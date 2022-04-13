@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Iterable, Iterator
+from typing import Iterable
 import warnings
 import numpy as np
 import pandas as pd
@@ -32,13 +32,17 @@ class Molecules:
     def __init__(
         self,
         pos: ArrayLike,
-        rot: Rotation,
+        rot: Rotation | None = None,
         features: pd.DataFrame | ArrayLike | dict[str, ArrayLike] | None = None,
     ):
         pos = np.atleast_2d(pos)
 
         if pos.shape[1] != 3:
             raise ValueError("Shape of pos must be (N, 3).")
+        
+        if rot is None:
+            quat = np.stack([np.array([0, 0, 0, 1])] * pos.shape[0], axis=0)
+            rot = Rotation.from_quat(quat)
         elif pos.shape[0] != len(rot):
             raise ValueError(
                 f"Length mismatch. There are {pos.shape[0]} molecules but {len(rot)} "
@@ -52,6 +56,34 @@ class Molecules:
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(n={len(self)})"
+
+    @classmethod
+    def from_axes(
+        cls, 
+        pos: np.ndarray, 
+        z: np.ndarray | None = None, 
+        y: np.ndarray | None = None,
+        x: np.ndarray | None = None,
+    ) -> Molecules:
+        """Construct molecule cloud with orientation from two of their local axes."""
+        pos = np.atleast_2d(pos)
+        
+        if sum((_ax is not None) for _ax in [z, y, x]) != 2:
+            raise TypeError("You must specify two out of z, y, and x.")
+        
+        # NOTE: np.cross assumes vectors are in xyz order. However, all the arrays here are defined
+        # in zyx order. To build right-handed coordinates, we must invert signs when using np.cross.
+        if z is None:
+            x = np.atleast_2d(x)
+            y = np.atleast_2d(y)
+            z = -np.cross(x, y, axis=1)
+        elif y is None:
+            z = np.atleast_2d(z)
+            x = np.atleast_2d(x)
+            y = -np.cross(z, x, axis=1)
+        
+        rotator = axes_to_rotator(z, y)
+        return cls(pos, rotator)
 
     @classmethod
     def from_euler(
@@ -255,65 +287,6 @@ class Molecules:
 
         return np.einsum("nij,njk,nkl->nil", translation_0, rot_mat, translation_1)
 
-    def cartesian(self, shape: tuple[int, int, int], scale: nm) -> np.ndarray:
-        """
-        Return all the rotated Cartesian coordinate systems defined around each molecule.
-
-        If number of molecules is very large, this method could raise memory error. To avoid it,
-        ``iter_cartesian`` could be an alternative.
-
-        Parameters
-        ----------
-        shape : tuple[int, int, int]
-            Shape of output coordinates.
-        scale : nm
-            Scale of coordinates. Same as the pixel size of the tomogram.
-
-        Yields
-        ------
-        np.ndarray
-            An array of shape (N, D, Lz, Ly, Lx), where N is the chunk size, D is
-            the number of dimensions (=3) and rests are length along each dimension.
-        """
-        it = self.iter_cartesian(shape, scale, chunksize=len(self))
-        return next(it)
-
-    def cartesian_dask(
-        self,
-        shape: tuple[int, int, int],
-        scale: nm,
-        chunksize: int = 64,
-    ):
-        center = np.array(shape) / 2 - 0.5
-        vec_x = self.x
-        vec_y = self.y
-        vec_z = -np.cross(vec_x, vec_y, axis=1)
-        ind_z, ind_y, ind_x = [np.arange(s) - c for s, c in zip(shape, center)]
-
-        x_ax = vec_x[:, :, np.newaxis] * ind_x
-        y_ax = vec_y[:, :, np.newaxis] * ind_y
-        z_ax = vec_z[:, :, np.newaxis] * ind_z
-
-        # There will be many points so data type should be converted into 32-bit
-        x_ax = x_ax.astype(np.float32)
-        y_ax = y_ax.astype(np.float32)
-        z_ax = z_ax.astype(np.float32)
-
-        from dask import array as da
-
-        x_ax = da.from_array(x_ax, chunks=(chunksize,) + x_ax.shape[1:])
-        x_ax = da.from_array(y_ax, chunks=(chunksize,) + y_ax.shape[1:])
-        x_ax = da.from_array(z_ax, chunks=(chunksize,) + z_ax.shape[1:])
-
-        coords = (
-            z_ax[:, :, :, np.newaxis, np.newaxis]
-            + y_ax[:, :, np.newaxis, :, np.newaxis]
-            + x_ax[:, :, np.newaxis, np.newaxis, :]
-        )
-        shifts = self.pos / scale
-        coords += shifts[:, :, np.newaxis, np.newaxis, np.newaxis]  # unit: pixel
-        return coords
-
     def cartesian_at(
         self,
         index: int | slice | Iterable[int],
@@ -357,65 +330,6 @@ class Molecules:
             )
                 
         return coords
-        
-    def iter_cartesian(
-        self,
-        shape: tuple[int, int, int],
-        scale: nm,
-        chunksize: int = 100,
-    ) -> Iterator[np.ndarray]:
-        """
-        Iterate over all the rotated Cartesian coordinate systems defined around each molecule.
-
-        Coordinates are split by ``chunksize`` because this method usually creates very large
-        arrays but they will not be used at the same time. To get whole list of coordinates, use
-        ``cartesian`` method.
-
-        Parameters
-        ----------
-        shape : tuple[int, int, int]
-            Shape of output coordinates.
-        scale : nm
-            Scale of coordinates. Same as the pixel size of the tomogram. This 
-            parameter is needed for calculating the center pixel coordinates.
-        chunksize : int, default is 100
-            Chunk size of the iterator.
-
-        Yields
-        ------
-        Iterator[np.ndarray]
-            Every yield is an array of shape (N, D, Lz, Ly, Lx), where N is the 
-            chunk size, D is the number of dimensions (=3) and rests are length
-            along each dimension.
-        """
-        center = np.array(shape) / 2 - 0.5
-        vec_x = self.x
-        vec_y = self.y
-        vec_z = -np.cross(vec_x, vec_y, axis=1)
-        ind_z, ind_y, ind_x = [np.arange(s) - c for s, c in zip(shape, center)]
-
-        chunk_offset = 0
-        nmole = len(self)
-        while chunk_offset < nmole:
-            sl = slice(chunk_offset, chunk_offset + chunksize, None)
-            x_ax = vec_x[sl, :, np.newaxis] * ind_x
-            y_ax = vec_y[sl, :, np.newaxis] * ind_y
-            z_ax = vec_z[sl, :, np.newaxis] * ind_z
-
-            # There will be many points so data type should be converted into 32-bit
-            x_ax = x_ax.astype(np.float32)
-            y_ax = y_ax.astype(np.float32)
-            z_ax = z_ax.astype(np.float32)
-
-            coords = (
-                z_ax[:, :, :, np.newaxis, np.newaxis]
-                + y_ax[:, :, np.newaxis, :, np.newaxis]
-                + x_ax[:, :, np.newaxis, np.newaxis, :]
-            )
-            shifts = self.pos[sl] / scale
-            coords += shifts[:, :, np.newaxis, np.newaxis, np.newaxis]  # unit: pixel
-            yield coords
-            chunk_offset += chunksize
 
     def matrix(self) -> np.ndarray:
         """
@@ -778,3 +692,45 @@ def from_euler(
     """Create a rotator from Euler angles using zyx-coordinate system."""
     seq = _translate_euler(seq)
     return Rotation.from_euler(seq, angles[..., ::-1], degrees)
+
+
+def _normalize(a: np.ndarray) -> np.ndarray:
+    """Normalize vectors to length 1. Input must be (N, 3)."""
+    return a / np.sqrt(np.sum(a**2, axis=1))[:, np.newaxis]
+
+def _extract_orthogonal(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Extract component of b orthogonal to a."""
+    a_norm = _normalize(a)
+    return b - np.sum(a_norm * b, axis=1)[:, np.newaxis] * a_norm
+
+def axes_to_rotator(z, y) -> Rotation:
+    ref = _normalize(np.atleast_2d(y))
+    
+    n = ref.shape[0]
+    yx = np.arctan2(ref[:, 2], ref[:, 1])
+    zy = np.arctan(-ref[:, 0]/np.abs(ref[:, 1]))
+    
+    rot_vec_yx = np.zeros((n, 3))
+    rot_vec_yx[:, 0] = yx
+    rot_yx = Rotation.from_rotvec(rot_vec_yx)
+    
+    rot_vec_zy = np.zeros((n, 3))
+    rot_vec_zy[:, 2] = zy
+    rot_zy = Rotation.from_rotvec(rot_vec_zy)
+    
+    rot1 = rot_yx * rot_zy
+    
+    if z is None:
+        return rot1
+    
+    vec = _normalize(np.atleast_2d(_extract_orthogonal(ref, z)))
+    
+    vec_trans = rot1.apply(vec, inverse=True)   # in zx-plane
+    
+    thetas = np.arctan2(vec_trans[..., 0], vec_trans[..., 2]) - np.pi/2
+    
+    rot_vec_zx = np.zeros((n, 3))
+    rot_vec_zx[:, 1] = thetas
+    rot2 = Rotation.from_rotvec(rot_vec_zx)
+    
+    return rot1 * rot2

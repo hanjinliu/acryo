@@ -1,12 +1,13 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Iterable, NamedTuple, Sequence, TypeVar
+from typing import Iterable, NamedTuple, Sequence
 import numpy as np
 from scipy.spatial.transform import Rotation
 import impy as ip
 
 from ._utils import normalize_rotations
 from ._types import Ranges
+from .._utils import compose_matrices
 
 
 class AlignmentResult(NamedTuple):
@@ -143,7 +144,7 @@ class BaseAlignmentModel(ABC):
         """
         result = self.align(img, max_shifts=max_shifts)
         rotator = Rotation.from_quat(result.quat)
-        matrix = _compose_matrices(img.shape, [rotator])[0]
+        matrix = compose_matrices(img.shape, [rotator])[0]
         if cval is None:
             cval = np.percentile(img, 1)
         img_trans = img.affine(translation=result.shift, cval=cval).affine(
@@ -252,7 +253,7 @@ class SupportRotation(BaseAlignmentModel):
         """
         if self._n_rotations > 1:
             rotators = [Rotation.from_quat(r).inv() for r in self.quaternions]
-            matrices = _compose_matrices(self._template.sizesof("zyx"), rotators)
+            matrices = compose_matrices(self._template.sizesof("zyx"), rotators)
             cval = np.percentile(self._template, 1)
             if self.is_multi_templates:
                 all_templates: list[ip.ImgArray] = []
@@ -316,36 +317,3 @@ class RealLowpassInput(FrequencyCutoffInput):
         """Apply low-pass filter."""
         return img.lowpass_filter(cutoff=self._cutoff)
 
-
-def _compose_matrices(
-    shape: tuple[int, int, int],
-    rotators: list[Rotation],
-):
-    dz, dy, dx = (np.array(shape) - 1) / 2
-    # center to corner
-    translation_0 = np.array(
-        [
-            [1.0, 0.0, 0.0, dz],
-            [0.0, 1.0, 0.0, dy],
-            [0.0, 0.0, 1.0, dx],
-            [0.0, 0.0, 0.0, 1.0],
-        ],
-        dtype=np.float32,
-    )
-    # corner to center
-    translation_1 = np.array(
-        [
-            [1.0, 0.0, 0.0, -dz],
-            [0.0, 1.0, 0.0, -dy],
-            [0.0, 0.0, 1.0, -dx],
-            [0.0, 0.0, 0.0, 1.0],
-        ],
-        dtype=np.float32,
-    )
-
-    matrices = []
-    for rot in rotators:
-        e_ = np.eye(4)
-        e_[:3, :3] = rot.as_matrix()
-        matrices.append(translation_0 @ e_ @ translation_1)
-    return matrices

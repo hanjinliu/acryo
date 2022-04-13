@@ -1,8 +1,10 @@
 from __future__ import annotations
 import numpy as np
 import impy as ip
-from typing import Callable
+from typing import Callable, TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from scipy.spatial.transform import Rotation
 
 def map_coordinates(
     input: ip.ImgArray | ip.LazyImgArray,
@@ -112,3 +114,38 @@ def make_slice_and_pad(z0: int, z1: int, size: int) -> tuple[slice, tuple[int, i
         raise ValueError(f"Specified size is {size} but need to slice at {z0}:{z1}.")
 
     return slice(z0, z1), (z0_pad, z1_pad)
+
+
+
+def compose_matrices(
+    shape: tuple[int, int, int],
+    rotators: list["Rotation"],
+):
+    dz, dy, dx = (np.array(shape) - 1) / 2
+    # center to corner
+    translation_0 = np.array(
+        [
+            [1.0, 0.0, 0.0, dz],
+            [0.0, 1.0, 0.0, dy],
+            [0.0, 0.0, 1.0, dx],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+    # corner to center
+    translation_1 = np.array(
+        [
+            [1.0, 0.0, 0.0, -dz],
+            [0.0, 1.0, 0.0, -dy],
+            [0.0, 0.0, 1.0, -dx],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+
+    matrices = []
+    for rot in rotators:
+        e_ = np.eye(4)
+        e_[:3, :3] = rot.as_matrix()
+        matrices.append(translation_0 @ e_ @ translation_1)
+    return matrices
