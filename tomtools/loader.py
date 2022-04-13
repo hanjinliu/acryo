@@ -1,5 +1,4 @@
 from __future__ import annotations
-from functools import partial
 from typing import (
     Any,
     Callable,
@@ -7,7 +6,6 @@ from typing import (
     Iterator,
     TYPE_CHECKING,
 )
-from typing_extensions import ParamSpec
 import warnings
 import weakref
 import tempfile
@@ -17,18 +15,15 @@ import numpy as np
 from numpy.typing import ArrayLike
 import impy as ip
 from dask import array as da
-from .alignment import (
-    AlignmentModel,
-)
+from .alignment import BaseAlignmentModel, ZNCCAlignment, SupportRotation
 from .molecules import Molecules
-from ._utils import multi_map_coordinates
-from .const import Mole, Align
+from . import _utils
+from .const import Align
 
 if TYPE_CHECKING:
     from .alignment import AlignmentResult
     from .alignment._types import Ranges
 
-_P = ParamSpec("_P")
 nm = float  # alias
 
 
@@ -99,42 +94,72 @@ class BaseLoader:
         """Return the number of subtomograms."""
         return self.molecules.pos.shape[0]
 
-    def iter_subtomograms(self) -> Iterator[ip.ImgArray]:  # axes: zyx
-        """
-        Iteratively load subtomograms.
+    def replace(
+        self,
+        molecules: Molecules | None = None,
+        output_shape: int | tuple[int, int, int] | None = None,
+        order: int | None = None,
+    ):
+        """Return a new instance with different parameter(s)."""
+        if molecules is None:
+            molecules = self.molecules
+        if output_shape is None:
+            output_shape = self.output_shape
+        if order is None:
+            order = self.order
+        return self.__class__(
+            self.image,
+            molecules=molecules,
+            output_shape=output_shape,
+            order=order,
+        )
+    
+    
+    def _check_shape(self, template: ip.ImgArray, name: str = "template") -> None:
+        if template.shape != self.output_shape:
+            warnings.warn(
+                f"'output_shape' of {self.__class__.__name__} object "
+                f"{self.output_shape!r} differs from the shape of {name} image "
+                f"{template.shape!r}. 'output_shape' is updated.",
+                UserWarning,
+            )
+            self.output_shape = template.shape
+        return None
 
-        This method load the required region of tomogram into memory and crop
-        subtomograms from it. To avoid repetitively loading same region, this
-        function determines what range of tomogram is needed to load current
-        chunk of subtomograms.
+    def _resolve_iterator(
+        self, it: Generator[Any, Any, ip.ImgArray], callback: Callable
+    ) -> ip.ImgArray:
+        """Iterate over an iterator until it returns something."""
+        if callback is None:
+            callback = lambda x: None
+        while True:
+            try:
+                next(it)
+                callback(self)
+            except StopIteration as e:
+                results = e.value
+                break
 
-        Yields
-        ------
-        ip.ImgArray
-            Yields image array of each subtomogram.
-        """
-        # TODO:
-        for subvols in self._iter_chunks():
-            for subvol in subvols:
-                yield subvol
-
-    def map(
-        self, f: Callable[_P, ip.ImgArray], *args, **kwargs
-    ) -> Iterator[ip.ImgArray]:
-        """
-        Map subtomogram loader to a function.
-
-        For every subtomogram ``img`` this function yields
-        ``f(img, *args, **kwargs)``.
-
-        Parameters
-        ----------
-        f : callable
-            Any mapping function.
-
-        """
-        fp = partial(f, *args, **kwargs)
-        return map(fp, self.iter_subtomograms)
+        return results
+    
+    def get_subtomogram(self, i: int) -> ip.ImgArray:
+        image = self.image
+        scale = image.scale.x
+        coords = self.molecules.cartesian_at(i, self.output_shape, scale)
+        with ip.use("cupy"):
+            subvols = np.stack(
+                _utils.map_coordinates(
+                    image, coords, order=self.order, cval=np.mean
+                ),
+                axis=0,
+            )
+        subvols = ip.asarray(subvols, axes="zyx")
+        subvols.set_scale(image)
+        return subvols
+    
+    def iter_subtomograms(self) -> Iterator[ip.ImgArray]:
+        for i in range(len(self)):
+            yield self.get_subtomogram(i)
 
     def iter_to_memmap(self, path: str | None = None):
         """
@@ -251,9 +276,261 @@ class BaseLoader:
                 aligned += subvol.value
             n += 1
             yield aligned
-        avg = ip.asarray(aligned / n, name="Avg", axes="zyx")
+        avg = ip.asarray(aligned / n, name="Average", axes="zyx")
         avg.set_scale(self.image)
         return avg
+
+    def iter_align(
+        self,
+        template: ip.ImgArray,
+        *,
+        mask: ip.ImgArray = None,
+        max_shifts: nm | tuple[nm, nm, nm] = 1.0,
+        alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
+        **align_kwargs,
+    ) -> Generator[AlignmentResult, None, SubtomogramLoader]:
+        """
+        Create an iterator that align subtomograms to the template image.
+
+        This method conduct so called "subtomogram alignment". Only shifts and rotations
+        are calculated in this method. To get averaged image, you'll have to run "average"
+        method using the resulting SubtomogramLoader instance.
+
+        Parameters
+        ----------
+        template : ip.ImgArray, optional
+            Template image.
+        mask : ip.ImgArray, optional
+            Mask image. Must in the same shae as the template.
+        max_shifts : int or tuple of int, default is (1., 1., 1.)
+            Maximum shift between subtomograms and template.
+        alignment_model : subclass of BaseAlignmentModel, optional
+            Alignment model class used for subtomogram alignment. By default, 
+            ``ZNCCAlignment`` will be used.
+        align_kwargs : optional keyword arguments
+            Additional keyword arguments passed to the input alignment model.
+
+        Returns
+        -------
+        SubtomogramLoader
+            An loader instance with updated molecules.
+
+        Yields
+        ------
+        AlignmentResult
+            An tuple representing the current alignment result.
+        """
+
+        self._check_shape(template)
+
+        local_shifts, local_rot, corr_max = _allocate(len(self))
+        _max_shifts_px = np.asarray(max_shifts) / self.scale
+
+        with ip.use("cupy"):
+            model = alignment_model(
+                template=template,
+                mask=mask,
+                **align_kwargs,
+            )
+            for i, subvol in enumerate(self.iter_subtomograms()):
+                result = model.align(subvol, _max_shifts_px)
+                _, local_shifts[i], local_rot[i], corr_max[i] = result
+                yield result
+
+        rotator = Rotation.from_quat(local_rot)
+        mole_aligned = self.molecules.linear_transform(
+            local_shifts * self.scale,
+            rotator,
+        )
+
+        mole_aligned.features = update_features(
+            self.molecules.features.copy(),
+            get_features(corr_max, local_shifts, rotator.as_rotvec()),
+        )
+
+        return self.replace(molecules=mole_aligned)
+
+    def iter_align_no_template(
+        self,
+        *,
+        mask_params: np.ndarray | Callable[[np.ndarray], np.ndarray] | None = None,
+        max_shifts: nm | tuple[nm, nm, nm] = 1.0,
+        alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
+        **align_kwargs,
+    ) -> Generator[AlignmentResult, None, SubtomogramLoader]:
+        """
+        Create an iterator that align subtomograms without template image.
+
+        A template-free version of :func:`iter_align`. This method first 
+        calculates averaged image and uses it for the alignment template. To
+        avoid loading same subtomograms twice, a memory-mapped array is created 
+        internally (so the second subtomogram loading is faster).
+
+        Parameters
+        ----------
+        template : ip.ImgArray, optional
+            Template image.
+        mask : ip.ImgArray, optional
+            Mask image. Must in the same shap as the template.
+        max_shifts : int or tuple of int, default is (1., 1., 1.)
+            Maximum shift between subtomograms and template.
+        alignment_model : subclass of BaseAlignmentModel, optional
+            Alignment model class used for subtomogram alignment. By default, 
+            ``ZNCCAlignment`` will be used.
+        align_kwargs : optional keyword arguments
+            Additional keyword arguments passed to the input alignment model.
+
+        Returns
+        -------
+        SubtomogramLoader
+            An loader instance with updated molecules.
+
+        Yields
+        ------
+        AlignmentResult
+            An tuple representing the current alignment result.
+        """
+        local_shifts, local_rot, corr_max = _allocate(len(self))
+        _max_shifts_px = np.asarray(max_shifts) / self.scale
+        all_subvols = yield from self.iter_to_memmap(path=None)
+
+        template = all_subvols.proj("p").compute()
+
+        # get mask image
+        if isinstance(mask_params, np.ndarray):
+            mask = mask_params
+        elif callable(mask_params):
+            mask = mask_params(template)
+        else:
+            mask = mask_params
+
+        with ip.use("cupy"):
+            model = alignment_model(
+                template=template,
+                mask=mask,
+                **align_kwargs,
+            )
+            for i, subvol in enumerate(all_subvols):
+                result = model.align(subvol.compute(), _max_shifts_px)
+                _, local_shifts[i], local_rot[i], corr_max[i] = result
+                yield result
+
+        rotator = Rotation.from_quat(local_rot)
+        mole_aligned = self.molecules.linear_transform(
+            local_shifts * self.scale,
+            rotator,
+        )
+
+        mole_aligned.features = update_features(
+            self.molecules.features.copy(),
+            get_features(corr_max, local_shifts, rotator.as_rotvec()),
+        )
+
+        return self.replace(molecules=mole_aligned)
+
+    def iter_align_multi_templates(
+        self,
+        templates: list[ip.ImgArray],
+        *,
+        mask: ip.ImgArray | None = None,
+        max_shifts: nm | tuple[nm, nm, nm] = 1.0,
+        alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
+        **align_kwargs,
+    ) -> Generator[AlignmentResult, None, SubtomogramLoader]:
+        """
+        Create an iterator that align subtomograms with multiple template images.
+
+        A multi-template version of :func:`iter_align`. This method calculate cross
+        correlation for every template and uses the best local shift, rotation and
+        template.
+
+        Parameters
+        ----------
+        templates: list of ImgArray
+            Template images.
+        mask : ip.ImgArray, optional
+            Mask image. Must in the same shape as the template.
+        max_shifts : int or tuple of int, default is (1., 1., 1.)
+            Maximum shift between subtomograms and template.
+        alignment_model : subclass of BaseAlignmentModel, optional
+            Alignment model class used for subtomogram alignment. By default, 
+            ``ZNCCAlignment`` will be used.
+        align_kwargs : optional keyword arguments
+            Additional keyword arguments passed to the input alignment model.
+
+        Returns
+        -------
+        SubtomogramLoader
+            An loader instance with updated molecules.
+
+        Yields
+        ------
+        AlignmentResult
+            An tuple representing the current alignment result.
+        """
+        n_templates = len(templates)
+        self._check_shape(templates[0])
+
+        local_shifts, local_rot, corr_max = _allocate(len(self))
+
+        # optimal template ID
+        labels = np.zeros(len(self), dtype=np.uint32)
+
+        _max_shifts_px = np.asarray(max_shifts) / self.scale
+        with ip.use("cupy"):
+            model = alignment_model(
+                template=np.stack(list(templates), axis="p"),
+                mask=mask,
+                **align_kwargs,
+            )
+
+            for i, subvol in enumerate(self.iter_subtomograms()):
+                result = model.align(subvol, _max_shifts_px)
+                labels[i], local_shifts[i], local_rot[i], corr_max[i] = result
+                yield result
+        
+        rotator = Rotation.from_quat(local_rot)
+        mole_aligned = self.molecules.linear_transform(
+            local_shifts * self.scale,
+            rotator,
+        )
+
+        if isinstance(model, SupportRotation) and model._n_rotations > 1:
+            labels %= n_templates
+        labels = labels.astype(np.uint8)
+
+        mole_aligned.features = pd.concat(
+            [
+                self.molecules.features,
+                get_features(corr_max, local_shifts, rotator.as_rotvec()),
+                pd.DataFrame({"labels": labels}),
+            ],
+            axis=1,
+        )
+
+        return self.replace(molecules=mole_aligned)
+
+    def iter_subtomoprops(
+        self,
+        template: ip.ImgArray = None,
+        mask: ip.ImgArray = None,
+        properties=(ip.zncc,),
+    ) -> Generator[None, None, pd.DataFrame]:
+        results = {
+            f.__name__: np.zeros(len(self), dtype=np.float32) for f in properties
+        }
+        n = 0
+        if mask is None:
+            mask = 1
+        template_masked = template * mask
+        for i, subvol in enumerate(self.iter_subtomograms()):
+            for _prop in properties:
+                prop = _prop(subvol * mask, template_masked)
+                results[_prop.__name__][i] = prop
+            n += 1
+            yield
+
+        return pd.DataFrame(results)
 
 
 class SubtomogramLoader(BaseLoader):
@@ -339,314 +616,6 @@ class SubtomogramLoader(BaseLoader):
             order=order,
             chunksize=chunksize,
         )
-
-    def iter_align(
-        self,
-        template: ip.ImgArray,
-        *,
-        mask: ip.ImgArray = None,
-        max_shifts: nm | tuple[nm, nm, nm] = 1.0,
-        rotations: Ranges | None = None,
-        cutoff: float = 0.5,
-        method: str = "zncc",
-    ) -> Generator[AlignmentResult, None, SubtomogramLoader]:
-        """
-        Create an iterator that align subtomograms to the template image.
-
-        This method conduct so called "subtomogram alignment". Only shifts and rotations
-        are calculated in this method. To get averaged image, you'll have to run "average"
-        method using the resulting SubtomogramLoader instance.
-
-        Parameters
-        ----------
-        template : ip.ImgArray, optional
-            Template image.
-        mask : ip.ImgArray, optional
-            Mask image. Must in the same shae as the template.
-        max_shifts : int or tuple of int, default is (1., 1., 1.)
-            Maximum shift between subtomograms and template.
-        rotations : (float, float) or three-tuple of (float, float) or None, optional
-            Rotation between subtomograms and template in external Euler angles.
-        cutoff : float, default is 0.5
-            Cutoff frequency of low-pass filter applied in each subtomogram.
-        method : {"pcc", "zncc"}, default is "zncc"
-            Alignment method. "pcc": phase cross correlation; "zncc": zero-mean normalized
-            cross correlation.
-
-        Returns
-        -------
-        SubtomogramLoader
-            An loader instance with updated molecules.
-
-        Yields
-        ------
-        AlignmentResult
-            An tuple representing the current alignment result.
-        """
-
-        self._check_shape(template)
-
-        local_shifts, local_rot, corr_max = _allocate(len(self))
-        _max_shifts_px = np.asarray(max_shifts) / self.scale
-
-        with ip.use("cupy"):
-            model = AlignmentModel(
-                template=template,
-                mask=mask,
-                cutoff=cutoff,
-                rotations=rotations,
-                method=method,
-            )
-            for i, subvol in enumerate(self.iter_subtomograms()):
-                result = model.align(subvol, _max_shifts_px)
-                _, local_shifts[i], local_rot[i], corr_max[i] = result
-                yield result
-
-            rotvec = Rotation.from_quat(local_rot).as_rotvec()
-            mole_aligned = transform_molecules(
-                self.molecules,
-                local_shifts * self.scale,
-                rotvec,
-            )
-
-        mole_aligned.features = update_features(
-            self.molecules.features.copy(),
-            get_features(method, corr_max, local_shifts, rotvec),
-        )
-
-        out = self.__class__(
-            self.image,
-            mole_aligned,
-            self.output_shape,
-            order=self.order,
-            chunksize=self.chunksize,
-        )
-
-        return out
-
-    def iter_align_no_template(
-        self,
-        *,
-        mask_params: np.ndarray
-        | tuple[nm, nm]
-        | Callable[[np.ndarray], np.ndarray] = (1, 1),
-        max_shifts: nm | tuple[nm, nm, nm] = 1.0,
-        rotations: Ranges | None = None,
-        cutoff: float = 0.5,
-        method: str = "zncc",
-    ) -> Generator[AlignmentResult, None, SubtomogramLoader]:
-        """
-        Create an iterator that align subtomograms without template image.
-
-        A template-free version of :func:`iter_align`. This method first calculates averaged
-        image and uses it for the alignment template. To avoid loading same subtomograms
-        twice, a memory-mapped array is created internally (so the second subtomogram
-        loading is faster).
-
-        Parameters
-        ----------
-        template : ip.ImgArray, optional
-            Template image.
-        mask : ip.ImgArray, optional
-            Mask image. Must in the same shap as the template.
-        max_shifts : int or tuple of int, default is (1., 1., 1.)
-            Maximum shift between subtomograms and template.
-        rotations : (float, float) or three-tuple of (float, float) or None, optional
-            Rotation between subtomograms and template in external Euler angles.
-        cutoff : float, default is 0.5
-            Cutoff frequency of low-pass filter applied in each subtomogram.
-        method : {"pcc", "zncc"}, default is "zncc"
-            Alignment method. "pcc": phase cross correlation; "zncc": zero-mean normalized
-            cross correlation.
-
-        Returns
-        -------
-        SubtomogramLoader
-            An loader instance with updated molecules.
-
-        Yields
-        ------
-        AlignmentResult
-            An tuple representing the current alignment result.
-        """
-        local_shifts, local_rot, corr_max = _allocate(len(self))
-        _max_shifts_px = np.asarray(max_shifts) / self.scale
-        all_subvols = yield from self.iter_to_memmap(path=None)
-
-        template = all_subvols.proj("p").compute()
-
-        # get mask image
-        if isinstance(mask_params, tuple):
-            _sigma, _radius = mask_params
-            mask = template.threshold().smooth_mask(
-                sigma=_sigma / self.scale,
-                dilate_radius=int(round(_radius / self.scale)),
-            )
-        elif isinstance(mask_params, np.ndarray):
-            mask = mask_params
-        elif callable(mask_params):
-            mask = mask_params(template)
-        else:
-            mask = mask_params
-
-        with ip.use("cupy"):
-            model = AlignmentModel(
-                template=template,
-                mask=mask,
-                cutoff=cutoff,
-                rotations=rotations,
-                method=method,
-            )
-            for i, subvol in enumerate(all_subvols):
-                result = model.align(subvol.compute(), _max_shifts_px)
-                _, local_shifts[i], local_rot[i], corr_max[i] = result
-                yield result
-
-            rotvec = Rotation.from_quat(local_rot).as_rotvec()
-            mole_aligned = transform_molecules(
-                self.molecules,
-                local_shifts * self.scale,
-                rotvec,
-            )
-
-        mole_aligned.features = update_features(
-            self.molecules.features.copy(),
-            get_features(method, corr_max, local_shifts, rotvec),
-        )
-
-        out = self.__class__(
-            self.image,
-            mole_aligned,
-            self.output_shape,
-            order=self.order,
-            chunksize=self.chunksize,
-        )
-        return out
-
-    def iter_align_multi_templates(
-        self,
-        templates: list[ip.ImgArray],
-        *,
-        mask: ip.ImgArray | None = None,
-        max_shifts: nm | tuple[nm, nm, nm] = 1.0,
-        rotations: Ranges | None = None,
-        cutoff: float = 0.5,
-        method: str = "zncc",
-    ) -> Generator[AlignmentResult, None, SubtomogramLoader]:
-        """
-        Create an iterator that align subtomograms with multiple template images.
-
-        A multi-template version of :func:`iter_align`. This method calculate cross
-        correlation for every template and uses the best local shift, rotation and
-        template.
-
-        Parameters
-        ----------
-        templates: list of ImgArray
-            Template images.
-        mask : ip.ImgArray, optional
-            Mask image. Must in the same shape as the template.
-        max_shifts : int or tuple of int, default is (1., 1., 1.)
-            Maximum shift between subtomograms and template.
-        rotations : (float, float) or three-tuple of (float, float) or None, optional
-            Rotation between subtomograms and template in external Euler angles.
-        cutoff : float, default is 0.5
-            Cutoff frequency of low-pass filter applied in each subtomogram.
-        method : {"pcc", "zncc"}, default is "zncc"
-            Alignment method. "pcc": phase cross correlation; "zncc": zero-mean normalized
-            cross correlation.
-
-        Returns
-        -------
-        SubtomogramLoader
-            An loader instance with updated molecules.
-
-        Yields
-        ------
-        AlignmentResult
-            An tuple representing the current alignment result.
-        """
-        n_templates = len(templates)
-        self._check_shape(templates[0])
-
-        local_shifts, local_rot, corr_max = _allocate(len(self))
-
-        # optimal template ID
-        labels = np.zeros(len(self), dtype=np.uint32)
-
-        _max_shifts_px = np.asarray(max_shifts) / self.scale
-        with ip.use("cupy"):
-            model = AlignmentModel(
-                template=np.stack(list(templates), axis="p"),
-                mask=mask,
-                cutoff=cutoff,
-                rotations=rotations,
-                method=method,
-            )
-
-            for i, subvol in enumerate(self.iter_subtomograms()):
-                result = model.align(subvol, _max_shifts_px)
-                labels[i], local_shifts[i], local_rot[i], corr_max[i] = result
-                yield result
-            rotvec = Rotation.from_quat(local_rot).as_rotvec()
-            mole_aligned = transform_molecules(
-                self.molecules,
-                local_shifts * self.scale,
-                Rotation.from_quat(local_rot).as_rotvec(),
-            )
-
-        if model.has_rotation:
-            labels %= n_templates
-        labels = labels.astype(np.uint8)
-
-        mole_aligned.features = pd.concat(
-            [
-                self.molecules.features,
-                get_features(method, corr_max, local_shifts, rotvec),
-                pd.DataFrame({"labels": labels}),
-            ],
-            axis=1,
-        )
-
-        mole_aligned.features = update_features(
-            self.molecules.features.copy(),
-            get_features(method, corr_max, local_shifts, rotvec),
-        )
-        mole_aligned.features = update_features(
-            mole_aligned.features,
-            {"labels": labels},
-        )
-
-        out = self.__class__(
-            self.image,
-            mole_aligned,
-            self.output_shape,
-            order=self.order,
-            chunksize=self.chunksize,
-        )
-        return out
-
-    def iter_subtomoprops(
-        self,
-        template: ip.ImgArray = None,
-        mask: ip.ImgArray = None,
-        properties=(ip.zncc,),
-    ) -> Generator[None, None, pd.DataFrame]:
-        results = {
-            f.__name__: np.zeros(len(self), dtype=np.float32) for f in properties
-        }
-        n = 0
-        if mask is None:
-            mask = 1
-        template_masked = template * mask
-        for i, subvol in enumerate(self.iter_subtomograms()):
-            for _prop in properties:
-                prop = _prop(subvol * mask, template_masked)
-                results[_prop.__name__][i] = prop
-            n += 1
-            yield
-
-        return pd.DataFrame(results)
 
     def iter_average_split(
         self,
@@ -854,16 +823,6 @@ class SubtomogramLoader(BaseLoader):
     #     )
     #     return clf
 
-    def _check_shape(self, template: ip.ImgArray, name: str = "template") -> None:
-        if template.shape != self.output_shape:
-            warnings.warn(
-                f"'output_shape' of {self.__class__.__name__} object {self.output_shape!r} "
-                f"differs from the shape of {name} image {template.shape!r}. 'output_shape' "
-                "is updated.",
-                UserWarning,
-            )
-            self.output_shape = template.shape
-        return None
 
     def _iter_chunks(self) -> Iterator[ip.ImgArray]:  # axes: pzyx
         """Generate subtomogram list chunk-wise."""
@@ -875,7 +834,7 @@ class SubtomogramLoader(BaseLoader):
         ):
             with ip.use("cupy"):
                 subvols = np.stack(
-                    multi_map_coordinates(
+                    _utils.multi_map_coordinates(
                         image, coords, order=self.order, cval=np.mean
                     ),
                     axis=0,
@@ -884,32 +843,15 @@ class SubtomogramLoader(BaseLoader):
             subvols.set_scale(image)
             yield subvols
 
-    def _resolve_iterator(
-        self, it: Generator[Any, Any, ip.ImgArray], callback: Callable
-    ) -> ip.ImgArray:
-        """Iterate over an iterator until it returns something."""
-        if callback is None:
-            callback = lambda x: None
-        while True:
-            try:
-                next(it)
-                callback(self)
-            except StopIteration as e:
-                results = e.value
-                break
-
-        return results
 
 
 class ChunkedSubtomogramLoader(SubtomogramLoader):
     ...
 
 
-def get_features(method: str, corr_max, local_shifts, rotvec) -> pd.DataFrame:
-    feature_key = Mole.zncc if method == "zncc" else Mole.pcc
-
+def get_features(corr_max, local_shifts, rotvec) -> pd.DataFrame:
     features = {
-        feature_key: corr_max,
+        "score": corr_max,
         Align.zShift: np.round(local_shifts[:, 0], 2),
         Align.yShift: np.round(local_shifts[:, 1], 2),
         Align.xShift: np.round(local_shifts[:, 2], 2),
@@ -928,30 +870,6 @@ def update_features(
     for name, value in values.items():
         features[name] = value
     return features
-
-
-def transform_molecules(
-    molecules: Molecules,
-    shift: ArrayLike,
-    rotvec: ArrayLike,
-) -> Molecules:
-    """Shift and rotate molecules around their own coordinate."""
-    shift_corrected = Rotation.from_rotvec(rotvec).apply(shift)
-    return molecules.translate_internal(shift_corrected).rotate_by_rotvec_internal(
-        rotvec
-    )
-
-
-def transform_molecules_inv(
-    molecules: Molecules,
-    shift: ArrayLike,
-    rotvec: ArrayLike,
-):
-    """Shift and rotate molecules around their own coordinate. Inverse mapping."""
-    shift_corrected = Rotation.from_rotvec(rotvec).apply(shift, inverse=True)
-    return molecules.rotate_by_rotvec_internal(-rotvec).translate_internal(
-        shift_corrected
-    )
 
 
 def _allocate(size: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:

@@ -1,10 +1,18 @@
-from ._base import FourierLowpassInput, RealLowpassInput, AlignmentResult
-from ._concrete import PCCAlign, ZNCCAlign
+from ._base import (
+    FourierLowpassInput,
+    RealLowpassInput,
+    BaseAlignmentModel,
+    AlignmentResult,
+    SupportRotation,
+)
+from ._concrete import PCCAlignment, ZNCCAlignment
 
 __all__ = [
     "AlignmentResult",
     "FourierLowpassInput",
     "RealLowpassInput",
-    "PCCAlign",
-    "ZNCCAlign",
+    "PCCAlignment",
+    "ZNCCAlignment",
+    "BaseAlignmentModel",
+    "SupportRotation",
 ]

@@ -314,6 +314,35 @@ class Molecules:
         coords += shifts[:, :, np.newaxis, np.newaxis, np.newaxis]  # unit: pixel
         return coords
 
+    def cartesian_at(
+        self,
+        i: int,
+        shape: tuple[int, int, int],
+        scale: nm,
+    ):
+        center = np.array(shape) / 2 - 0.5
+        vec_x = self._rotator[i].apply([0.0, 0.0, 1.0])
+        vec_y = self._rotator[i].apply([0.0, 1.0, 0.0])
+        vec_z = -np.cross(vec_x, vec_y)
+        ind_z, ind_y, ind_x = [np.arange(s) - c for s, c in zip(shape, center)]
+        x_ax = vec_x[:, np.newaxis] * ind_x
+        y_ax = vec_y[:, np.newaxis] * ind_y
+        z_ax = vec_z[:, np.newaxis] * ind_z
+
+        # There will be many points so data type should be converted into 32-bit
+        x_ax = x_ax.astype(np.float32)
+        y_ax = y_ax.astype(np.float32)
+        z_ax = z_ax.astype(np.float32)
+
+        coords = (
+            z_ax[:, :, np.newaxis, np.newaxis] +
+            y_ax[:, np.newaxis, :, np.newaxis] +
+            x_ax[:, np.newaxis, np.newaxis, :]
+        )
+        shifts = self.pos[i] / scale
+        coords += shifts[:, np.newaxis, np.newaxis, np.newaxis]  # unit: pixel
+        return coords
+        
     def iter_cartesian(
         self,
         shape: tuple[int, int, int],
@@ -696,6 +725,29 @@ class Molecules:
             self._rotator = rot
             out = self
         return out
+    
+    def linear_transform(
+        self,
+        shift: ArrayLike,
+        rotator: Rotation,
+        inv: bool = False,
+    ) -> Molecules:
+        """Shift and rotate molecules around their own coordinate."""
+        rotvec = rotator.as_rotvec()
+        if inv:
+            shift_corrected = rotator.apply(shift, inverse=True)
+            return (
+                self
+                .rotate_by_rotvec_internal(-rotvec)
+                .translate_internal(shift_corrected)
+            )
+        else:
+            shift_corrected = rotator.apply(shift)
+            return (
+                self
+                .translate_internal(shift_corrected)
+                .rotate_by_rotvec_internal(rotvec)
+            )
 
 
 def _translate_euler(seq: str) -> str:

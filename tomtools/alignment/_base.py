@@ -8,8 +8,6 @@ import impy as ip
 from ._utils import normalize_rotations
 from ._types import Ranges
 
-_P = TypeVar("_P")
-
 
 class AlignmentResult(NamedTuple):
     """The optimal alignment result."""
@@ -25,7 +23,6 @@ class BaseAlignmentModel(ABC):
         self,
         template: ip.ImgArray | Sequence[ip.ImgArray],
         mask: ip.ImgArray | None = None,
-        pretransform_params: _P | None = None,
     ):
         if isinstance(template, ip.ImgArray):
             if template.ndim == 3:
@@ -40,7 +37,6 @@ class BaseAlignmentModel(ABC):
             self._template: ip.ImgArray = np.stack(template, axis="p")
             self._n_templates = self._template.shape[0]
 
-        self._pretransform_params = pretransform_params
         if mask is None:
             self.mask = 1
         else:
@@ -64,8 +60,8 @@ class BaseAlignmentModel(ABC):
         """Optimize."""
 
     @abstractmethod
-    def pre_transform(self, img: ip.ImgArray, params: _P) -> ip.ImgArray:
-        """Pre-transformation."""
+    def pre_transform(self, img: ip.ImgArray) -> ip.ImgArray:
+        """Pre-transformation applied to input images (including template)."""
 
     def _get_template_input(self) -> ip.ImgArray:
         """
@@ -86,7 +82,7 @@ class BaseAlignmentModel(ABC):
         if self.is_multi_templates:
             template_input = np.stack(
                 [
-                    self.pre_transform(tmp * self.mask, self._pretransform_params)
+                    self.pre_transform(tmp * self.mask)
                     for tmp in self._template
                 ],
                 axis="p",
@@ -117,7 +113,7 @@ class BaseAlignmentModel(ABC):
         """
         img_masked = img * self.mask
         return self._align_func(
-            self.pre_transform(img_masked, self._pretransform_params),
+            self.pre_transform(img_masked),
             self.template_input,
             max_shifts,
         )
@@ -266,9 +262,7 @@ class SupportRotation(BaseAlignmentModel):
                         tmp: ip.ImgArray
                         cval = np.percentile(tmp, 1)
                         all_templates.append(
-                            self.pre_transform(
-                                tmp.affine(mat, cval=cval), self._pretransform_params
-                            )
+                            self.pre_transform(tmp.affine(mat, cval=cval))
                         )
                 template_input: ip.ImgArray = np.stack(all_templates, axis="p")
 
@@ -276,10 +270,7 @@ class SupportRotation(BaseAlignmentModel):
                 template_masked = self._template * self.mask
                 template_input: ip.ImgArray = np.stack(
                     [
-                        self.pre_transform(
-                            template_masked.affine(mat, cval=cval),
-                            self._pretransform_params,
-                        )
+                        self.pre_transform(template_masked.affine(mat, cval=cval))
                         for mat in matrices
                     ],
                     axis="p",
@@ -288,7 +279,7 @@ class SupportRotation(BaseAlignmentModel):
             if self.is_multi_templates:
                 template_input: ip.ImgArray = np.stack(
                     [
-                        self.pre_transform(tmp * self.mask, self._pretransform_params)
+                        self.pre_transform(tmp * self.mask)
                         for tmp in self._template
                     ],
                     axis="p",
@@ -298,15 +289,32 @@ class SupportRotation(BaseAlignmentModel):
 
         return template_input
 
+class FrequencyCutoffInput(BaseAlignmentModel):
+    """
+    An alignment model that supports frequency-based pre-filtering
+    
+    This class can be used for implementing such as low-pass filter or high-pass
+    filter before alignment.
+    """
+    def __init__(
+        self,
+        template: ip.ImgArray | Sequence[ip.ImgArray],
+        mask: ip.ImgArray | None = None,
+        cutoff: float | None = None,
+    ):
+        super().__init__(template, mask)
+        self._cutoff = cutoff or 1.0
+        
+class FourierLowpassInput(FrequencyCutoffInput):
+    def pre_transform(self, img: ip.ImgArray) -> ip.ImgArray:
+        """Apply low-pass filter and FFT."""
+        return img.lowpass_filter(cutoff=self._cutoff).fft()  # TODO: do not fft twice
 
-class FourierLowpassInput(BaseAlignmentModel):
-    def pre_transform(self, img: ip.ImgArray, cutoff: float) -> ip.ImgArray:
-        return img.lowpass_filter(cutoff=cutoff).fft()  # TODO: do not fft twice
 
-
-class RealLowpassInput(BaseAlignmentModel):
-    def pre_transform(self, img: ip.ImgArray, cutoff: float) -> ip.ImgArray:
-        return img.lowpass_filter(cutoff=cutoff)
+class RealLowpassInput(FrequencyCutoffInput):
+    def pre_transform(self, img: ip.ImgArray) -> ip.ImgArray:
+        """Apply low-pass filter."""
+        return img.lowpass_filter(cutoff=self._cutoff)
 
 
 def _compose_matrices(

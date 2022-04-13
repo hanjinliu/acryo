@@ -5,6 +5,40 @@ import impy as ip
 from typing import Callable
 
 
+def map_coordinates(
+    input: ip.ImgArray | ip.LazyImgArray,
+    coordinates: np.ndarray,
+    order: int = 3, 
+    mode: str = "constant",
+    cval: float | Callable[[ip.ImgArray], float] = 0.0
+) -> np.ndarray:
+    """
+    Crop image at the edges of coordinates before calling map_coordinates to avoid
+    loading entire array into memory.
+    """    
+    coordinates = coordinates.copy()
+    shape = input.shape
+    sl = []
+    for i in range(input.ndim):
+        imin = int(np.min(coordinates[i])) - order
+        imax = int(np.ceil(np.max(coordinates[i]))) + order + 1
+        _sl, _pad = make_slice_and_pad(imin, imax, shape[i])
+        sl.append(_sl)
+        coordinates[i] -= _sl.start
+    
+    img = input[tuple(sl)]
+    if isinstance(img, ip.LazyImgArray):
+        img = img.compute()
+    if callable(cval):
+        cval = cval(img)
+    
+    return img.map_coordinates(
+        coordinates=coordinates,
+        order=order,
+        mode=mode, 
+        cval=cval,
+    )
+
 def multi_map_coordinates(
     input: ip.ImgArray | ip.LazyImgArray,
     coordinates: np.ndarray,
