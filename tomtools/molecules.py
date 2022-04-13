@@ -316,31 +316,46 @@ class Molecules:
 
     def cartesian_at(
         self,
-        i: int,
+        index: int | slice | Iterable[int],
         shape: tuple[int, int, int],
         scale: nm,
-    ):
-        center = np.array(shape) / 2 - 0.5
-        vec_x = self._rotator[i].apply([0.0, 0.0, 1.0])
-        vec_y = self._rotator[i].apply([0.0, 1.0, 0.0])
-        vec_z = -np.cross(vec_x, vec_y)
-        ind_z, ind_y, ind_x = [np.arange(s) - c for s, c in zip(shape, center)]
-        x_ax = vec_x[:, np.newaxis] * ind_x
-        y_ax = vec_y[:, np.newaxis] * ind_y
-        z_ax = vec_z[:, np.newaxis] * ind_z
+    ) -> np.ndarray:
+        if isinstance(index, int):
+            center = np.array(shape) / 2 - 0.5
+            vec_x = self._rotator[index].apply([0.0, 0.0, 1.0])
+            vec_y = self._rotator[index].apply([0.0, 1.0, 0.0])
+            vec_z = -np.cross(vec_x, vec_y)
+            ind_z, ind_y, ind_x = [np.arange(s) - c for s, c in zip(shape, center)]
+            x_ax = vec_x[:, np.newaxis] * ind_x
+            y_ax = vec_y[:, np.newaxis] * ind_y
+            z_ax = vec_z[:, np.newaxis] * ind_z
 
-        # There will be many points so data type should be converted into 32-bit
-        x_ax = x_ax.astype(np.float32)
-        y_ax = y_ax.astype(np.float32)
-        z_ax = z_ax.astype(np.float32)
+            # There will be many points so data type should be converted into 32-bit
+            x_ax = x_ax.astype(np.float32)
+            y_ax = y_ax.astype(np.float32)
+            z_ax = z_ax.astype(np.float32)
 
-        coords = (
-            z_ax[:, :, np.newaxis, np.newaxis] +
-            y_ax[:, np.newaxis, :, np.newaxis] +
-            x_ax[:, np.newaxis, np.newaxis, :]
-        )
-        shifts = self.pos[i] / scale
-        coords += shifts[:, np.newaxis, np.newaxis, np.newaxis]  # unit: pixel
+            coords = (
+                z_ax[:, :, np.newaxis, np.newaxis] +
+                y_ax[:, np.newaxis, :, np.newaxis] +
+                x_ax[:, np.newaxis, np.newaxis, :]
+            )
+            shifts = self.pos[index] / scale
+            coords += shifts[:, np.newaxis, np.newaxis, np.newaxis]  # unit: pixel
+        elif isinstance(index, slice):
+            start, stop, step = index.indices(len(self))
+            coords = np.stack(
+                [self.cartesian_at(i, shape, scale)
+                 for i in range(start, stop, step)],
+                axis=0,
+            )
+        else:
+            coords = np.stack(
+                [self.cartesian_at(i, shape, scale)
+                 for i in index],
+                axis=0,
+            )
+                
         return coords
         
     def iter_cartesian(

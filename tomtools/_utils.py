@@ -1,6 +1,5 @@
 from __future__ import annotations
 import numpy as np
-from dask import array as da, delayed
 import impy as ip
 from typing import Callable
 
@@ -83,38 +82,15 @@ def multi_map_coordinates(
         cval = cval(img)
     input_img = img
 
-    tasks = []
+    imgs = []
     for crds in coordinates:
-        mapped = lazy_map_coordinates(
-            input_img,
-            coordinates=crds,
-            order=order,
-            mode=mode,
-            cval=cval,
+        imgs.append(
+            input_img.map_coordinates(
+                crds, mode=mode, cval=cval, order=order
+            )
         )
-
-        tasks.append(da.from_delayed(mapped, coordinates.shape[2:], dtype=np.float32))
-
-    out = da.compute(tasks, scheduler=ip.Const["SCHEDULER"])[0]
-
-    return np.stack(out, axis=0)
-
-
-@delayed
-def lazy_map_coordinates(
-    input: ip.ImgArray,
-    coordinates: np.ndarray,
-    order: int = 3,
-    mode: str = "constant",
-    cval: float | Callable[[ip.ImgArray], float] = 0.0,
-) -> np.ndarray:
-    """Delayed version of ndi.map_coordinates."""
-    return input.map_coordinates(
-        coordinates=coordinates,
-        order=order,
-        mode=mode,
-        cval=cval,
-    )
+    
+    return np.stack(imgs, axis=0)
 
 
 def make_slice_and_pad(z0: int, z1: int, size: int) -> tuple[slice, tuple[int, int]]:
