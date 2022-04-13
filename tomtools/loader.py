@@ -12,7 +12,6 @@ import tempfile
 import pandas as pd
 from scipy.spatial.transform import Rotation
 import numpy as np
-from numpy.typing import ArrayLike
 import impy as ip
 from dask import array as da
 from .alignment import BaseAlignmentModel, ZNCCAlignment, SupportRotation
@@ -22,7 +21,7 @@ from .const import Align
 
 if TYPE_CHECKING:
     from .alignment import AlignmentResult
-    from .alignment._types import Ranges
+    from typing_extensions import Self
 
 nm = float  # alias
 
@@ -31,7 +30,7 @@ class BaseLoader:
     def __init__(
         self,
         image: ip.ImgArray | ip.LazyImgArray | np.ndarray | da.core.Array,
-        mole: Molecules,
+        molecules: Molecules,
         output_shape: int | tuple[int, int, int],
         order: int = 3,
     ) -> None:
@@ -44,13 +43,14 @@ class BaseLoader:
             else:
                 raise TypeError("'image' must be a 3D numpy ndarray like object.")
         self.image = image
-        self._molecules = mole
+        self._molecules = molecules
         self._order = order
         if isinstance(output_shape, int):
             output_shape = (output_shape,) * ndim
         else:
             output_shape = tuple(output_shape)
         self._output_shape = output_shape
+        self._cached_lazy_imgarray = None
 
     def __repr__(self) -> str:
         shape = str(self.image.shape).lstrip("AxesShape")
@@ -99,7 +99,7 @@ class BaseLoader:
         molecules: Molecules | None = None,
         output_shape: int | tuple[int, int, int] | None = None,
         order: int | None = None,
-    ):
+    ) -> Self:
         """Return a new instance with different parameter(s)."""
         if molecules is None:
             molecules = self.molecules
@@ -143,8 +143,10 @@ class BaseLoader:
         return results
     
     def get_subtomogram(self, i: int) -> ip.ImgArray:
+        if self._cached_lazy_imgarray is not None:
+            return self._cached_lazy_imgarray[i].compute()
         image = self.image
-        scale = image.scale.x
+        scale = self.scale
         coords = self.molecules.cartesian_at(i, self.output_shape, scale)
         with ip.use("cupy"):
             subvols = np.stack(
@@ -161,7 +163,7 @@ class BaseLoader:
         for i in range(len(self)):
             yield self.get_subtomogram(i)
 
-    def iter_to_memmap(self, path: str | None = None):
+    def iter_create_cache(self, path: str | None = None):
         """
         Create an iterator that convert all the subtomograms into a memory-mapped array.
 
@@ -199,13 +201,23 @@ class BaseLoader:
         darr = da.from_array(
             mmap, chunks=(1,) + self.output_shape, meta=np.array([], dtype=np.float32)
         )
-        arr = ip.LazyImgArray(darr, name="All_subtomograms", axes="pzyx")
+        arr = ip.LazyImgArray(darr, name="Subtomograms", axes="pzyx")
         arr.set_scale(self.image)
+        self._cached_lazy_imgarray = arr
         return arr
+    
+    def map_subtomograms(self, f: Callable, *args, **kwargs):
+        from dask import delayed
+        @delayed
+        def _f(i: int, *args, **kwargs):
+            subvol = self.get_subtomogram(i)
+            return f(subvol, *args, **kwargs)
+        tasks = [_f(i, *args, **kwargs) for i in range(len(self))]
+        return da.compute(tasks)[0]
 
-    def to_lazy_imgarray(self, path: str | None = None) -> ip.LazyImgArray:
+    def create_cache(self, path: str | None = None) -> ip.LazyImgArray:
         """
-        An non-iterator version of :func:`iter_to_memmap`.
+        An non-iterator version of :func:`iter_create_cache`.
 
         Parameters
         ----------
@@ -231,14 +243,14 @@ class BaseLoader:
         >>> avg = arr.proj("p")  # identical to np.mean(arr, axis=0)
 
         """
-        it = self.iter_to_memmap(path)
+        it = self.iter_create_cache(path)
         return self._resolve_iterator(it, lambda x: None)
 
     def to_stack(self, binsize: int = 1) -> ip.ImgArray:
         """Create a 4D image stack of all the subtomograms."""
         images = list(self.iter_subtomograms(binsize=binsize))
         stack: ip.ImgArray = np.stack(images, axis="p")
-        stack.set_scale(xyz=self.image.scale.x * binsize)
+        stack.set_scale(xyz=self.scale * binsize)
         return stack
 
     def iter_average(
@@ -274,8 +286,11 @@ class BaseLoader:
         for subvol in self.iter_subtomograms():
             if classifier(subvol):
                 aligned += subvol.value
-            n += 1
+                n += 1
             yield aligned
+        if n == 0:
+            warnings.warn("No subtomogram was averaged.", UserWarning)
+            n = 1
         avg = ip.asarray(aligned / n, name="Average", axes="zyx")
         avg.set_scale(self.image)
         return avg
@@ -288,7 +303,7 @@ class BaseLoader:
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
         **align_kwargs,
-    ) -> Generator[AlignmentResult, None, SubtomogramLoader]:
+    ) -> Generator[AlignmentResult, None, Self]:
         """
         Create an iterator that align subtomograms to the template image.
 
@@ -350,6 +365,44 @@ class BaseLoader:
 
         return self.replace(molecules=mole_aligned)
 
+    def parallel_align(
+        self,
+        template: ip.ImgArray,
+        *,
+        mask: ip.ImgArray = None,
+        max_shifts: nm | tuple[nm, nm, nm] = 1.0,
+        alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
+        **align_kwargs,
+    ) -> Generator[AlignmentResult, None, Self]:
+        
+        self._check_shape(template)
+
+        _max_shifts_px = np.asarray(max_shifts) / self.scale
+
+        with ip.use("cupy"):
+            model = alignment_model(
+                template=template,
+                mask=mask,
+                **align_kwargs,
+            )
+            out = self.map_subtomograms(model.align, _max_shifts_px)
+        
+        local_shifts, local_rot, corr_max = _allocate(len(self))
+        for i, result in enumerate(out):
+            _, local_shifts[i], local_rot[i], corr_max[i] = result
+            
+        rotator = Rotation.from_quat(local_rot)
+        mole_aligned = self.molecules.linear_transform(
+            local_shifts * self.scale, rotator,
+        )
+
+        mole_aligned.features = update_features(
+            self.molecules.features.copy(),
+            get_features(corr_max, local_shifts, rotator.as_rotvec()),
+        )
+
+        return self.replace(molecules=mole_aligned)
+        
     def iter_align_no_template(
         self,
         *,
@@ -357,7 +410,7 @@ class BaseLoader:
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
         **align_kwargs,
-    ) -> Generator[AlignmentResult, None, SubtomogramLoader]:
+    ) -> Generator[AlignmentResult, None, Self]:
         """
         Create an iterator that align subtomograms without template image.
 
@@ -390,9 +443,7 @@ class BaseLoader:
         AlignmentResult
             An tuple representing the current alignment result.
         """
-        local_shifts, local_rot, corr_max = _allocate(len(self))
-        _max_shifts_px = np.asarray(max_shifts) / self.scale
-        all_subvols = yield from self.iter_to_memmap(path=None)
+        all_subvols = yield from self.iter_create_cache(path=None)
 
         template = all_subvols.proj("p").compute()
 
@@ -403,30 +454,14 @@ class BaseLoader:
             mask = mask_params(template)
         else:
             mask = mask_params
-
-        with ip.use("cupy"):
-            model = alignment_model(
-                template=template,
-                mask=mask,
-                **align_kwargs,
-            )
-            for i, subvol in enumerate(all_subvols):
-                result = model.align(subvol.compute(), _max_shifts_px)
-                _, local_shifts[i], local_rot[i], corr_max[i] = result
-                yield result
-
-        rotator = Rotation.from_quat(local_rot)
-        mole_aligned = self.molecules.linear_transform(
-            local_shifts * self.scale,
-            rotator,
+        out = yield from self.iter_align(
+            tmeplate=template,
+            mask=mask,
+            max_shifts=max_shifts,
+            alignment_model=alignment_model,
+            **align_kwargs,
         )
-
-        mole_aligned.features = update_features(
-            self.molecules.features.copy(),
-            get_features(corr_max, local_shifts, rotator.as_rotvec()),
-        )
-
-        return self.replace(molecules=mole_aligned)
+        return out
 
     def iter_align_multi_templates(
         self,
@@ -436,7 +471,7 @@ class BaseLoader:
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
         **align_kwargs,
-    ) -> Generator[AlignmentResult, None, SubtomogramLoader]:
+    ) -> Generator[AlignmentResult, None, Self]:
         """
         Create an iterator that align subtomograms with multiple template images.
 
@@ -562,60 +597,6 @@ class SubtomogramLoader(BaseLoader):
         other.
     """
 
-    def __init__(
-        self,
-        image: ip.ImgArray | ip.LazyImgArray | np.ndarray | da.core.Array,
-        mole: Molecules,
-        output_shape: int | tuple[int, int, int],
-        order: int = 3,
-        chunksize: int = 1,
-    ) -> None:
-        ndim = 3
-        if not isinstance(image, (ip.ImgArray, ip.LazyImgArray)):
-            if isinstance(image, np.ndarray) and image.ndim == ndim:
-                image = ip.asarray(image, axes="zyx")
-            elif isinstance(image, da.core.Array) and image.ndim == ndim:
-                image = ip.LazyImgArray(image, axes="zyx")
-            else:
-                raise TypeError("'image' must be a 3D numpy ndarray like object.")
-        self.image = image
-        self._molecules = mole
-        self._order = order
-        self._chunksize = max(chunksize, 1)
-        if isinstance(output_shape, int):
-            output_shape = (output_shape,) * ndim
-        else:
-            output_shape = tuple(output_shape)
-        self._output_shape = output_shape
-
-    @property
-    def chunksize(self) -> int:
-        """Return the chunk size on subtomogram loading."""
-        return self._chunksize
-
-    def __iter__(self) -> Iterator[ip.ImgArray]:
-        return self.iter_subtomograms()
-
-    def replace(
-        self,
-        output_shape: int | tuple[int, int, int] | None = None,
-        order: int | None = None,
-        chunksize: int | None = None,
-    ):
-        """Return a new instance with different parameter(s)."""
-        if output_shape is None:
-            output_shape = self.output_shape
-        if order is None:
-            order = self.order
-        if chunksize is None:
-            chunksize = self.chunksize
-        return self.__class__(
-            self.image,
-            self.molecules,
-            output_shape=output_shape,
-            order=order,
-            chunksize=chunksize,
-        )
 
     def iter_average_split(
         self,
@@ -670,7 +651,7 @@ class SubtomogramLoader(BaseLoader):
         self,
         *,
         classifier=None,
-        callback: Callable[[SubtomogramLoader], Any] = None,
+        callback: Callable[[Self], Any] = None,
     ) -> ip.ImgArray:
         """
         A non-iterator version of :func:`iter_average`.
@@ -698,11 +679,10 @@ class SubtomogramLoader(BaseLoader):
         template: ip.ImgArray = None,
         mask: ip.ImgArray = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
-        rotations: Ranges | None = None,
-        cutoff: float = 0.5,
-        method: str = "zncc",
-        callback: Callable[[SubtomogramLoader], Any] = None,
-    ) -> SubtomogramLoader:
+        alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
+        callback: Callable[[Self], Any] = None,
+        **align_kwargs,
+    ) -> Self:
         """
         A non-iterator version of :func:`iter_align`.
 
@@ -714,10 +694,6 @@ class SubtomogramLoader(BaseLoader):
             Mask image. Must in the same shae as the template.
         max_shifts : int or tuple of int, default is (1., 1., 1.)
             Maximum shift between subtomograms and template.
-        rotations : (float, float) or three-tuple of (float, float) or None, optional
-            Rotation between subtomograms and template in external Euler angles.
-        cutoff : float, default is 0.5
-            Cutoff frequency of low-pass filter applied in each subtomogram.
         callback : callable, optional
             Callback function that will get called after each iteration.
 
@@ -731,9 +707,8 @@ class SubtomogramLoader(BaseLoader):
             template=template,
             mask=mask,
             max_shifts=max_shifts,
-            rotations=rotations,
-            cutoff=cutoff,
-            method=method,
+            alignment_model=alignment_model,
+            **align_kwargs,
         )
 
         return self._resolve_iterator(align_iter, callback)
@@ -743,7 +718,7 @@ class SubtomogramLoader(BaseLoader):
         *,
         n_set: int = 1,
         seed: int | float | str | bytes | bytearray | None = 0,
-        callback: Callable[[SubtomogramLoader], Any] = None,
+        callback: Callable[[Self], Any] = None,
     ) -> tuple[ip.ImgArray, ip.ImgArray]:
         """
         A non-iterator version of :func:`iter_average_split`.
@@ -824,6 +799,55 @@ class SubtomogramLoader(BaseLoader):
     #     return clf
 
 
+
+
+class ChunkedSubtomogramLoader(SubtomogramLoader):
+    
+    def __init__(
+        self,
+        image: ip.ImgArray | ip.LazyImgArray | np.ndarray | da.core.Array,
+        mole: Molecules,
+        output_shape: int | tuple[int, int, int],
+        order: int = 3,
+        chunksize: int = 100,
+    ) -> None:
+        super().__init__(image, mole, output_shape, order)
+        self._chunksize = chunksize
+
+    @property
+    def chunksize(self) -> int:
+        """Return the chunk size on subtomogram loading."""
+        return self._chunksize
+
+    def replace(
+        self,
+        molecules: Molecules | None = None,
+        output_shape: int | tuple[int, int, int] | None = None,
+        order: int | None = None,
+        chunksize: int | None = None,
+    ) -> Self:
+        """Return a new instance with different parameter(s)."""
+        if molecules is None:
+            molecules = self.molecules
+        if output_shape is None:
+            output_shape = self.output_shape
+        if order is None:
+            order = self.order
+        if chunksize is None:
+            chunksize = self.chunksize
+        return self.__class__(
+            self.image,
+            self.molecules,
+            output_shape=output_shape,
+            order=order,
+            chunksize=chunksize,
+        )
+    
+    def iter_subtomograms(self) -> Iterator[ip.ImgArray]:
+        for subvols in self._iter_chunks():
+            for subvol in subvols:
+                yield subvol
+
     def _iter_chunks(self) -> Iterator[ip.ImgArray]:  # axes: pzyx
         """Generate subtomogram list chunk-wise."""
         image = self.image
@@ -842,11 +866,6 @@ class SubtomogramLoader(BaseLoader):
             subvols = ip.asarray(subvols, axes="pzyx")
             subvols.set_scale(image)
             yield subvols
-
-
-
-class ChunkedSubtomogramLoader(SubtomogramLoader):
-    ...
 
 
 def get_features(corr_max, local_shifts, rotvec) -> pd.DataFrame:

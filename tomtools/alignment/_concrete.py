@@ -1,9 +1,9 @@
 import numpy as np
 import impy as ip
-from ._base import FourierLowpassInput, RealLowpassInput, SupportRotation
+from ._base import FourierLowpassInput, RealLowpassInput
 
 
-class PCCAlignment(FourierLowpassInput, SupportRotation):
+class PCCAlignment(FourierLowpassInput):
     """Alignment model using phase cross correlation."""
 
     def optimize(
@@ -19,7 +19,7 @@ class PCCAlignment(FourierLowpassInput, SupportRotation):
         return shift, np.zeros(4), zncc
 
 
-class ZNCCAlignment(RealLowpassInput, SupportRotation):
+class ZNCCAlignment(RealLowpassInput):
     """Alignment model using zero-mean normalized cross correlation."""
 
     def optimize(

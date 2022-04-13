@@ -184,9 +184,9 @@ class BaseAlignmentModel(ABC):
 
     def _get_alignment_function(self):
         if self.is_multi_templates:
-            return self._optimize_single
-        else:
             return self._optimize_multiple
+        else:
+            return self._optimize_single
 
     @property
     def is_multi_templates(self) -> bool:
@@ -202,12 +202,11 @@ class SupportRotation(BaseAlignmentModel):
         self,
         template: ip.ImgArray | Sequence[ip.ImgArray],
         mask: ip.ImgArray | None = None,
-        cutoff: float = 0.5,
         rotations: Ranges | None = None,
     ):
-        super().__init__(template=template, mask=mask, pretransform_params=cutoff)
         self.quaternions = normalize_rotations(rotations)
         self._n_rotations = self.quaternions.shape[0]
+        super().__init__(template=template, mask=mask)
 
     def align(
         self,
@@ -285,11 +284,11 @@ class SupportRotation(BaseAlignmentModel):
                     axis="p",
                 )
             else:
-                template_input = self.pre_transform(template_input)
+                template_input = self.pre_transform(self._template)
 
         return template_input
 
-class FrequencyCutoffInput(BaseAlignmentModel):
+class FrequencyCutoffInput(SupportRotation):
     """
     An alignment model that supports frequency-based pre-filtering
     
@@ -300,10 +299,11 @@ class FrequencyCutoffInput(BaseAlignmentModel):
         self,
         template: ip.ImgArray | Sequence[ip.ImgArray],
         mask: ip.ImgArray | None = None,
+        rotations: Ranges | None = None,
         cutoff: float | None = None,
     ):
-        super().__init__(template, mask)
         self._cutoff = cutoff or 1.0
+        super().__init__(template, mask, rotations)
         
 class FourierLowpassInput(FrequencyCutoffInput):
     def pre_transform(self, img: ip.ImgArray) -> ip.ImgArray:
