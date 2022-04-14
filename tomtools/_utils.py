@@ -17,8 +17,10 @@ def map_coordinates(
     cval: float | Callable[[np.ndarray], float] = 0.0,
 ) -> np.ndarray:
     """
-    Crop image at the edges of coordinates before calling map_coordinates to avoid
-    loading entire array into memory.
+    Modified version of ``scipy.ndimage.map_coordinates``.
+
+    This function crops the inputimage at the edges of coordinates before
+    calling ``ndi.map_coordinates`` to avoid loading entire array into memory.
     """
     coordinates = coordinates.copy()
     shape = input.shape
@@ -54,7 +56,7 @@ def multi_map_coordinates(
     cval: float | Callable[[np.ndarray], float] = 0.0,
 ) -> np.ndarray:
     """
-    Multiple map-coordinate in parallel.
+    Multiple map-coordinate.
 
     Result of this function is identical to following code.
 
@@ -108,8 +110,11 @@ def multi_map_coordinates(
 
 def make_slice_and_pad(z0: int, z1: int, size: int) -> tuple[slice, tuple[int, int]]:
     """
-    This function calculates what slicing and padding are needed when an array is sliced
-    by ``z0:z1``. Array must be padded when z0 is negative or z1 is outside the array size.
+    Helper function for cropping images.
+
+    This function calculates what slicing and padding are needed when an array
+    is sliced by ``z0:z1``. Array must be padded when z0 is negative or z1 is
+    outside the array size.
     """
     z0_pad = z1_pad = 0
     if z0 < 0:
@@ -131,6 +136,8 @@ def compose_matrices(
     shape: tuple[int, int, int],
     rotators: list[Rotation],
 ):
+    """Compose Affine matrices from an array shape and a Rotation object."""
+
     dz, dy, dx = (np.array(shape) - 1) / 2
     # center to corner
     translation_0 = np.array(
@@ -180,7 +187,7 @@ def fourier_shell_correlation(
 
     Returns
     -------
-    tuple[np.ndarray, np.ndarray]
+    np.ndarray and np.ndarray
         Frequency and FSC.
     """
     shape = img0.shape

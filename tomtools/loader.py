@@ -35,7 +35,37 @@ def subtomogram_loader(
     order: int = 3,
     scale: nm = 1.0,
     chunksize: int = 1,
-):
+) -> SubtomogramLoader | ChunkedSubtomogramLoader:
+    """
+    Return a proper subtomogram loader object.
+
+    Parameters
+    ----------
+    image : np.ndarray or da.core.Array
+        Tomogram image. Must be 3-D.
+    molecules : Molecules
+        Molecules object that represents positions and orientations of
+        subtomograms.
+    output_shape : int or tuple of int
+        Shape of output subtomogram in pixel.
+    order : int, default is 3
+        Interpolation order of subtomogram sampling.
+        - 0 = Nearest neighbor
+        - 1 = Linear interpolation
+        - 3 = Cubic interpolation
+    scale : float, default is 1.0
+        Physical scale of pixel, such as nm. This value does not affect
+        averaging/alignment results but molecule coordinates are multiplied
+        by this value. This parameter is useful when another loader with
+        binned image is created.
+    chunksize : int, default is 1
+        Set to >1 if adjacent molecules are physically adjacent.
+
+    Returns
+    -------
+    SubtomogramLoader or ChunkedSubtomogramLoader object
+        Proper subtomogram loader object.
+    """
     if not image.ndim == 3:
         raise TypeError("Input image must be 3D.")
     kwargs = dict(
@@ -52,33 +82,7 @@ def subtomogram_loader(
 
 
 class SubtomogramLoader:
-    """
-    A class for efficient loading of subtomograms.
-
-    A ``SubtomogramLoader`` instance is basically composed of two elements,
-    an image and a Molecules object. A subtomogram is loaded by creating a
-    local rotated Cartesian coordinate at a molecule and calculating mapping
-    from the image to the subtomogram.
-
-    Parameters
-    ----------
-    image : np.ndarray or da.core.Array
-        Tomogram image.
-    mole : Molecules
-        Molecules object that defines position and rotation of subtomograms.
-    output_shape : int or tuple of int
-        Shape (in pixel) of output subtomograms.
-    order : int, default is 1
-        Interpolation order of subtomogram sampling.
-        - 0 = Nearest neighbor
-        - 1 = Linear interpolation
-        - 3 = Cubic interpolation
-    scale : float, default is 1.0
-        Physical scale of pixel, such as nm. This value does not affect
-        averaging/alignment results but molecule coordinates are multiplied
-        by this value. This parameter is useful when another loader with
-        binned image is created.
-    """
+    """A basic subtomogram loader class."""
 
     def __init__(
         self,
@@ -88,6 +92,34 @@ class SubtomogramLoader:
         order: int = 3,
         scale: nm = 1.0,
     ) -> None:
+        """
+        A class for efficient loading of subtomograms.
+
+        A ``SubtomogramLoader`` instance is basically composed of two elements,
+        an image and a Molecules object. A subtomogram is loaded by creating a
+        local rotated Cartesian coordinate at a molecule and calculating mapping
+        from the image to the subtomogram.
+
+        Parameters
+        ----------
+        image : np.ndarray or da.core.Array
+            Tomogram image. Must be 3-D.
+        molecules : Molecules
+            Molecules object that represents positions and orientations of
+            subtomograms.
+        output_shape : int or tuple of int
+            Shape of output subtomogram in pixel.
+        order : int, default is 3
+            Interpolation order of subtomogram sampling.
+            - 0 = Nearest neighbor
+            - 1 = Linear interpolation
+            - 3 = Cubic interpolation
+        scale : float, default is 1.0
+            Physical scale of pixel, such as nm. This value does not affect
+            averaging/alignment results but molecule coordinates are multiplied
+            by this value. This parameter is useful when another loader with
+            binned image is created.
+        """
         # check type of input image
         if isinstance(image, np.ndarray):
             self._image_ref = weakref.ref(image)
@@ -343,9 +375,9 @@ class SubtomogramLoader:
         """
         Split subtomograms into two set and average separately.
 
-        This method executes pairwise subtomogram averaging using randomly selected
-        molecules, which is useful for calculation of such as Fourier shell
-        correlation.
+        This method executes pairwise subtomogram averaging using randomly
+        selected molecules, which is useful for calculation of such as Fourier
+        shell correlation.
 
         Parameters
         ----------
@@ -641,6 +673,8 @@ class SubtomogramLoader:
 
 
 class ChunkedSubtomogramLoader(SubtomogramLoader):
+    """A subtomogram loader class for chunkwise loading."""
+
     def __init__(
         self,
         image: _A,
@@ -650,6 +684,31 @@ class ChunkedSubtomogramLoader(SubtomogramLoader):
         scale: nm = 1.0,
         chunksize: int = 100,
     ) -> None:
+        """
+        A SubtomogramLoader class equipped with chunkwise subtomogram loading.
+
+        Parameters
+        ----------
+        image : np.ndarray or da.core.Array
+            Tomogram image. Must be 3-D.
+        molecules : Molecules
+            Molecules object that represents positions and orientations of
+            subtomograms.
+        output_shape : int or tuple of int
+            Shape of output subtomogram in pixel.
+        order : int, default is 3
+            Interpolation order of subtomogram sampling.
+            - 0 = Nearest neighbor
+            - 1 = Linear interpolation
+            - 3 = Cubic interpolation
+        scale : float, default is 1.0
+            Physical scale of pixel, such as nm. This value does not affect
+            averaging/alignment results but molecule coordinates are multiplied
+            by this value. This parameter is useful when another loader with
+            binned image is created.
+        chunksize : int, default is 1
+            How many subtomogram will be loaded at the same time.
+        """
         super().__init__(image, molecules, output_shape, order, scale=scale)
         self._chunksize = chunksize
 

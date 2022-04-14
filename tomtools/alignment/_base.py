@@ -315,12 +315,16 @@ class FrequencyCutoffInput(SupportRotation):
 
 
 class FourierLowpassInput(FrequencyCutoffInput):
+    """Abstract model that uses low-pass-filtrated Fourier images as inputs."""
+
     def pre_transform(self, img: np.ndarray) -> np.ndarray:
-        """Apply low-pass filter and FFT."""
+        """Apply low-pass filter without IFFT."""
         return lowpass_filter_ft(img, cutoff=self._cutoff)
 
 
 class RealLowpassInput(FrequencyCutoffInput):
+    """Abstract model that uses low-pass-filtrated real images as inputs."""
+
     def pre_transform(self, img: np.ndarray) -> np.ndarray:
         """Apply low-pass filter."""
         return lowpass_filter(img, cutoff=self._cutoff)

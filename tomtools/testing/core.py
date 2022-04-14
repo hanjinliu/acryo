@@ -12,9 +12,9 @@ class TomogramGenerator:
     """
     A tester class for subtomogram averaging and alignment.
 
-    Given a template image, this class can create tomogram by assembling rotated,
-    noisy template images gridwise. Molecules objects can also be sampled with
-    arbitrary positional errors.
+    Given a template image, this class can create tomogram by assembling
+    rotated, noisy template images gridwise. Molecules objects can also
+    be sampled with arbitrary positional errors.
     """
 
     def __init__(
@@ -65,7 +65,7 @@ class TomogramGenerator:
             template = np.pad(template, pad_width, dims="zyx")
 
         gy, gx = self.grid_shape
-        mols = template
+
         mols: list[list[np.ndarray]] = [
             [template.copy() for _ in range(gy)] for _ in range(gx)
         ]
