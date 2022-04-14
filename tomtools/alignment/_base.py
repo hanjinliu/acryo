@@ -289,6 +289,13 @@ class SupportRotation(BaseAlignmentModel):
 
         return template_input
 
+    def _get_alignment_function(self):
+        if self.is_multi_templates or self._n_rotations > 1:
+            return self._optimize_multiple
+        else:
+            return self._optimize_single
+        
+
 class FrequencyCutoffInput(SupportRotation):
     """
     An alignment model that supports frequency-based pre-filtering

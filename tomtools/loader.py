@@ -189,6 +189,17 @@ class SubtomogramLoader:
             yield self.get_subtomogram(i)
 
     def construct_dask(self) -> da.core.Array:
+        """
+        Construct a dask array of subtomograms.
+        
+        This function is always needed before parallel processing. If subtomograms
+        are cached in a memory-map it will be used instead.
+
+        Returns
+        -------
+        da.core.Array
+            An 4-D array with axes "pzyx".
+        """
         if self._cached_lazy_imgarray is not None:
             return self._cached_lazy_imgarray.value
         delayed_get_subtomogram = delayed(self._get_subtomogram_4d)

@@ -7,13 +7,13 @@ from ..molecules import from_euler
 
 def _normalize_a_range(rng: RangeLike) -> RangeLike:
     if len(rng) != 2:
-        raise TypeError("Range must be defined by (float, float).")
+        raise TypeError(f"Range must be defined by (float, float), got {rng!r}")
     max_rot, drot = rng
     return float(max_rot), float(drot)
 
 
 def _normalize_ranges(rng: Ranges) -> Ranges:
-    if isinstance(rng, tuple) and isinstance(rng[0], tuple):
+    if isinstance(rng, (tuple, list)) and isinstance(rng[0], tuple):
         return tuple(_normalize_a_range(r) for r in rng)
     else:
         rng = _normalize_a_range(rng)

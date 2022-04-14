@@ -1,3 +1,8 @@
-from ._blob import blob, TestSet
+from ._templates import blobs, spiral
+from .core import TomogramGenerator
 
-__all__ = ["blob", "TestSet"]
+__all__ = [
+    "blobs", 
+    "spiral",
+    "TomogramGenerator"
+]
