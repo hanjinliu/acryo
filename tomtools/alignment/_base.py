@@ -113,7 +113,6 @@ class BaseAlignmentModel(ABC):
             Result of alignment.
         """
         img_masked = img * self.mask
-        print(max_shifts)
         return self._align_func(
             self.pre_transform(img_masked),
             self.template_input,
@@ -299,7 +298,7 @@ class SupportRotation(BaseAlignmentModel):
 
 class FrequencyCutoffInput(SupportRotation):
     """
-    An alignment model that supports frequency-based pre-filtering
+    An alignment model that supports frequency-based pre-filtering.
     
     This class can be used for implementing such as low-pass filter or high-pass
     filter before alignment.

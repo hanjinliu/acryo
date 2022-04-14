@@ -6,10 +6,17 @@ from .._utils import compose_matrices
 from ..alignment._utils import normalize_rotations
 
 class TomogramGenerator:
+    """
+    A tester class for subtomogram averaging and alignment.
+    
+    Given a template image, this class can create tomogram by assembling rotated,
+    noisy template images gridwise. Molecules objects can also be sampled with
+    arbitrary positional errors.
+    """
     def __init__(
         self,
         template: ip.ImgArray,
-        grid_shape=(10, 10),
+        grid_shape: tuple[int, int] = (10, 10),
         rotations=None,
         noise_sigma: float = 1,
         seed: int = 0,
@@ -48,11 +55,16 @@ class TomogramGenerator:
         rotators = [Rotation.from_quat(self.quaternions[idx]) for idx in quat_idx]
         return compose_matrices(self.template.shape, rotators)
 
-    def get_tomogram(self, tilt_range=(-90, 90)):
+    def get_tomogram(
+        self,
+        pad_width: int = 0,
+        tilt_range: tuple[float, float] = (-90, 90)
+    ) -> ip.ImgArray:
         np.random.seed(self._seed)
         template = self.template
-        if tilt_range != (-90, 90):
-            raise NotImplementedError()
+        if pad_width > 0:
+            template = np.pad(template, pad_width, dims="zyx")
+            
         gy, gx = self.grid_shape
         mols = template
         mols: list[list[ip.ImgArray]] = [
@@ -61,13 +73,19 @@ class TomogramGenerator:
         if self.quaternions.shape[0] > 0:
             matrices = self.get_matrices()
             mtx_iterator = iter(matrices)
-            for i in range(gy):
-                for j in range(gx):
-                    mtx = next(mtx_iterator)
-                    mols[i][j].affine(mtx, update=True)
-        for i in range(gy):
-            for j in range(gx):
-                mols[i][j] += np.random.normal(scale=self.noise_sigma, size=template.shape) 
+            for i, j in wrange(gy, gx):
+                mtx = next(mtx_iterator)
+                mols[i][j].affine(mtx, update=True)
+        
+        for i, j in wrange(gy, gx):
+            mols[i][j] += np.random.normal(scale=self.noise_sigma, size=template.shape)
+        
+        if tilt_range != (-90, 90):
+            mw = _missing_wedge_mask(template.shape, tilt_range=tilt_range)
+            for i, j in wrange(gy, gx):
+                ft = mols[i][j].fft()
+                mols[i][j] = (ft * mw).ifft()
+        
         tomogram: ip.ImgArray = np.block(mols)
         np.random.seed(None)
         tomogram.set_scale(template)
@@ -79,10 +97,28 @@ class TomogramGenerator:
         offset = (shape_vec - 1) / 2 * self.scale
         vy, vx = shape_vec[1:] * self.scale
         centers = []
-        for i in range(gy):
-            for j in range(gx):
-                centers.append(offset + np.array([0., vy*i, vx*j]))
+        for i, j in wrange(gy, gx):
+            centers.append(offset + np.array([0., vy*i, vx*j]))
         centers = np.stack(centers, axis=0)
         return Molecules(centers).translate_random(
             max_distance=max_distance, seed=self._seed
         )
+
+def _missing_wedge_mask(shape, tilt_range: tuple[float, float]) -> np.ndarray:
+    """
+    Create a missing-wedge binary mask image. This mask should be multiplied to
+    Fourier transformed image.
+    """
+    radmin, radmax = np.deg2rad(tilt_range)
+    x0 = (shape[2] - 1) / 2
+    z0 = (shape[0] - 1) / 2
+    zz, yy, xx = np.indices(shape)
+    d0 = zz - z0 - np.tan(radmin) * (xx - x0)
+    d1 = zz - z0 - np.tan(radmax) * (xx - x0)
+    missing = d0 * d1 < 0
+    return missing
+
+def wrange(l0: int, l1: int):
+    for i in range(l0):
+        for j in range(l1):
+            yield i, j

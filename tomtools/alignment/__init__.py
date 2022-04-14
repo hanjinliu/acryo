@@ -4,6 +4,7 @@ from ._base import (
     BaseAlignmentModel,
     AlignmentResult,
     SupportRotation,
+    FrequencyCutoffInput,
 )
 from ._concrete import PCCAlignment, ZNCCAlignment
 
@@ -15,4 +16,5 @@ __all__ = [
     "ZNCCAlignment",
     "BaseAlignmentModel",
     "SupportRotation",
+    "FrequencyCutoffInput",
 ]

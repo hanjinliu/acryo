@@ -3,6 +3,7 @@ from typing import (
     Callable,
     Generator,
     Iterator,
+    overload,
     TYPE_CHECKING,
 )
 import warnings
@@ -13,12 +14,17 @@ from scipy.spatial.transform import Rotation
 import numpy as np
 import impy as ip
 from dask import array as da, delayed
-from .alignment import BaseAlignmentModel, ZNCCAlignment, SupportRotation
+from .alignment import (
+    BaseAlignmentModel,
+    ZNCCAlignment,
+    SupportRotation,
+    FrequencyCutoffInput,
+)
+from .alignment._types import Ranges
 from .molecules import Molecules
 from . import _utils
 
 if TYPE_CHECKING:
-    from .alignment import AlignmentResult
     from typing_extensions import Self
 
 nm = float  # alias
@@ -214,6 +220,7 @@ class SubtomogramLoader:
         return da.concatenate(arrays, axis=0)
     
     def construct_lazyimgarray(self) -> ip.LazyImgArray:
+        """Stack subtomograms into a LazyImgArray."""
         arr = ip.aslazy(self.construct_dask(), axes="zyx")
         return arr.set_scale(self.image)
 
@@ -347,6 +354,32 @@ class SubtomogramLoader:
             ip_stack = ip_stack[0]
         return ip_stack
 
+    
+    @overload
+    def align(
+        self,
+        template: ip.ImgArray,
+        mask: ip.ImgArray,
+        max_shifts: nm | tuple[nm, nm, nm],
+        alignment_model: type[SupportRotation],
+        rotations: Ranges,
+        **kwargs,
+    ):
+        ...
+        
+    @overload
+    def align(
+        self,
+        template: ip.ImgArray,
+        mask: ip.ImgArray,
+        max_shifts: nm | tuple[nm, nm, nm],
+        alignment_model: type[FrequencyCutoffInput],
+        rotations: Ranges,
+        cutoff: float,
+        **kwargs,
+    ):
+        ...
+        
     def align(
         self,
         template: ip.ImgArray,
@@ -472,7 +505,7 @@ class SubtomogramLoader:
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
         **align_kwargs,
-    ) -> Generator[AlignmentResult, None, Self]:
+    ) -> Self:
         """
         Align subtomograms with multiple template images.
 
@@ -498,11 +531,6 @@ class SubtomogramLoader:
         -------
         SubtomogramLoader
             An loader instance with updated molecules.
-
-        Yields
-        ------
-        AlignmentResult
-            An tuple representing the current alignment result.
         """
         n_templates = len(templates)
         self._check_shape(templates[0])

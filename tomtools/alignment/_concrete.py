@@ -13,10 +13,10 @@ class PCCAlignment(FourierLowpassInput):
         max_shifts: tuple[float, float, float],
     ) -> tuple[np.ndarray, np.ndarray, float]:
         """Optimize."""
-        shift, zncc = ip.ft_pcc_maximum_with_corr(
+        shift, pcc = ip.ft_pcc_maximum_with_corr(
             subvolume, template, upsample_factor=20, max_shifts=max_shifts
         )
-        return shift, np.zeros(4), zncc
+        return shift, np.zeros(4), pcc
 
 
 class ZNCCAlignment(RealLowpassInput):
