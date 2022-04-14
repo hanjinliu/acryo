@@ -1,11 +1,6 @@
 from __future__ import annotations
 from typing import (
-    Any,
     Callable,
-    Generator,
-    Iterable,
-    Iterator,
-    overload,
     TYPE_CHECKING,
     TypeVar,
 )
@@ -21,25 +16,24 @@ from .alignment import (
     BaseAlignmentModel,
     ZNCCAlignment,
     SupportRotation,
-    FrequencyCutoffInput,
 )
-from ._types import Ranges
+from ._types import nm, pixel
 from .molecules import Molecules
 from . import _utils
 
 if TYPE_CHECKING:
     from typing_extensions import Self
 
-nm = float  # alias
 _A = TypeVar("_A", np.ndarray, da.core.Array)
+_R = TypeVar("_R")
 
 
 def subtomogram_loader(
     image: np.ndarray | da.core.Array,
     molecules: Molecules,
-    output_shape: int | tuple[int, int, int],
+    output_shape: pixel | tuple[pixel, pixel, pixel],
     order: int = 3,
-    scale: float = 1.0,
+    scale: nm = 1.0,
     chunksize: int = 1,
 ):
     if not image.ndim == 3:
@@ -52,9 +46,9 @@ def subtomogram_loader(
         scale=scale,
     )
     if chunksize == 1:
-        return SubtomogramLoader(**kwargs)
+        return SubtomogramLoader(**kwargs)  # type: ignore
     else:
-        return ChunkedSubtomogramLoader(**kwargs, chunksize=chunksize)
+        return ChunkedSubtomogramLoader(**kwargs, chunksize=chunksize)  # type: ignore
 
 
 class SubtomogramLoader:
@@ -90,7 +84,7 @@ class SubtomogramLoader:
         self,
         image: _A,
         molecules: Molecules,
-        output_shape: int | tuple[int, int, int],
+        output_shape: pixel | tuple[pixel, pixel, pixel],
         order: int = 3,
         scale: nm = 1.0,
     ) -> None:
@@ -122,11 +116,9 @@ class SubtomogramLoader:
 
         # check output_shape
         if isinstance(output_shape, int):
-            output_shape = (output_shape,) * image.ndim
+            self._output_shape = (output_shape,) * image.ndim
         else:
-            output_shape = tuple(output_shape)
-
-        self._output_shape = output_shape
+            self._output_shape = tuple(output_shape)
 
         # check scale
         self._scale = float(scale)
@@ -153,7 +145,7 @@ class SubtomogramLoader:
             image = self._image_ref
         if image is None:
             raise ValueError("No tomogram found.")
-        return image
+        return image  # type: ignore
 
     @property
     def scale(self) -> nm:
@@ -161,7 +153,7 @@ class SubtomogramLoader:
         return self._scale
 
     @property
-    def output_shape(self) -> tuple[int, ...]:
+    def output_shape(self) -> tuple[pixel, ...]:
         """Return the output subtomogram shape."""
         return self._output_shape
 
@@ -182,7 +174,7 @@ class SubtomogramLoader:
     def replace(
         self,
         molecules: Molecules | None = None,
-        output_shape: int | tuple[int, int, int] | None = None,
+        output_shape: pixel | tuple[pixel, pixel, pixel] | None = None,
         order: int | None = None,
         scale: float | None = None,
     ) -> Self:
@@ -207,10 +199,10 @@ class SubtomogramLoader:
         """Create a shallow copy of the loader."""
         return self.replace()
 
-    def binning(self, binsize: int = 2, *, compute: bool = True) -> Self:
+    def binning(self, binsize: pixel = 2, *, compute: bool = True) -> Self:
         tr = -(binsize - 1) / 2 * self.scale
         molecules = self.molecules.translate([tr, tr, tr])
-        binned_image = _utils.bin_image(self.image, binsize)
+        binned_image = _utils.bin_image(self.image, binsize=binsize)
         if isinstance(binned_image, da.core.Array) and compute:
             binned_image = binned_image.compute()
         out = self.replace(
@@ -229,7 +221,7 @@ class SubtomogramLoader:
                 f"{template.shape!r}. 'output_shape' is updated.",
                 UserWarning,
             )
-            self.output_shape = template.shape
+            self._output_shape = template.shape
         return None
 
     def get_subtomogram(self, i: int) -> np.ndarray:
@@ -239,15 +231,9 @@ class SubtomogramLoader:
         image = self.image
         scale = self.scale
         coords = self.molecules.cartesian_at(i, self.output_shape, scale)
-        subvol = np.stack(
-            _utils.map_coordinates(image, coords, order=self.order, cval=np.mean),
-            axis=0,
-        )
+        mapped = _utils.map_coordinates(image, coords, order=self.order, cval=np.mean)
+        subvol = np.stack(list(mapped), axis=0)
         return subvol
-
-    def iter_subtomograms(self) -> Iterator[np.ndarray]:
-        for i in range(len(self)):
-            yield self.get_subtomogram(i)
 
     def construct_dask(self) -> da.core.Array:
         """
@@ -320,7 +306,9 @@ class SubtomogramLoader:
 
         mmap[:] = dask_array[:]
         darr = da.from_array(
-            mmap, chunks=(1,) + self.output_shape, meta=np.array([], dtype=np.float32)
+            mmap,
+            chunks=(1,) + self.output_shape,  # type: ignore
+            meta=np.array([], dtype=np.float32),
         )
         return darr
 
@@ -349,7 +337,7 @@ class SubtomogramLoader:
     def average_split(
         self,
         n_set: int = 1,
-        seed: int = 0,
+        seed: int | None = 0,
         squeeze: bool = True,
     ) -> np.ndarray:
         """
@@ -390,31 +378,6 @@ class SubtomogramLoader:
         if squeeze and n_set == 1:
             stack = stack[0]
         return stack
-
-    @overload
-    def align(
-        self,
-        template: np.ndarray,
-        mask: np.ndarray | None,
-        max_shifts: nm | tuple[nm, nm, nm],
-        alignment_model: type[SupportRotation],
-        rotations: Ranges,
-        **kwargs,
-    ):
-        ...
-
-    @overload
-    def align(
-        self,
-        template: np.ndarray,
-        mask: np.ndarray | None,
-        max_shifts: nm | tuple[nm, nm, nm],
-        alignment_model: type[FrequencyCutoffInput],
-        rotations: Ranges,
-        cutoff: float,
-        **kwargs,
-    ):
-        ...
 
     def align(
         self,
@@ -610,32 +573,28 @@ class SubtomogramLoader:
 
         return self.replace(molecules=mole_aligned)
 
-    def iter_subtomoprops(
+    def subtomoprops(
         self,
-        template: np.ndarray = None,
+        template: np.ndarray,
+        func: Callable[[np.ndarray, np.ndarray], _R],
         mask: np.ndarray | None = None,
-        properties: Iterable[Callable[[np.ndarray, np.ndarray], Any]] = (),
-    ) -> Generator[None, None, pd.DataFrame]:
-        results = {
-            f.__name__: np.zeros(len(self), dtype=np.float32) for f in properties
-        }
-        n = 0
-        if mask is None:
-            mask = 1
-        template_masked = template * mask
-        for i, subvol in enumerate(self.iter_subtomograms()):
-            for _prop in properties:
-                prop = _prop(subvol * mask, template_masked)
-                results[_prop.__name__][i] = prop
-            n += 1
-            yield
+    ) -> list[_R]:
 
-        return pd.DataFrame(results)
+        if mask is None:
+            _mask = 1
+        else:
+            _mask = mask
+        template_masked = template * _mask
+
+        tasks = self.construct_map(func, template_masked)
+        all_results: list[_R] = da.compute(tasks)[0]
+
+        return all_results
 
     def fsc(
         self,
         mask: np.ndarray | None = None,
-        seed: int | float | str | bytes | bytearray | None = 0,
+        seed: int | None = 0,
         n_set: int = 1,
         dfreq: float = 0.05,
     ) -> pd.DataFrame:
@@ -659,20 +618,24 @@ class SubtomogramLoader:
             A data frame with FSC results.
         """
         if mask is None:
-            mask = 1
+            _mask = 1
         else:
             self._check_shape(mask, "mask")
+            _mask = mask
+
+        if n_set <= 0:
+            raise ValueError("'n_set' must be positive.")
 
         img = self.average_split(n_set=n_set, seed=seed, squeeze=False)
         fsc_all: dict[str, np.ndarray] = {}
         for i in range(n_set):
             img0, img1 = img[i]
             freq, fsc = _utils.fourier_shell_correlation(
-                img0 * mask, img1 * mask, dfreq=dfreq
+                img0 * _mask, img1 * _mask, dfreq=dfreq
             )
             fsc_all[f"FSC-{i}"] = fsc
 
-        out: dict[str, np.ndarray] = {"freq": freq}
+        out: dict[str, np.ndarray] = {"freq": freq}  # type: ignore
         out.update(fsc_all)
         return pd.DataFrame(out)
 
@@ -680,7 +643,7 @@ class SubtomogramLoader:
 class ChunkedSubtomogramLoader(SubtomogramLoader):
     def __init__(
         self,
-        image: np.ndarray | da.core.Array,
+        image: _A,
         molecules: Molecules,
         output_shape: int | tuple[int, int, int],
         order: int = 3,
@@ -723,12 +686,7 @@ class ChunkedSubtomogramLoader(SubtomogramLoader):
             chunksize=chunksize,
         )
 
-    def iter_subtomograms(self) -> Iterator[np.ndarray]:
-        for subvols in self.get_subtomogram_chunk():
-            for subvol in subvols:
-                yield subvol
-
-    def get_subtomogram_chunk(self, chunk_index: int) -> Iterator[np.ndarray]:
+    def get_subtomogram_chunk(self, chunk_index: int) -> np.ndarray:
         """Generate subtomogram list chunk-wise."""
         image = self.image
         sl = slice(chunk_index * self.chunksize, (chunk_index + 1) * self.chunksize)

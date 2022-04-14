@@ -5,6 +5,7 @@ from scipy.fft import fftn, ifftn
 from ..molecules import Molecules
 from .._utils import compose_matrices
 from ..alignment._utils import normalize_rotations
+from .._types import nm, degree
 
 
 class TomogramGenerator:
@@ -22,14 +23,12 @@ class TomogramGenerator:
         grid_shape: tuple[int, int] = (10, 10),
         rotations=None,
         noise_sigma: float = 1,
-        scale: float = 1.0,
         seed: int = 0,
     ) -> None:
         self._template = template
         self._grid_shape = grid_shape
         self._quaternions = normalize_rotations(rotations)
         self._noise_sigma = noise_sigma
-        self._scale = float(scale)
         self._seed = seed
 
     @property
@@ -48,10 +47,6 @@ class TomogramGenerator:
     def noise_sigma(self):
         return self._noise_sigma
 
-    @property
-    def scale(self):
-        return self._scale
-
     def get_matrices(self):
         gy, gx = self.grid_shape
         quat_idx = np.random.choice(self.quaternions.shape[0], size=(gy * gx))
@@ -62,7 +57,7 @@ class TomogramGenerator:
         return compose_matrices(self.template.shape, rotators)
 
     def get_tomogram(
-        self, pad_width: int = 0, tilt_range: tuple[float, float] = (-90, 90)
+        self, pad_width: int = 0, tilt_range: tuple[degree, degree] = (-90, 90)
     ) -> np.ndarray:
         np.random.seed(self._seed)
         template = self.template
@@ -94,11 +89,11 @@ class TomogramGenerator:
         np.random.seed(None)
         return tomogram
 
-    def sample_molecules(self, max_distance: float = 3.0):
+    def sample_molecules(self, max_distance: nm = 3.0, scale: nm = 1.0):
         gy, gx = self.grid_shape
         shape_vec = np.array(self.template.shape)
-        offset = (shape_vec - 1) / 2 * self.scale
-        vy, vx = shape_vec[1:] * self.scale
+        offset = (shape_vec - 1) / 2 * scale
+        vy, vx = shape_vec[1:] * scale
         centers = []
         for i, j in wrange(gy, gx):
             centers.append(offset + np.array([0.0, vy * i, vx * j]))
@@ -108,10 +103,10 @@ class TomogramGenerator:
         )
 
 
-def _missing_wedge_mask(shape, tilt_range: tuple[float, float]) -> np.ndarray:
+def _missing_wedge_mask(shape, tilt_range: tuple[degree, degree]) -> np.ndarray:
     """
-    Create a missing-wedge binary mask image. 
-    
+    Create a missing-wedge binary mask image.
+
     Mask created by this function should be multiplied to Fourier transformed
     image.
 
@@ -126,7 +121,7 @@ def _missing_wedge_mask(shape, tilt_range: tuple[float, float]) -> np.ndarray:
     -------
     np.ndarray
         A binary mask.
-    """    
+    """
     radmin, radmax = np.deg2rad(tilt_range)
     x0 = (shape[2] - 1) / 2
     z0 = (shape[0] - 1) / 2

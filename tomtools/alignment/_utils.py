@@ -1,12 +1,13 @@
 from __future__ import annotations
 import itertools
 from functools import reduce, lru_cache
+from typing import Sequence
 import numpy as np
 from scipy.fft import rfftn, irfftn, fftn
 from scipy.signal import fftconvolve
 from scipy import ndimage as ndi
 
-from .._types import Ranges, RangeLike
+from .._types import Ranges, RangeLike, pixel
 from ..molecules import from_euler
 
 
@@ -40,9 +41,9 @@ def normalize_rotations(rotations: Ranges | None) -> np.ndarray:
         Corresponding quaternions in shape (N, 4).
     """
     if rotations is not None:
-        rotations = _normalize_ranges(rotations)
+        _rotations = _normalize_ranges(rotations)
         angles = []
-        for max_rot, step in rotations:
+        for max_rot, step in _rotations:
             if step == 0:
                 angles.append(np.zeros(1))
             else:
@@ -52,18 +53,18 @@ def normalize_rotations(rotations: Ranges | None) -> np.ndarray:
         quat: list[np.ndarray] = []
         for angs in itertools.product(*angles):
             quat.append(from_euler(np.array(angs), "zyx", degrees=True).as_quat())
-        rotations = np.stack(quat, axis=0)
+        quats = np.stack(quat, axis=0)
     else:
-        rotations = np.array([[0.0, 0.0, 0.0, 1.0]])
+        quats = np.array([[0.0, 0.0, 0.0, 1.0]])
 
-    return rotations
+    return quats
 
 
 # lowpass filter
 # Modified from skimage.filters._fft_based
 def lowpass_filter_ft(img: np.ndarray, cutoff: float, order: int = 2) -> np.ndarray:
     if cutoff >= 0.5 * np.sqrt(img.ndim) or cutoff <= 0:
-        return fftn(img)
+        return fftn(img)  # type: ignore
     weight = _get_ND_butterworth_filter(
         img.shape,
         cutoff,
@@ -84,7 +85,7 @@ def lowpass_filter(img: np.ndarray, cutoff: float, order: int = 2) -> np.ndarray
         high_pass=False,
         real=True,
     )
-    out: np.ndarray = irfftn(weight * rfftn(img))
+    out: np.ndarray = irfftn(weight * rfftn(img))  # type: ignore
     return out.real
 
 
@@ -97,11 +98,13 @@ def _get_ND_butterworth_filter(
     real: bool,
 ):
     ranges = []
-    for d, fc in zip(shape, cutoff):
-        axis = np.arange(-(d - 1) // 2, (d - 1) // 2 + 1, dtype=np.float32) / (d * fc)
+    for d in shape:
+        axis = np.arange(-(d - 1) // 2, (d - 1) // 2 + 1, dtype=np.float32) / (
+            d * cutoff
+        )
         ranges.append(np.fft.ifftshift(axis ** 2))
     if real:
-        limit = d // 2 + 1
+        limit = shape[-1] // 2 + 1
         ranges[-1] = ranges[-1][:limit]
     q2 = reduce(np.add, np.meshgrid(*ranges, indexing="ij", sparse=True))
     wfilt = 1 / (1 + q2 ** order)
@@ -118,7 +121,7 @@ def subpixel_pcc(
     f0: np.ndarray,
     f1: np.ndarray,
     upsample_factor: int,
-    max_shifts: tuple[float, ...] | None = None,
+    max_shifts: tuple[float, ...] | np.ndarray | None = None,
 ) -> tuple[np.ndarray, float]:
     if isinstance(max_shifts, (int, float)):
         max_shifts = (max_shifts,) * f0.ndim
@@ -140,7 +143,6 @@ def subpixel_pcc(
         upsampled_region_size = np.ceil(upsample_factor * 1.5)
         # Center of output array at dftshift + 1
         dftshift = np.fix(upsampled_region_size / 2.0)
-        upsample_factor = np.array(upsample_factor, dtype=np.float32)
         # Matrix multiply DFT around the current shift estimate
         sample_region_offset = dftshift - shifts * upsample_factor
         cross_correlation = _upsampled_dft(
@@ -150,7 +152,6 @@ def subpixel_pcc(
         power = abs2(cross_correlation)
 
         if max_shifts is not None:
-            max_shifts = np.asarray(max_shifts)
             _upsampled_left_shifts = (shifts + max_shifts) * upsample_factor
             _upsampled_right_shifts = (max_shifts - shifts) * upsample_factor
             power = crop_by_max_shifts(
@@ -173,11 +174,9 @@ def _upsampled_dft(
     axis_offsets: np.ndarray,
 ) -> np.ndarray:
     # if people pass in an integer, expand it to a list of equal-sized sections
-    upsampled_region_size = [
-        upsampled_region_size,
-    ] * data.ndim
+    upsampled_region_sizes = [upsampled_region_size] * data.ndim
 
-    dim_properties = list(zip(data.shape, upsampled_region_size, axis_offsets))
+    dim_properties = list(zip(data.shape, upsampled_region_sizes, axis_offsets))
 
     for (n_items, ups_size, ax_offset) in dim_properties[::-1]:
         kernel = (np.arange(ups_size) - ax_offset)[:, np.newaxis] * np.fft.fftfreq(
@@ -190,7 +189,7 @@ def _upsampled_dft(
 
 
 def abs2(a: np.ndarray) -> np.ndarray:
-    return a.real ** 2 + a.imag ** 2
+    return a.real ** 2 + a.imag ** 2  # type: ignore
 
 
 def crop_by_max_shifts(power: np.ndarray, left, right):
@@ -265,7 +264,7 @@ def subpixel_zncc(
 
     if upsample_factor > 1:
         coords = _create_mesh(
-            upsample_factor, maxima, max_shifts, midpoints, pad_width_eff
+            upsample_factor, maxima, max_shifts, midpoints, pad_width_eff  # type: ignore
         )
         local_response: np.ndarray = ndi.map_coordinates(
             response, coords, order=3, mode="reflect", prefilter=True
@@ -305,7 +304,7 @@ def _window_sum_3d(image, window_shape):
     return window_sum
 
 
-def _safe_sqrt(a: np.ndarray, fill=0):
+def _safe_sqrt(a: np.ndarray, fill: float = 0.0):
     out = np.full(a.shape, fill, dtype=np.float32)
     out = np.zeros_like(a)
     mask = a > 0
@@ -318,38 +317,38 @@ def _get_padding_params(
     shape0: tuple[int, ...],
     shape1: tuple[int, ...],
     max_shifts: tuple[int, ...] | None,
-) -> tuple[list[tuple[int, ...]], list[slice] | slice]:
+) -> tuple[list[tuple[int, ...]], tuple[slice, ...] | slice]:
     if max_shifts is None:
         pad_width = [(w, w) for w in shape1]
         sl = slice(None)
     else:
         pad_width: list[tuple[int, ...]] = []
-        sl: list[slice] = []
+        _sl: list[slice] = []
         for w, s0, s1 in zip(max_shifts, shape0, shape1):
             w_int = int(np.ceil(w + 3 - (s0 - s1) / 2))
             if w_int >= 0:
                 pad_width.append((w_int,) * 2)
-                sl.append(slice(None))
+                _sl.append(slice(None))
             else:
                 pad_width.append((0,) * 2)
-                sl.append(slice(-w_int, w_int, None))
-        sl = tuple(sl)
+                _sl.append(slice(-w_int, w_int, None))
+        sl = tuple(_sl)
 
     return pad_width, sl
 
 
 def _create_mesh(
     upsample_factor: int,
-    maxima: tuple[int, ...],
-    max_shifts: tuple[int, ...] | None,
-    midpoints: tuple[int, ...],
-    pad_width_eff: tuple[int, ...],
+    maxima: Sequence[pixel],
+    max_shifts: Sequence[pixel] | None,
+    midpoints: Sequence[pixel],
+    pad_width_eff: Sequence[pixel],
 ):
     if max_shifts is not None:
         shifts = np.array(maxima, dtype=np.float32) - np.array(
             midpoints, dtype=np.float32
-        )
-        max_shifts = np.array(max_shifts, dtype=np.float32)
+        )  # type: ignore
+        max_shifts = np.array(max_shifts, dtype=np.float32)  # type: ignore
         left = -shifts - max_shifts
         right = -shifts + max_shifts
         local_shifts = tuple(

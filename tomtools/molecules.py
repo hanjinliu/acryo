@@ -5,16 +5,16 @@ import numpy as np
 import pandas as pd
 from numpy.typing import ArrayLike
 from scipy.spatial.transform import Rotation
+from ._types import nm
 
 _CSV_COLUMNS = ["z", "y", "x", "zvec", "yvec", "xvec"]
-nm = float  # alias
 
 
 class Molecules:
     """
     Object that represents position- and orientation-defined molecules.
 
-    Positions are represented by a (N, 3) ``np.ndarray`` and orientations 
+    Positions are represented by a (N, 3) ``np.ndarray`` and orientations
     are represented by a ``scipy.spatial.transform.Rotation`` object.
     Features of each molecule can also be recorded by the ``features``
     property.
@@ -39,7 +39,7 @@ class Molecules:
 
         if pos.shape[1] != 3:
             raise ValueError("Shape of pos must be (N, 3).")
-        
+
         if rot is None:
             quat = np.stack([np.array([0, 0, 0, 1])] * pos.shape[0], axis=0)
             rot = Rotation.from_quat(quat)
@@ -59,29 +59,33 @@ class Molecules:
 
     @classmethod
     def from_axes(
-        cls, 
-        pos: np.ndarray, 
-        z: np.ndarray | None = None, 
+        cls,
+        pos: np.ndarray,
+        z: np.ndarray | None = None,
         y: np.ndarray | None = None,
         x: np.ndarray | None = None,
     ) -> Molecules:
         """Construct molecule cloud with orientation from two of their local axes."""
         pos = np.atleast_2d(pos)
-        
+
         if sum((_ax is not None) for _ax in [z, y, x]) != 2:
             raise TypeError("You must specify two out of z, y, and x.")
-        
+
         # NOTE: np.cross assumes vectors are in xyz order. However, all the arrays here are defined
         # in zyx order. To build right-handed coordinates, we must invert signs when using np.cross.
         if z is None:
+            if x is None or y is None:
+                raise TypeError("Two of x, y, z is needed.")
             x = np.atleast_2d(x)
             y = np.atleast_2d(y)
             z = -np.cross(x, y, axis=1)
         elif y is None:
+            if x is None or z is None:
+                raise TypeError("Two of x, y, z is needed.")
             z = np.atleast_2d(z)
             x = np.atleast_2d(x)
             y = -np.cross(z, x, axis=1)
-        
+
         rotator = axes_to_rotator(z, y)
         return cls(pos, rotator)
 
@@ -101,7 +105,7 @@ class Molecules:
     @classmethod
     def from_csv(cls, path: str, **kwargs) -> Molecules:
         """Load csv as a Molecules object."""
-        df: pd.DataFrame = pd.read_csv(path, **kwargs)
+        df: pd.DataFrame = pd.read_csv(path, **kwargs)  # type: ignore
         if df.shape[1] < 6:
             raise ValueError(
                 "CSV must have more than or equal six columns but got "
@@ -165,10 +169,7 @@ class Molecules:
         """Return the number of molecules."""
         return self._pos.shape[0]
 
-    def __getitem__(
-        self,
-        key: int | slice | list[int] | np.ndarray
-    ) -> Molecules:
+    def __getitem__(self, key: int | slice | list[int] | np.ndarray) -> Molecules:
         return self.subset(key)
 
     @property
@@ -222,13 +223,13 @@ class Molecules:
         """
         Create a subset of molecules by slicing.
 
-        Any slicing supported in ``numpy.ndarray``, except for integer, can be 
+        Any slicing supported in ``numpy.ndarray``, except for integer, can be
         used here. Molecule positions and angles are sliced at the same time.
 
         Parameters
         ----------
         spec : int, slice, list of int, or ndarray
-            Specifier that defines which molecule will be used. Any objects 
+            Specifier that defines which molecule will be used. Any objects
             that numpy slicing are defined are supported. For instance,
             ``[2, 3, 5]`` means the 2nd, 3rd and 5th molecules will be used
             (zero-indexed), and ``slice(10, 20)`` means the 10th to 19th
@@ -309,37 +310,35 @@ class Molecules:
             z_ax = z_ax.astype(np.float32)
 
             coords = (
-                z_ax[:, :, np.newaxis, np.newaxis] +
-                y_ax[:, np.newaxis, :, np.newaxis] +
-                x_ax[:, np.newaxis, np.newaxis, :]
+                z_ax[:, :, np.newaxis, np.newaxis]
+                + y_ax[:, np.newaxis, :, np.newaxis]
+                + x_ax[:, np.newaxis, np.newaxis, :]
             )
             shifts = self.pos[index] / scale
             coords += shifts[:, np.newaxis, np.newaxis, np.newaxis]  # unit: pixel
         elif isinstance(index, slice):
             start, stop, step = index.indices(len(self))
             coords = np.stack(
-                [self.cartesian_at(i, shape, scale)
-                 for i in range(start, stop, step)],
+                [self.cartesian_at(i, shape, scale) for i in range(start, stop, step)],
                 axis=0,
             )
         else:
             coords = np.stack(
-                [self.cartesian_at(i, shape, scale)
-                 for i in index],
+                [self.cartesian_at(i, shape, scale) for i in index],
                 axis=0,
             )
-                
+
         return coords
 
     def matrix(self) -> np.ndarray:
         """
-        Calculate rotation matrices that align molecules in such orientations 
+        Calculate rotation matrices that align molecules in such orientations
         that ``vec`` belong to the object.
 
         Returns
         -------
         (N, 3, 3) ndarray
-            Rotation matrices. Rotations represented by these matrices transform 
+            Rotation matrices. Rotations represented by these matrices transform
             molecules to the same orientations, i.e., align all the molecules.
         """
         return self._rotator.as_matrix()
@@ -358,7 +357,7 @@ class Molecules:
             same. Extrinsic and intrinsic rotations cannot be mixed in one function
             call.
         degrees: bool, default is False
-            Copy of ``scipy.spatial.transform.Rotation.as_euler``. Returned 
+            Copy of ``scipy.spatial.transform.Rotation.as_euler``. Returned
             angles are in degrees if this flag is True, else they are in radians.
 
         Returns
@@ -383,7 +382,7 @@ class Molecules:
 
     def rotvec(self) -> np.ndarray:
         """
-        Calculate rotation vectors that transforms a source vector to vectors 
+        Calculate rotation vectors that transforms a source vector to vectors
         that belong to the object.
 
         Returns
@@ -397,8 +396,8 @@ class Molecules:
         """
         Translate molecule positions by ``shifts``.
 
-        Shifts are applied in world coordinates, not internal coordinates of 
-        every molecules. If molecules should be translated in their own 
+        Shifts are applied in world coordinates, not internal coordinates of
+        every molecules. If molecules should be translated in their own
         coordinates, such as translating toward y-direction of each molecules
         by 1.0 nm, use ``translate_internal`` instead. Translation operation
         does not convert molecule orientations.
@@ -408,7 +407,7 @@ class Molecules:
         shifts : (3,) or (N, 3) array
             Spatial shift of molecules.
         copy : bool, default is True
-            If true, create a new instance, otherwise overwrite the existing 
+            If true, create a new instance, otherwise overwrite the existing
             instance.
 
         Returns
@@ -427,19 +426,14 @@ class Molecules:
             out = self
         return out
 
-    def translate_internal(
-        self, 
-        shifts: ArrayLike, 
-        *,
-        copy: bool = True
-    ) -> Molecules:
+    def translate_internal(self, shifts: ArrayLike, *, copy: bool = True) -> Molecules:
         """
         Translate molecule positions internally by ``shifts``.
 
         Shifts are applied in world coordinates, not internal coordinates of
-        every molecules. If molecules should be translated in their own 
-        coordinates, such as translating toward y-direction of each molecules 
-        by 1.0 nm, use ``translate_internal`` instead. Translation operation 
+        every molecules. If molecules should be translated in their own
+        coordinates, such as translating toward y-direction of each molecules
+        by 1.0 nm, use ``translate_internal`` instead. Translation operation
         does not convert molecule orientations.
 
         Parameters
@@ -447,7 +441,7 @@ class Molecules:
         shifts : (3,) or (N, 3) array
             Spatial shift of molecules.
         copy : bool, default is True
-            If true, create a new instance, otherwise overwrite the existing 
+            If true, create a new instance, otherwise overwrite the existing
             instance.
 
         Returns
@@ -459,17 +453,17 @@ class Molecules:
         return self.translate(world_shifts, copy=copy)
 
     def translate_random(
-        self, 
-        max_distance: nm, 
-        *, 
-        seed=None, 
-        copy=True
+        self,
+        max_distance: nm,
+        *,
+        seed: int | None = None,
+        copy: bool = True,
     ) -> Molecules:
         """
         Apply random translation to each molecule.
 
-        Translation range is restricted by a maximum distance and translation 
-        values are uniformly distributed in this region. Different translations 
+        Translation range is restricted by a maximum distance and translation
+        values are uniformly distributed in this region. Different translations
         will be applied to different molecules.
 
         Parameters
@@ -479,7 +473,7 @@ class Molecules:
         seed : int, optional
             Random seed, by default None
         copy : bool, default is True
-            If true, create a new instance, otherwise overwrite the existing 
+            If true, create a new instance, otherwise overwrite the existing
             instance.
 
         Returns
@@ -509,7 +503,7 @@ class Molecules:
     ) -> Molecules:
         """
         Rotate molecules using internal rotation vector.
-        
+
         Vector components are calculated in the molecule-coordinate.
 
         Parameters
@@ -542,10 +536,10 @@ class Molecules:
         Parameters
         ----------
         matrix : ArrayLike
-            Rotation matrices, whose length must be same as the number of 
+            Rotation matrices, whose length must be same as the number of
             molecules.
         copy : bool, default is True
-            If true, create a new instance, otherwise overwrite the existing 
+            If true, create a new instance, otherwise overwrite the existing
             instance.
 
         Returns
@@ -565,7 +559,7 @@ class Molecules:
         quat : ArrayLike
             Rotation quaternion.
         copy : bool, default is True
-            If true, create a new instance, otherwise overwrite the existing 
+            If true, create a new instance, otherwise overwrite the existing
             instance.
 
         Returns
@@ -591,7 +585,7 @@ class Molecules:
         angles: array-like
             Euler angles of rotation.
         copy : bool, default is True
-            If true, create a new instance, otherwise overwrite the existing 
+            If true, create a new instance, otherwise overwrite the existing
             instance.
 
         Returns
@@ -599,7 +593,7 @@ class Molecules:
         Molecules
             Instance with updated orientation.
         """
-        rotator = from_euler(angles, seq, degrees)
+        rotator = from_euler(np.asarray(angles), seq, degrees)
         return self.rotate_by(rotator, copy)
 
     def rotate_by_rotvec(self, vector: ArrayLike, copy: bool = True) -> Molecules:
@@ -611,7 +605,7 @@ class Molecules:
         vector: array-like
             Rotation vectors.
         copy : bool, default is True
-            If true, create a new instance, otherwise overwrite the existing 
+            If true, create a new instance, otherwise overwrite the existing
             instance.
 
         Returns
@@ -654,7 +648,7 @@ class Molecules:
             self._rotator = rot
             out = self
         return out
-    
+
     def linear_transform(
         self,
         shift: ArrayLike,
@@ -665,17 +659,13 @@ class Molecules:
         rotvec = rotator.as_rotvec()
         if inv:
             shift_corrected = rotator.apply(shift, inverse=True)
-            return (
-                self
-                .rotate_by_rotvec_internal(-rotvec)
-                .translate_internal(shift_corrected)
+            return self.rotate_by_rotvec_internal(-rotvec).translate_internal(
+                shift_corrected
             )
         else:
             shift_corrected = rotator.apply(shift)
-            return (
-                self
-                .translate_internal(shift_corrected)
-                .rotate_by_rotvec_internal(rotvec)
+            return self.translate_internal(shift_corrected).rotate_by_rotvec_internal(
+                rotvec
             )
 
 
@@ -684,11 +674,7 @@ def _translate_euler(seq: str) -> str:
     return seq[::-1].translate(table)
 
 
-def from_euler(
-    angles: np.ndarray,
-    seq: str = "ZXZ",
-    degrees: bool = False
-) -> Rotation:
+def from_euler(angles: np.ndarray, seq: str = "ZXZ", degrees: bool = False) -> Rotation:
     """Create a rotator from Euler angles using zyx-coordinate system."""
     seq = _translate_euler(seq)
     return Rotation.from_euler(seq, angles[..., ::-1], degrees)
@@ -696,41 +682,43 @@ def from_euler(
 
 def _normalize(a: np.ndarray) -> np.ndarray:
     """Normalize vectors to length 1. Input must be (N, 3)."""
-    return a / np.sqrt(np.sum(a**2, axis=1))[:, np.newaxis]
+    return a / np.sqrt(np.sum(a ** 2, axis=1))[:, np.newaxis]
+
 
 def _extract_orthogonal(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """Extract component of b orthogonal to a."""
     a_norm = _normalize(a)
     return b - np.sum(a_norm * b, axis=1)[:, np.newaxis] * a_norm
 
+
 def axes_to_rotator(z, y) -> Rotation:
     ref = _normalize(np.atleast_2d(y))
-    
+
     n = ref.shape[0]
     yx = np.arctan2(ref[:, 2], ref[:, 1])
-    zy = np.arctan(-ref[:, 0]/np.abs(ref[:, 1]))
-    
+    zy = np.arctan(-ref[:, 0] / np.abs(ref[:, 1]))
+
     rot_vec_yx = np.zeros((n, 3))
     rot_vec_yx[:, 0] = yx
     rot_yx = Rotation.from_rotvec(rot_vec_yx)
-    
+
     rot_vec_zy = np.zeros((n, 3))
     rot_vec_zy[:, 2] = zy
     rot_zy = Rotation.from_rotvec(rot_vec_zy)
-    
+
     rot1 = rot_yx * rot_zy
-    
+
     if z is None:
         return rot1
-    
+
     vec = _normalize(np.atleast_2d(_extract_orthogonal(ref, z)))
-    
-    vec_trans = rot1.apply(vec, inverse=True)   # in zx-plane
-    
-    thetas = np.arctan2(vec_trans[..., 0], vec_trans[..., 2]) - np.pi/2
-    
+
+    vec_trans = rot1.apply(vec, inverse=True)  # in zx-plane
+
+    thetas = np.arctan2(vec_trans[..., 0], vec_trans[..., 2]) - np.pi / 2
+
     rot_vec_zx = np.zeros((n, 3))
     rot_vec_zx[:, 1] = thetas
     rot2 = Rotation.from_rotvec(rot_vec_zx)
-    
+
     return rot1 * rot2

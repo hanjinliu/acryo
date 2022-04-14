@@ -13,7 +13,7 @@ from .._utils import compose_matrices
 class AlignmentResult(NamedTuple):
     """The optimal alignment result."""
 
-    label: int | tuple[int, int]
+    label: int
     shift: np.ndarray
     quat: np.ndarray
     corr: float
@@ -41,10 +41,10 @@ class BaseAlignmentModel(ABC):
         if mask is None:
             self.mask = 1
         else:
-            if template.shape[-3:] != mask.shape:
+            if self._template.shape[-3:] != mask.shape:
                 raise ValueError(
                     "Shape mismatch in zyx axes between tempalte image "
-                    f"{template.shape} and mask image {mask.shape})."
+                    f"{self._template.shape} and mask image {mask.shape})."
                 )
             self.mask = mask
 
@@ -86,7 +86,7 @@ class BaseAlignmentModel(ABC):
                 axis=0,
             )
         else:
-            template_input = self.pre_transform(template_input)
+            template_input = self.pre_transform(self._template)
         return template_input
 
     def align(
@@ -143,9 +143,11 @@ class BaseAlignmentModel(ABC):
         rotator = Rotation.from_quat(result.quat)
         matrix = compose_matrices(img.shape, [rotator])[0]
         if cval is None:
-            cval = np.percentile(img, 1)
-        img_shifted = ndi.shift(img, result.shift, cval=cval)
-        img_trans = ndi.affine_transform(img_shifted, matrix, cval=cval)
+            _cval = np.percentile(img, 1)
+        else:
+            _cval = cval
+        img_shifted = ndi.shift(img, result.shift, cval=_cval)
+        img_trans = ndi.affine_transform(img_shifted, matrix, cval=_cval)
         return img_trans, result
 
     def _optimize_single(
@@ -273,7 +275,7 @@ class SupportRotation(BaseAlignmentModel):
                         )
                         for mat in matrices
                     ],
-                    axis="p",
+                    axis=0,
                 )
         else:
             if self.is_multi_templates:
@@ -315,7 +317,7 @@ class FrequencyCutoffInput(SupportRotation):
 class FourierLowpassInput(FrequencyCutoffInput):
     def pre_transform(self, img: np.ndarray) -> np.ndarray:
         """Apply low-pass filter and FFT."""
-        return lowpass_filter_ft(cutoff=self._cutoff)
+        return lowpass_filter_ft(img, cutoff=self._cutoff)
 
 
 class RealLowpassInput(FrequencyCutoffInput):

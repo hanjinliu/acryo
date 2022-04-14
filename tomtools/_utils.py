@@ -52,7 +52,7 @@ def multi_map_coordinates(
     order: int = 3,
     mode: str = "constant",
     cval: float | Callable[[np.ndarray], float] = 0.0,
-) -> list[np.ndarray]:
+) -> np.ndarray:
     """
     Multiple map-coordinate in parallel.
 
@@ -90,7 +90,7 @@ def multi_map_coordinates(
         cval = cval(img)
     input_img = img
 
-    imgs = []
+    imgs: list[np.ndarray] = []
     for crds in coordinates:
         imgs.append(
             ndi.map_coordinates(
@@ -204,24 +204,24 @@ def fourier_shell_correlation(
     f0: np.ndarray = np.fft.fftshift(fftn(img0))
     f1: np.ndarray = np.fft.fftshift(fftn(img1))
 
-    cov = f0.real * f1.real + f0.imag * f1.imag
-    pw0 = f0.real ** 2 + f0.imag ** 2
-    pw1 = f1.real ** 2 + f1.imag ** 2
+    cov = f0.real * f1.real + f0.imag * f1.imag  # type: ignore
+    pw0 = f0.real ** 2 + f0.imag ** 2  # type: ignore
+    pw1 = f1.real ** 2 + f1.imag ** 2  # type: ignore
 
     out = radial_sum(cov) / np.sqrt(radial_sum(pw0) * radial_sum(pw1))
     freq = (np.arange(len(out)) + 0.5) * dfreq
     return freq, out
 
 
-def bin_image(img: np.ndarray, binsize: int) -> np.ndarray:
-    slices: list[slice] = []
-    shapes: list[int] = []
+def bin_image(img: np.ndarray | da.core.Array, binsize: int) -> np.ndarray:
+    _slices: list[slice] = []
+    _shapes: list[int] = []
     for s in img.shape:
         npix, res = divmod(s, binsize)
-        slices.append(slice(None, s - res))
-        shapes.extend([npix, binsize])
-    slices = tuple(slices)
-    shapes = tuple(shapes)
+        _slices.append(slice(None, s - res))
+        _shapes.extend([npix, binsize])
+    slices = tuple(_slices)
+    shapes = tuple(_shapes)
     img_reshaped = np.reshape(img[slices], shapes)
     axis = tuple(i * 2 + 1 for i in range(img.ndim))
     return np.sum(img_reshaped, axis=axis)

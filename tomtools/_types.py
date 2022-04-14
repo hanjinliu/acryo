@@ -1,4 +1,9 @@
-from typing import Union
+from typing_extensions import TypeAlias
 
 RangeLike = tuple[float, float]
-Ranges = Union[RangeLike, tuple[RangeLike, RangeLike, RangeLike]]
+Ranges = tuple[RangeLike, RangeLike, RangeLike]
+
+# type alias
+nm: TypeAlias = float
+degree: TypeAlias = float
+pixel: TypeAlias = int
