@@ -22,12 +22,14 @@ class TomogramGenerator:
         grid_shape: tuple[int, int] = (10, 10),
         rotations=None,
         noise_sigma: float = 1,
+        scale: float = 1.0,
         seed: int = 0,
     ) -> None:
         self._template = template
         self._grid_shape = grid_shape
         self._quaternions = normalize_rotations(rotations)
         self._noise_sigma = noise_sigma
+        self._scale = float(scale)
         self._seed = seed
 
     @property
@@ -48,7 +50,7 @@ class TomogramGenerator:
 
     @property
     def scale(self):
-        return self.template.scale.x
+        return self._scale
 
     def get_matrices(self):
         gy, gx = self.grid_shape
@@ -86,7 +88,7 @@ class TomogramGenerator:
             mw = _missing_wedge_mask(template.shape, tilt_range=tilt_range)
             for i, j in wrange(gy, gx):
                 ft = np.fft.fftshift(fftn(mols[i][j]))
-                mols[i][j] = np.fft.ifftshift(ifftn(ft * mw))
+                mols[i][j] = np.real(np.fft.ifftshift(ifftn(ft * mw)))
 
         tomogram: np.ndarray = np.block(mols)
         np.random.seed(None)
@@ -108,9 +110,23 @@ class TomogramGenerator:
 
 def _missing_wedge_mask(shape, tilt_range: tuple[float, float]) -> np.ndarray:
     """
-    Create a missing-wedge binary mask image. This mask should be multiplied to
-    Fourier transformed image.
-    """
+    Create a missing-wedge binary mask image. 
+    
+    Mask created by this function should be multiplied to Fourier transformed
+    image.
+
+    Parameters
+    ----------
+    shape : tuple of int
+        Shape of the output array.
+    tilt_range : tuple[float, float]
+        Tomogram tilt range in degree.
+
+    Returns
+    -------
+    np.ndarray
+        A binary mask.
+    """    
     radmin, radmax = np.deg2rad(tilt_range)
     x0 = (shape[2] - 1) / 2
     z0 = (shape[0] - 1) / 2

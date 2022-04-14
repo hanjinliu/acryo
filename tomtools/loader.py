@@ -39,16 +39,22 @@ def subtomogram_loader(
     molecules: Molecules,
     output_shape: int | tuple[int, int, int],
     order: int = 3,
+    scale: float = 1.0,
     chunksize: int = 1,
 ):
     if not image.ndim == 3:
         raise TypeError("Input image must be 3D.")
+    kwargs = dict(
+        image=image,
+        molecules=molecules,
+        output_shape=output_shape,
+        order=order,
+        scale=scale,
+    )
     if chunksize == 1:
-        return SubtomogramLoader(image, molecules, output_shape, order)
+        return SubtomogramLoader(**kwargs)
     else:
-        return ChunkedSubtomogramLoader(
-            image, molecules, output_shape, order, chunksize
-        )
+        return ChunkedSubtomogramLoader(**kwargs, chunksize=chunksize)
 
 
 class SubtomogramLoader:
@@ -88,30 +94,63 @@ class SubtomogramLoader:
         order: int = 3,
         scale: nm = 1.0,
     ) -> None:
-        ndim = 3
-        self._image_ref = weakref.ref(image)
+        # check type of input image
+        if isinstance(image, np.ndarray):
+            self._image_ref = weakref.ref(image)
+        elif isinstance(image, da.core.Array):
+            self._image_ref = image
+        else:
+            raise TypeError(
+                "Input image of a SubtomogramLoader instance must be np.ndarray "
+                f"or dask.core.Array, got {type(image)}."
+            )
+
+        # check type of molecules
+        if not isinstance(molecules, Molecules):
+            raise TypeError(
+                "The second argument 'molecules' must be a Molecules object, got"
+                f"{type(molecules)}."
+            )
         self._molecules = molecules
+
+        # check interpolation order
+        if order not in (0, 1, 3):
+            raise ValueError(
+                f"The third argument 'order' must be 0, 1 or 3, got {order!r}."
+            )
         self._order = order
+
+        # check output_shape
         if isinstance(output_shape, int):
-            output_shape = (output_shape,) * ndim
+            output_shape = (output_shape,) * image.ndim
         else:
             output_shape = tuple(output_shape)
+
         self._output_shape = output_shape
-        self._cached_dask_array: da.core.Array | None = None
+
+        # check scale
         self._scale = float(scale)
+        if self._scale <= 0:
+            raise ValueError("Negative scale is not allowed.")
+
+        self._cached_dask_array: da.core.Array | None = None
 
     def __repr__(self) -> str:
-        shape = "x".join(self.image.shape)
+        shape = "x".join(map(str, self.image.shape))
         mole_repr = repr(self.molecules)
         return (
-            f"{self.__class__.__name__}(tomogram=[{shape}], molecules={mole_repr}"
-            f"output_shape={self.output_shape}, order={self.order})"
+            f"{self.__class__.__name__}(tomogram=[{shape}], molecules={mole_repr}, "
+            f"output_shape={self.output_shape}, order={self.order}, "
+            f"scale={self.scale:.4f})"
         )
 
     @property
     def image(self) -> _A:
         """Return tomogram image."""
-        image = self._image_ref()
+        if isinstance(self._image_ref, weakref.ReferenceType):
+            image = self._image_ref()
+        else:
+            image = self._image_ref
         if image is None:
             raise ValueError("No tomogram found.")
         return image
@@ -179,7 +218,7 @@ class SubtomogramLoader:
             scale=self.scale * binsize,
         )
 
-        out._image_ref = weakref(binned_image)
+        out._image_ref = weakref.ref(binned_image)
         return out
 
     def _check_shape(self, template: np.ndarray, name: str = "template") -> None:
@@ -633,8 +672,9 @@ class SubtomogramLoader:
             )
             fsc_all[f"FSC-{i}"] = fsc
 
-        df = pd.DataFrame({"freq": freq})
-        return pd.concat([df, fsc_all], axis=1)
+        out: dict[str, np.ndarray] = {"freq": freq}
+        out.update(fsc_all)
+        return pd.DataFrame(out)
 
 
 class ChunkedSubtomogramLoader(SubtomogramLoader):
@@ -644,9 +684,10 @@ class ChunkedSubtomogramLoader(SubtomogramLoader):
         molecules: Molecules,
         output_shape: int | tuple[int, int, int],
         order: int = 3,
+        scale: nm = 1.0,
         chunksize: int = 100,
     ) -> None:
-        super().__init__(image, molecules, output_shape, order)
+        super().__init__(image, molecules, output_shape, order, scale=scale)
         self._chunksize = chunksize
 
     @property
@@ -678,6 +719,7 @@ class ChunkedSubtomogramLoader(SubtomogramLoader):
             molecules=molecules,
             output_shape=output_shape,
             order=order,
+            scale=scale,
             chunksize=chunksize,
         )
 

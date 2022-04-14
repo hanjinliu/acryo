@@ -2,7 +2,7 @@ from __future__ import annotations
 import itertools
 from functools import reduce, lru_cache
 import numpy as np
-from scipy.fft import rfftn, irfftn
+from scipy.fft import rfftn, irfftn, fftn
 from scipy.signal import fftconvolve
 from scipy import ndimage as ndi
 
@@ -63,16 +63,27 @@ def normalize_rotations(rotations: Ranges | None) -> np.ndarray:
 # Modified from skimage.filters._fft_based
 def lowpass_filter_ft(img: np.ndarray, cutoff: float, order: int = 2) -> np.ndarray:
     if cutoff >= 0.5 * np.sqrt(img.ndim) or cutoff <= 0:
-        return img
-    weight = _get_ND_butterworth_filter(img.shape, cutoff, order, False, True)
-    out = weight * rfftn(img)
-    return out
+        return fftn(img)
+    weight = _get_ND_butterworth_filter(
+        img.shape,
+        cutoff,
+        order,
+        high_pass=False,
+        real=False,
+    )
+    return weight * fftn(img)
 
 
 def lowpass_filter(img: np.ndarray, cutoff: float, order: int = 2) -> np.ndarray:
     if cutoff >= 0.5 * np.sqrt(img.ndim) or cutoff <= 0:
         return img
-    weight = _get_ND_butterworth_filter(img.shape, cutoff, order, False, True)
+    weight = _get_ND_butterworth_filter(
+        img.shape,
+        cutoff,
+        order,
+        high_pass=False,
+        real=True,
+    )
     out: np.ndarray = irfftn(weight * rfftn(img))
     return out.real
 
