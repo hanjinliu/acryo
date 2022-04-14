@@ -1,7 +1,6 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING, Iterable
 import numpy as np
-import impy as ip
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
@@ -14,8 +13,8 @@ class PcaClassifier:
 
     def __init__(
         self,
-        image_stack: ip.ImgArray,
-        mask_image: ip.ImgArray | None = None,
+        image_stack: np.ndarray,
+        mask_image: np.ndarray | None = None,
         n_components: int = 2,
         n_clusters: int = 2,
         seed: int | None = 0,
@@ -48,10 +47,10 @@ class PcaClassifier:
         self._labels = self._kmeans.fit_predict(self.get_transform())
         return self
 
-    def transform(self, input: ip.ImgArray, mask: bool = True) -> np.ndarray:
+    def transform(self, input: np.ndarray, mask: bool = True) -> np.ndarray:
         if mask:
             input = input * mask
-        flat = input.value.reshape(input.shape[0], -1)
+        flat = input.reshape(input.shape[0], -1)
         return self._pca.transform(flat)
 
     def predict(self, input) -> np.ndarray:
@@ -59,12 +58,12 @@ class PcaClassifier:
         labels = self._kmeans.predict(transformed)
         return labels
 
-    def _image_flat(self, mask: bool = False) -> ip.ImgArray:
+    def _image_flat(self, mask: bool = False) -> np.ndarray:
         if mask:
             _input = self._image * self._mask
         else:
             _input = self._image
-        return _input.value.reshape(self._n_image, -1)
+        return _input.reshape(self._n_image, -1)
 
     def get_transform(self, labels: Iterable[int] | None = None) -> np.ndarray:
         """
@@ -100,22 +99,19 @@ class PcaClassifier:
         ax.scatter(transformed[:, ax0], transformed[:, ax1])
         return ax
 
-    def get_bases(self) -> ip.ImgArray:
+    def get_bases(self) -> np.ndarray:
         """
         Get base images (principal axes) as image stack.
 
         Returns
         -------
-        ip.ImgArray
+        np.ndarray
             Same axes as input image stack, while the axis "p" corresponds to the identifier
             of bases.
         """
-        bases = self.pca.components_.reshape(self.n_components, *self._shape)
-        out = ip.asarray(bases, axes=self._image.axes)
-        out.set_scale(self._image)
-        return out
+        return self.pca.components_.reshape(self.n_components, *self._shape)
 
-    def split_clusters(self) -> list[ip.ImgArray]:
+    def split_clusters(self) -> list[np.ndarray]:
         """
         Split input image stack into list of image stacks according to the labels.
 
@@ -123,9 +119,8 @@ class PcaClassifier:
         only one cluster will be returned. If input image stack has ``"pzyx"`` axes,
         list of ``"pzyx"`` images will be returned.
         """
-        output: list[ip.ImgArray] = []
+        output: list[np.ndarray] = []
         for i in range(self.n_clusters):
             img0 = self._image[self._labels == i]
-            img0.set_scale(self._image)
             output.append(img0)
         return output

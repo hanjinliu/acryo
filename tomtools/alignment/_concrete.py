@@ -1,5 +1,4 @@
 import numpy as np
-import impy as ip
 from ._base import FourierLowpassInput, RealLowpassInput
 from ._utils import subpixel_pcc, subpixel_zncc
 
@@ -9,8 +8,8 @@ class PCCAlignment(FourierLowpassInput):
 
     def optimize(
         self,
-        subvolume: ip.ImgArray,
-        template: ip.ImgArray,
+        subvolume: np.ndarray,
+        template: np.ndarray,
         max_shifts: tuple[float, float, float],
     ) -> tuple[np.ndarray, np.ndarray, float]:
         """Optimize."""
@@ -25,8 +24,8 @@ class ZNCCAlignment(RealLowpassInput):
 
     def optimize(
         self,
-        subvolume: ip.ImgArray,
-        template: ip.ImgArray,
+        subvolume: np.ndarray,
+        template: np.ndarray,
         max_shifts: tuple[float, float, float],
     ) -> tuple[np.ndarray, np.ndarray, float]:
         """Optimize."""

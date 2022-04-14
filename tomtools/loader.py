@@ -16,6 +16,7 @@ import pandas as pd
 from scipy.spatial.transform import Rotation
 import numpy as np
 from dask import array as da, delayed
+
 from .alignment import (
     BaseAlignmentModel,
     ZNCCAlignment,
@@ -72,6 +73,11 @@ class SubtomogramLoader:
         - 0 = Nearest neighbor
         - 1 = Linear interpolation
         - 3 = Cubic interpolation
+    scale : float, default is 1.0
+        Physical scale of pixel, such as nm. This value does not affect
+        averaging/alignment results but molecule coordinates are multiplied
+        by this value. This parameter is useful when another loader with
+        binned image is created.
     """
 
     def __init__(
@@ -80,9 +86,10 @@ class SubtomogramLoader:
         molecules: Molecules,
         output_shape: int | tuple[int, int, int],
         order: int = 3,
+        scale: nm = 1.0,
     ) -> None:
         ndim = 3
-        self.image = image
+        self._image_ref = weakref.ref(image)
         self._molecules = molecules
         self._order = order
         if isinstance(output_shape, int):
@@ -91,6 +98,7 @@ class SubtomogramLoader:
             output_shape = tuple(output_shape)
         self._output_shape = output_shape
         self._cached_dask_array: da.core.Array | None = None
+        self._scale = float(scale)
 
     def __repr__(self) -> str:
         shape = "x".join(self.image.shape)
@@ -108,15 +116,10 @@ class SubtomogramLoader:
             raise ValueError("No tomogram found.")
         return image
 
-    @image.setter
-    def image(self, image: _A):
-        """Set tomogram as a weak reference."""
-        self._image_ref = weakref.ref(image)
-
     @property
     def scale(self) -> nm:
-        """Get the scale (nm/px) of tomogram."""
-        return self.image.scale.x
+        """Get the physical scale of tomogram."""
+        return self._scale
 
     @property
     def output_shape(self) -> tuple[int, ...]:
@@ -142,6 +145,7 @@ class SubtomogramLoader:
         molecules: Molecules | None = None,
         output_shape: int | tuple[int, int, int] | None = None,
         order: int | None = None,
+        scale: float | None = None,
     ) -> Self:
         """Return a new instance with different parameter(s)."""
         if molecules is None:
@@ -150,12 +154,33 @@ class SubtomogramLoader:
             output_shape = self.output_shape
         if order is None:
             order = self.order
+        if scale is None:
+            scale = self.scale
         return self.__class__(
             self.image,
             molecules=molecules,
             output_shape=output_shape,
             order=order,
+            scale=scale,
         )
+
+    def copy(self) -> Self:
+        """Create a shallow copy of the loader."""
+        return self.replace()
+
+    def binning(self, binsize: int = 2, *, compute: bool = True) -> Self:
+        tr = -(binsize - 1) / 2 * self.scale
+        molecules = self.molecules.translate([tr, tr, tr])
+        binned_image = _utils.bin_image(self.image, binsize)
+        if isinstance(binned_image, da.core.Array) and compute:
+            binned_image = binned_image.compute()
+        out = self.replace(
+            molecules=molecules,
+            scale=self.scale * binsize,
+        )
+
+        out._image_ref = weakref(binned_image)
+        return out
 
     def _check_shape(self, template: np.ndarray, name: str = "template") -> None:
         if template.shape != self.output_shape:
@@ -211,7 +236,7 @@ class SubtomogramLoader:
         ]
         return da.stack(arrays, axis=0)
 
-    def construct_map(self, f: Callable, *args, **kwargs):
+    def construct_map(self, f: Callable, *args, **kwargs) -> list[da.core.Delayed]:
         dask_array = self.construct_dask()
         delayed_f = delayed(f)
         tasks = [delayed_f(ar, *args, **kwargs) for ar in dask_array]
@@ -634,6 +659,7 @@ class ChunkedSubtomogramLoader(SubtomogramLoader):
         molecules: Molecules | None = None,
         output_shape: int | tuple[int, int, int] | None = None,
         order: int | None = None,
+        scale: float | None = None,
         chunksize: int | None = None,
     ) -> Self:
         """Return a new instance with different parameter(s)."""
@@ -643,6 +669,8 @@ class ChunkedSubtomogramLoader(SubtomogramLoader):
             output_shape = self.output_shape
         if order is None:
             order = self.order
+        if scale is None:
+            scale = self.scale
         if chunksize is None:
             chunksize = self.chunksize
         return self.__class__(

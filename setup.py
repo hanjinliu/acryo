@@ -22,6 +22,7 @@ setup(
         "scipy>=1.7.3",
         "pandas>=1.3",
         "dask>=2021.6.0",
+        "typing_extensions>=4.1.1",
     ],
     python_requires=">=3.8",
 )

@@ -166,7 +166,23 @@ def fourier_shell_correlation(
     img1: np.ndarray,
     dfreq: float = 0.02,
 ) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Calculate Fourier shell correlation for resolution analysis.
 
+    Parameters
+    ----------
+    img0 : np.ndarray
+        First input image.
+    img1 : np.ndarray
+        Second input image.
+    dfreq : float, default is 0.02
+        Difference of sampling frequency.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        Frequency and FSC.
+    """
     shape = img0.shape
 
     freqs = np.meshgrid(
@@ -195,3 +211,17 @@ def fourier_shell_correlation(
     out = radial_sum(cov) / np.sqrt(radial_sum(pw0) * radial_sum(pw1))
     freq = (np.arange(len(out)) + 0.5) * dfreq
     return freq, out
+
+
+def bin_image(img: np.ndarray, binsize: int) -> np.ndarray:
+    slices: list[slice] = []
+    shapes: list[int] = []
+    for s in img.shape:
+        npix, res = divmod(s, binsize)
+        slices.append(slice(None, s - res))
+        shapes.extend([npix, binsize])
+    slices = tuple(slices)
+    shapes = tuple(shapes)
+    img_reshaped = np.reshape(img[slices], shapes)
+    axis = tuple(i * 2 + 1 for i in range(img.ndim))
+    return np.sum(img_reshaped, axis=axis)
