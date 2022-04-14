@@ -166,13 +166,12 @@ class SubtomogramLoader:
         image = self.image
         scale = self.scale
         coords = self.molecules.cartesian_at(i, self.output_shape, scale)
-        with ip.use("cupy"):
-            subvol = np.stack(
-                _utils.map_coordinates(
-                    image, coords, order=self.order, cval=np.mean
-                ),
-                axis=0,
-            )
+        subvol = np.stack(
+            _utils.map_coordinates(
+                image, coords, order=self.order, cval=np.mean
+            ),
+            axis=0,
+        )
         subvol = ip.asarray(subvol, axes="zyx")
         subvol.set_scale(image)
         return subvol
@@ -292,12 +291,10 @@ class SubtomogramLoader:
         ImgArray
             Averaged image
         """
-        with ip.use("cupy"):
-            dask_array = self.construct_dask()
-            avg: ip.ImgArray = da.compute(
-                da.mean(dask_array, axis=0),
-                scheduler=ip.Const["SCHEDULER"]
-            )[0]
+        dask_array = self.construct_dask()
+        avg: ip.ImgArray = da.compute(
+            da.mean(dask_array, axis=0),
+        )[0]
         
         avg.axes = "zyx"
         avg.set_scale(self.image)
@@ -342,7 +339,7 @@ class SubtomogramLoader:
             dask_avg1 = da.mean(dask_array[indices1], axis=0)
             tasks.extend([dask_avg0, dask_avg1])
         np.random.seed(None)
-        out = da.compute(tasks, scheduler=ip.Const["SCHEDULER"])[0]
+        out = da.compute(tasks)[0]
         stack = np.stack(out, axis=0).reshape(n_set, 2, *self.output_shape)
         ip_stack = ip.asarray(stack, name="split average", axes="pqzyx")
         ip_stack.set_scale(self.image)
@@ -389,14 +386,13 @@ class SubtomogramLoader:
 
         _max_shifts_px = np.asarray(max_shifts) / self.scale
 
-        with ip.use("cupy"):
-            model = alignment_model(
-                template=template,
-                mask=mask,
-                **align_kwargs,
-            )
-            tasks = self.construct_map(model.align, _max_shifts_px)
-            all_results = da.compute(tasks)[0]
+        model = alignment_model(
+            template=template,
+            mask=mask,
+            **align_kwargs,
+        )
+        tasks = self.construct_map(model.align, _max_shifts_px)
+        all_results = da.compute(tasks)[0]
         
         local_shifts, local_rot, scores = _allocate(len(self))
         for i, result in enumerate(all_results):
@@ -518,14 +514,13 @@ class SubtomogramLoader:
 
         _max_shifts_px = np.asarray(max_shifts) / self.scale
         
-        with ip.use("cupy"):
-            model = alignment_model(
-                template=np.stack(list(templates), axis="p"),
-                mask=mask,
-                **align_kwargs,
-            )
-            tasks = self.construct_map(model.align, _max_shifts_px)
-            all_results = da.compute(tasks)[0]
+        model = alignment_model(
+            template=np.stack(list(templates), axis="p"),
+            mask=mask,
+            **align_kwargs,
+        )
+        tasks = self.construct_map(model.align, _max_shifts_px)
+        all_results = da.compute(tasks)[0]
         
         local_shifts, local_rot, scores = _allocate(len(self))
         for i, result in enumerate(all_results):
@@ -668,10 +663,9 @@ class ChunkedSubtomogramLoader(SubtomogramLoader):
         image = self.image
         sl = slice(chunk_index*self.chunksize, (chunk_index + 1) * self.chunksize)
         coords = self.molecules.cartesian_at(sl, self.output_shape, self.scale)
-        with ip.use("cupy"):
-            subvols = _utils.multi_map_coordinates(
-                    image, coords, order=self.order, cval=np.mean
-                )
+        subvols = _utils.multi_map_coordinates(
+            image, coords, order=self.order, cval=np.mean
+        )
         subvols = ip.asarray(subvols, axes="pzyx")
         subvols.set_scale(image)
         return subvols

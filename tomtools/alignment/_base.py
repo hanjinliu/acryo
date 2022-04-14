@@ -113,6 +113,7 @@ class BaseAlignmentModel(ABC):
             Result of alignment.
         """
         img_masked = img * self.mask
+        print(max_shifts)
         return self._align_func(
             self.pre_transform(img_masked),
             self.template_input,

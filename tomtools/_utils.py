@@ -1,6 +1,7 @@
 from __future__ import annotations
 import numpy as np
 import impy as ip
+from scipy import ndimage as ndi
 from typing import Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -33,11 +34,13 @@ def map_coordinates(
     if callable(cval):
         cval = cval(img)
     
-    return img.map_coordinates(
+    return ndi.map_coordinates(
+        img.value,
         coordinates=coordinates,
         order=order,
         mode=mode, 
         cval=cval,
+        prefilter=order>1,
     )
 
 def multi_map_coordinates(
@@ -87,8 +90,13 @@ def multi_map_coordinates(
     imgs = []
     for crds in coordinates:
         imgs.append(
-            input_img.map_coordinates(
-                crds, mode=mode, cval=cval, order=order
+            ndi.map_coordinates(
+                input_img.value, 
+                crds,
+                mode=mode,
+                cval=cval,
+                order=order,
+                prefilter=order>1,
             )
         )
     
