@@ -1,23 +1,25 @@
 from __future__ import annotations
 import numpy as np
-import impy as ip
+from dask import array as da
 from scipy import ndimage as ndi
+from scipy.fft import fftn
 from typing import Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from scipy.spatial.transform import Rotation
 
+
 def map_coordinates(
-    input: ip.ImgArray | ip.LazyImgArray,
+    input: np.ndarray | da.core.Array,
     coordinates: np.ndarray,
-    order: int = 3, 
+    order: int = 3,
     mode: str = "constant",
-    cval: float | Callable[[ip.ImgArray], float] = 0.0
+    cval: float | Callable[[np.ndarray], float] = 0.0,
 ) -> np.ndarray:
     """
     Crop image at the edges of coordinates before calling map_coordinates to avoid
     loading entire array into memory.
-    """    
+    """
     coordinates = coordinates.copy()
     shape = input.shape
     sl = []
@@ -27,28 +29,29 @@ def map_coordinates(
         _sl, _pad = make_slice_and_pad(imin, imax, shape[i])
         sl.append(_sl)
         coordinates[i] -= _sl.start
-    
+
     img = input[tuple(sl)]
-    if isinstance(img, ip.LazyImgArray):
+    if isinstance(img, da.core.Array):
         img = img.compute()
     if callable(cval):
         cval = cval(img)
-    
+
     return ndi.map_coordinates(
-        img.value,
+        img,
         coordinates=coordinates,
         order=order,
-        mode=mode, 
+        mode=mode,
         cval=cval,
-        prefilter=order>1,
+        prefilter=order > 1,
     )
 
+
 def multi_map_coordinates(
-    input: ip.ImgArray | ip.LazyImgArray,
+    input: np.ndarray | da.core.Array,
     coordinates: np.ndarray,
     order: int = 3,
     mode: str = "constant",
-    cval: float | Callable[[ip.ImgArray], float] = 0.0,
+    cval: float | Callable[[np.ndarray], float] = 0.0,
 ) -> list[np.ndarray]:
     """
     Multiple map-coordinate in parallel.
@@ -81,7 +84,7 @@ def multi_map_coordinates(
         coordinates[:, i] -= _sl.start
 
     img = input[tuple(sl)]
-    if isinstance(img, ip.LazyImgArray):
+    if isinstance(img, da.core.Array):
         img = img.compute()
     if callable(cval):
         cval = cval(img)
@@ -91,15 +94,15 @@ def multi_map_coordinates(
     for crds in coordinates:
         imgs.append(
             ndi.map_coordinates(
-                input_img.value, 
+                input_img,
                 crds,
                 mode=mode,
                 cval=cval,
                 order=order,
-                prefilter=order>1,
+                prefilter=order > 1,
             )
         )
-    
+
     return np.stack(imgs, axis=0)
 
 
@@ -124,10 +127,9 @@ def make_slice_and_pad(z0: int, z1: int, size: int) -> tuple[slice, tuple[int, i
     return slice(z0, z1), (z0_pad, z1_pad)
 
 
-
 def compose_matrices(
     shape: tuple[int, int, int],
-    rotators: list["Rotation"],
+    rotators: list[Rotation],
 ):
     dz, dy, dx = (np.array(shape) - 1) / 2
     # center to corner
@@ -157,3 +159,39 @@ def compose_matrices(
         e_[:3, :3] = rot.as_matrix()
         matrices.append(translation_0 @ e_ @ translation_1)
     return matrices
+
+
+def fourier_shell_correlation(
+    img0: np.ndarray,
+    img1: np.ndarray,
+    dfreq: float = 0.02,
+) -> tuple[np.ndarray, np.ndarray]:
+
+    shape = img0.shape
+
+    freqs = np.meshgrid(
+        *[np.fft.fftshift(np.fft.fftfreq(s)) for s in shape], indexing="ij"
+    )
+
+    r: np.ndarray = np.sqrt(sum(f ** 2 for f in freqs))
+
+    # make radially separated labels
+    labels = (r / dfreq).astype(np.uint16)
+    nlabels = labels.max()
+
+    out = np.empty(nlabels, dtype=np.float32)
+
+    def radial_sum(arr):
+        arr = np.asarray(arr)
+        return ndi.sum_labels(arr, labels=labels, index=np.arange(0, nlabels))
+
+    f0: np.ndarray = np.fft.fftshift(fftn(img0))
+    f1: np.ndarray = np.fft.fftshift(fftn(img1))
+
+    cov = f0.real * f1.real + f0.imag * f1.imag
+    pw0 = f0.real ** 2 + f0.imag ** 2
+    pw1 = f1.real ** 2 + f1.imag ** 2
+
+    out = radial_sum(cov) / np.sqrt(radial_sum(pw0) * radial_sum(pw1))
+    freq = (np.arange(len(out)) + 0.5) * dfreq
+    return freq, out

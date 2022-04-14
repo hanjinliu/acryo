@@ -1,10 +1,13 @@
 from __future__ import annotations
 from typing import (
+    Any,
     Callable,
     Generator,
+    Iterable,
     Iterator,
     overload,
     TYPE_CHECKING,
+    TypeVar,
 )
 import warnings
 import weakref
@@ -12,7 +15,6 @@ import tempfile
 import pandas as pd
 from scipy.spatial.transform import Rotation
 import numpy as np
-import impy as ip
 from dask import array as da, delayed
 from .alignment import (
     BaseAlignmentModel,
@@ -20,7 +22,7 @@ from .alignment import (
     SupportRotation,
     FrequencyCutoffInput,
 )
-from .alignment._types import Ranges
+from ._types import Ranges
 from .molecules import Molecules
 from . import _utils
 
@@ -28,27 +30,24 @@ if TYPE_CHECKING:
     from typing_extensions import Self
 
 nm = float  # alias
+_A = TypeVar("_A", np.ndarray, da.core.Array)
 
 
 def subtomogram_loader(
-    image: ip.ImgArray | ip.LazyImgArray | np.ndarray | da.core.Array,
+    image: np.ndarray | da.core.Array,
     molecules: Molecules,
     output_shape: int | tuple[int, int, int],
     order: int = 3,
     chunksize: int = 1,
 ):
-    ndim = 3
-    if not isinstance(image, (ip.ImgArray, ip.LazyImgArray)):
-        if isinstance(image, np.ndarray) and image.ndim == ndim:
-            image = ip.asarray(image, axes="zyx")
-        elif isinstance(image, da.core.Array) and image.ndim == ndim:
-            image = ip.LazyImgArray(image, axes="zyx")
-        else:
-            raise TypeError("'image' must be a 3D numpy ndarray like object.")
+    if not image.ndim == 3:
+        raise TypeError("Input image must be 3D.")
     if chunksize == 1:
         return SubtomogramLoader(image, molecules, output_shape, order)
     else:
-        return ChunkedSubtomogramLoader(image, molecules, output_shape, order, chunksize)
+        return ChunkedSubtomogramLoader(
+            image, molecules, output_shape, order, chunksize
+        )
 
 
 class SubtomogramLoader:
@@ -62,7 +61,7 @@ class SubtomogramLoader:
 
     Parameters
     ----------
-    image : ImgArray, LazyImgArray, np.ndarray or da.core.Array
+    image : np.ndarray or da.core.Array
         Tomogram image.
     mole : Molecules
         Molecules object that defines position and rotation of subtomograms.
@@ -74,9 +73,10 @@ class SubtomogramLoader:
         - 1 = Linear interpolation
         - 3 = Cubic interpolation
     """
+
     def __init__(
         self,
-        image: ip.ImgArray | ip.LazyImgArray,
+        image: _A,
         molecules: Molecules,
         output_shape: int | tuple[int, int, int],
         order: int = 3,
@@ -90,15 +90,18 @@ class SubtomogramLoader:
         else:
             output_shape = tuple(output_shape)
         self._output_shape = output_shape
-        self._cached_lazy_imgarray = None
+        self._cached_dask_array: da.core.Array | None = None
 
     def __repr__(self) -> str:
-        shape = str(self.image.shape).lstrip("AxesShape")
+        shape = "x".join(self.image.shape)
         mole_repr = repr(self.molecules)
-        return f"{self.__class__.__name__}(tomogram={shape}, molecules={mole_repr})"
+        return (
+            f"{self.__class__.__name__}(tomogram=[{shape}], molecules={mole_repr}"
+            f"output_shape={self.output_shape}, order={self.order})"
+        )
 
     @property
-    def image(self) -> ip.ImgArray | ip.LazyImgArray:
+    def image(self) -> _A:
         """Return tomogram image."""
         image = self._image_ref()
         if image is None:
@@ -106,7 +109,7 @@ class SubtomogramLoader:
         return image
 
     @image.setter
-    def image(self, image: ip.ImgArray | ip.LazyImgArray):
+    def image(self, image: _A):
         """Set tomogram as a weak reference."""
         self._image_ref = weakref.ref(image)
 
@@ -153,9 +156,8 @@ class SubtomogramLoader:
             output_shape=output_shape,
             order=order,
         )
-    
-    
-    def _check_shape(self, template: ip.ImgArray, name: str = "template") -> None:
+
+    def _check_shape(self, template: np.ndarray, name: str = "template") -> None:
         if template.shape != self.output_shape:
             warnings.warn(
                 f"'output_shape' of {self.__class__.__name__} object "
@@ -165,38 +167,28 @@ class SubtomogramLoader:
             )
             self.output_shape = template.shape
         return None
-    
-    def get_subtomogram(self, i: int) -> ip.ImgArray:
-        if self._cached_lazy_imgarray is not None:
-            return self._cached_lazy_imgarray[i].compute()
+
+    def get_subtomogram(self, i: int) -> np.ndarray:
+        if self._cached_dask_array is not None:
+            return da.compute(self._cached_dask_array[i])[0]
+
         image = self.image
         scale = self.scale
         coords = self.molecules.cartesian_at(i, self.output_shape, scale)
         subvol = np.stack(
-            _utils.map_coordinates(
-                image, coords, order=self.order, cval=np.mean
-            ),
+            _utils.map_coordinates(image, coords, order=self.order, cval=np.mean),
             axis=0,
         )
-        subvol = ip.asarray(subvol, axes="zyx")
-        subvol.set_scale(image)
         return subvol
-    
-    def _get_subtomogram_4d(self, i: int) -> ip.ImgArray:
-        sv = self.get_subtomogram(i)
-        subvol = sv.value[np.newaxis]
-        subvol = ip.asarray(subvol, axes="pzyx")
-        subvol.set_scale(sv)
-        return subvol
-    
-    def iter_subtomograms(self) -> Iterator[ip.ImgArray]:
+
+    def iter_subtomograms(self) -> Iterator[np.ndarray]:
         for i in range(len(self)):
             yield self.get_subtomogram(i)
 
     def construct_dask(self) -> da.core.Array:
         """
         Construct a dask array of subtomograms.
-        
+
         This function is always needed before parallel processing. If subtomograms
         are cached in a memory-map it will be used instead.
 
@@ -205,35 +197,29 @@ class SubtomogramLoader:
         da.core.Array
             An 4-D array with axes "pzyx".
         """
-        if self._cached_lazy_imgarray is not None:
-            return self._cached_lazy_imgarray.value
-        delayed_get_subtomogram = delayed(self._get_subtomogram_4d)
-        
+        if self._cached_dask_array is not None:
+            return self._cached_dask_array
+        delayed_get_subtomogram = delayed(self.get_subtomogram)
+
         arrays = [
             da.from_delayed(
                 delayed_get_subtomogram(i),
-                shape=(1,) + self.output_shape,
+                shape=self.output_shape,
                 dtype=np.float32,
             )
             for i in range(len(self))
         ]
-        return da.concatenate(arrays, axis=0)
-    
-    def construct_lazyimgarray(self) -> ip.LazyImgArray:
-        """Stack subtomograms into a LazyImgArray."""
-        arr = ip.aslazy(self.construct_dask(), axes="zyx")
-        return arr.set_scale(self.image)
+        return da.stack(arrays, axis=0)
 
-        
     def construct_map(self, f: Callable, *args, **kwargs):
         dask_array = self.construct_dask()
         delayed_f = delayed(f)
         tasks = [delayed_f(ar, *args, **kwargs) for ar in dask_array]
         return tasks
 
-    def create_cache(self, path: str | None = None) -> ip.LazyImgArray:
+    def create_cache(self, path: str | None = None) -> da.core.Array:
         """
-        An non-iterator version of :func:`iter_create_cache`.
+        Create cached stack of subtomograms.
 
         Parameters
         ----------
@@ -243,7 +229,7 @@ class SubtomogramLoader:
 
         Returns
         -------
-        LazyImgArray
+        da.core.Array
             A lazy-loading array that uses the memory-mapped array.
 
         Examples
@@ -272,21 +258,16 @@ class SubtomogramLoader:
         darr = da.from_array(
             mmap, chunks=(1,) + self.output_shape, meta=np.array([], dtype=np.float32)
         )
-        arr = ip.aslazy(darr, name="Subtomograms", axes="pzyx")
-        arr.set_scale(self.image)
-        self._cached_lazy_imgarray = arr
-        return arr
+        return darr
 
-    def to_stack(self, binsize: int = 1) -> ip.ImgArray:
+    def asnumpy(self) -> np.ndarray:
         """Create a 4D image stack of all the subtomograms."""
-        arr = self.construct_lazyimgarray()
-        if binsize > 1:
-            arr = arr.binning(binsize, check_edges=False)
+        arr = self.construct_dask()
         return arr.compute()
 
     def average(
         self,
-    ) -> ip.ImgArray:
+    ) -> np.ndarray:
         """
         Calculate the average of subtomograms.
 
@@ -295,27 +276,21 @@ class SubtomogramLoader:
 
         Returns
         -------
-        ImgArray
+        np.ndarray
             Averaged image
         """
         dask_array = self.construct_dask()
-        avg: ip.ImgArray = da.compute(
-            da.mean(dask_array, axis=0),
-        )[0]
-        
-        avg.axes = "zyx"
-        avg.set_scale(self.image)
-        return avg
-    
+        return da.compute(da.mean(dask_array, axis=0))[0]
+
     def average_split(
         self,
         n_set: int = 1,
         seed: int = 0,
         squeeze: bool = True,
-    ) -> ip.ImgArray:
+    ) -> np.ndarray:
         """
         Split subtomograms into two set and average separately.
-        
+
         This method executes pairwise subtomogram averaging using randomly selected
         molecules, which is useful for calculation of such as Fourier shell
         correlation.
@@ -336,7 +311,7 @@ class SubtomogramLoader:
         np.random.seed(seed)
         tasks = []
         for _ in range(n_set):
-            sl = np.random.choice(np.arange(nmole), nmole//2).tolist()
+            sl = np.random.choice(np.arange(nmole), nmole // 2).tolist()
             indices0 = np.zeros(nmole, dtype=bool)
             indices0[sl] = True
             indices1 = np.ones(nmole, dtype=bool)
@@ -348,30 +323,27 @@ class SubtomogramLoader:
         np.random.seed(None)
         out = da.compute(tasks)[0]
         stack = np.stack(out, axis=0).reshape(n_set, 2, *self.output_shape)
-        ip_stack = ip.asarray(stack, name="split average", axes="pqzyx")
-        ip_stack.set_scale(self.image)
         if squeeze and n_set == 1:
-            ip_stack = ip_stack[0]
-        return ip_stack
+            stack = stack[0]
+        return stack
 
-    
     @overload
     def align(
         self,
-        template: ip.ImgArray,
-        mask: ip.ImgArray,
+        template: np.ndarray,
+        mask: np.ndarray | None,
         max_shifts: nm | tuple[nm, nm, nm],
         alignment_model: type[SupportRotation],
         rotations: Ranges,
         **kwargs,
     ):
         ...
-        
+
     @overload
     def align(
         self,
-        template: ip.ImgArray,
-        mask: ip.ImgArray,
+        template: np.ndarray,
+        mask: np.ndarray | None,
         max_shifts: nm | tuple[nm, nm, nm],
         alignment_model: type[FrequencyCutoffInput],
         rotations: Ranges,
@@ -379,12 +351,12 @@ class SubtomogramLoader:
         **kwargs,
     ):
         ...
-        
+
     def align(
         self,
-        template: ip.ImgArray,
+        template: np.ndarray,
         *,
-        mask: ip.ImgArray = None,
+        mask: np.ndarray | None = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
         **align_kwargs,
@@ -398,14 +370,14 @@ class SubtomogramLoader:
 
         Parameters
         ----------
-        template : ip.ImgArray, optional
+        template : np.ndarray, optional
             Template image.
-        mask : ip.ImgArray, optional
+        mask : np.ndarray, optional
             Mask image. Must in the same shae as the template.
         max_shifts : int or tuple of int, default is (1., 1., 1.)
             Maximum shift between subtomograms and template.
         alignment_model : subclass of BaseAlignmentModel, optional
-            Alignment model class used for subtomogram alignment. By default, 
+            Alignment model class used for subtomogram alignment. By default,
             ``ZNCCAlignment`` will be used.
         align_kwargs : optional keyword arguments
             Additional keyword arguments passed to the input alignment model.
@@ -426,14 +398,15 @@ class SubtomogramLoader:
         )
         tasks = self.construct_map(model.align, _max_shifts_px)
         all_results = da.compute(tasks)[0]
-        
+
         local_shifts, local_rot, scores = _allocate(len(self))
         for i, result in enumerate(all_results):
             _, local_shifts[i], local_rot[i], scores[i] = result
-            
+
         rotator = Rotation.from_quat(local_rot)
         mole_aligned = self.molecules.linear_transform(
-            local_shifts * self.scale, rotator,
+            local_shifts * self.scale,
+            rotator,
         )
 
         mole_aligned.features = update_features(
@@ -442,11 +415,11 @@ class SubtomogramLoader:
         )
 
         return self.replace(molecules=mole_aligned)
-        
+
     def align_no_template(
         self,
         *,
-        mask_params: np.ndarray | Callable[[np.ndarray], np.ndarray] | None = None,
+        mask: np.ndarray | Callable[[np.ndarray], np.ndarray] | None = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
         **align_kwargs,
@@ -454,21 +427,19 @@ class SubtomogramLoader:
         """
         Align subtomograms without template image.
 
-        A template-free version of :func:`iter_align`. This method first 
+        A template-free version of :func:`iter_align`. This method first
         calculates averaged image and uses it for the alignment template. To
-        avoid loading same subtomograms twice, a memory-mapped array is created 
+        avoid loading same subtomograms twice, a memory-mapped array is created
         internally (so the second subtomogram loading is faster).
 
         Parameters
         ----------
-        template : ip.ImgArray, optional
-            Template image.
-        mask : ip.ImgArray, optional
-            Mask image. Must in the same shap as the template.
+        mask : np.ndarray or callable, optional
+            Mask image. Must in the same shape as the template.
         max_shifts : int or tuple of int, default is (1., 1., 1.)
             Maximum shift between subtomograms and template.
         alignment_model : subclass of BaseAlignmentModel, optional
-            Alignment model class used for subtomogram alignment. By default, 
+            Alignment model class used for subtomogram alignment. By default,
             ``ZNCCAlignment`` will be used.
         align_kwargs : optional keyword arguments
             Additional keyword arguments passed to the input alignment model.
@@ -480,28 +451,28 @@ class SubtomogramLoader:
         """
         all_subvols = self.create_cache()
 
-        template = all_subvols.proj("p").compute()
+        template = da.compute(da.mean(all_subvols, axis=0))[0]
 
         # get mask image
-        if isinstance(mask_params, np.ndarray):
-            mask = mask_params
-        elif callable(mask_params):
-            mask = mask_params(template)
+        if isinstance(mask, np.ndarray):
+            mask = mask
+        elif callable(mask):
+            mask = mask(template)
         else:
-            mask = mask_params
+            mask = mask
         return self.align(
             template,
             mask=mask,
             max_shifts=max_shifts,
             alignment_model=alignment_model,
-            **align_kwargs
+            **align_kwargs,
         )
 
     def align_multi_templates(
         self,
-        templates: list[ip.ImgArray],
+        templates: list[np.ndarray],
         *,
-        mask: ip.ImgArray | None = None,
+        mask: np.ndarray | None = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
         **align_kwargs,
@@ -517,12 +488,12 @@ class SubtomogramLoader:
         ----------
         templates: list of ImgArray
             Template images.
-        mask : ip.ImgArray, optional
+        mask : np.ndarray, optional
             Mask image. Must in the same shape as the template.
         max_shifts : int or tuple of int, default is (1., 1., 1.)
             Maximum shift between subtomograms and template.
         alignment_model : subclass of BaseAlignmentModel, optional
-            Alignment model class used for subtomogram alignment. By default, 
+            Alignment model class used for subtomogram alignment. By default,
             ``ZNCCAlignment`` will be used.
         align_kwargs : optional keyword arguments
             Additional keyword arguments passed to the input alignment model.
@@ -541,19 +512,19 @@ class SubtomogramLoader:
         labels = np.zeros(len(self), dtype=np.uint32)
 
         _max_shifts_px = np.asarray(max_shifts) / self.scale
-        
+
         model = alignment_model(
-            template=np.stack(list(templates), axis="p"),
+            template=np.stack(list(templates), axis=0),
             mask=mask,
             **align_kwargs,
         )
         tasks = self.construct_map(model.align, _max_shifts_px)
         all_results = da.compute(tasks)[0]
-        
+
         local_shifts, local_rot, scores = _allocate(len(self))
         for i, result in enumerate(all_results):
             labels[i], local_shifts[i], local_rot[i], scores[i] = result
-        
+
         rotator = Rotation.from_quat(local_rot)
         mole_aligned = self.molecules.linear_transform(
             local_shifts * self.scale,
@@ -577,9 +548,9 @@ class SubtomogramLoader:
 
     def iter_subtomoprops(
         self,
-        template: ip.ImgArray = None,
-        mask: ip.ImgArray = None,
-        properties=(ip.zncc,),
+        template: np.ndarray = None,
+        mask: np.ndarray | None = None,
+        properties: Iterable[Callable[[np.ndarray, np.ndarray], Any]] = (),
     ) -> Generator[None, None, pd.DataFrame]:
         results = {
             f.__name__: np.zeros(len(self), dtype=np.float32) for f in properties
@@ -599,7 +570,7 @@ class SubtomogramLoader:
 
     def fsc(
         self,
-        mask: ip.ImgArray | None = None,
+        mask: np.ndarray | None = None,
         seed: int | float | str | bytes | bytearray | None = 0,
         n_set: int = 1,
         dfreq: float = 0.05,
@@ -609,7 +580,7 @@ class SubtomogramLoader:
 
         Parameters
         ----------
-        mask : ip.ImgArray, optional
+        mask : np.ndarray, optional
             Mask image, by default None
         seed : random seed, default is 0
             Random seed used to split subtomograms.
@@ -632,7 +603,9 @@ class SubtomogramLoader:
         fsc_all: dict[str, np.ndarray] = {}
         for i in range(n_set):
             img0, img1 = img[i]
-            freq, fsc = ip.fsc(img0 * mask, img1 * mask, dfreq=dfreq)
+            freq, fsc = _utils.fourier_shell_correlation(
+                img0 * mask, img1 * mask, dfreq=dfreq
+            )
             fsc_all[f"FSC-{i}"] = fsc
 
         df = pd.DataFrame({"freq": freq})
@@ -640,10 +613,9 @@ class SubtomogramLoader:
 
 
 class ChunkedSubtomogramLoader(SubtomogramLoader):
-    
     def __init__(
         self,
-        image: ip.ImgArray | ip.LazyImgArray | np.ndarray | da.core.Array,
+        image: np.ndarray | da.core.Array,
         molecules: Molecules,
         output_shape: int | tuple[int, int, int],
         order: int = 3,
@@ -680,29 +652,27 @@ class ChunkedSubtomogramLoader(SubtomogramLoader):
             order=order,
             chunksize=chunksize,
         )
-    
-    def iter_subtomograms(self) -> Iterator[ip.ImgArray]:
+
+    def iter_subtomograms(self) -> Iterator[np.ndarray]:
         for subvols in self.get_subtomogram_chunk():
             for subvol in subvols:
                 yield subvol
 
-    def get_subtomogram_chunk(self, chunk_index: int) -> Iterator[ip.ImgArray]:  # axes: pzyx
+    def get_subtomogram_chunk(self, chunk_index: int) -> Iterator[np.ndarray]:
         """Generate subtomogram list chunk-wise."""
         image = self.image
-        sl = slice(chunk_index*self.chunksize, (chunk_index + 1) * self.chunksize)
+        sl = slice(chunk_index * self.chunksize, (chunk_index + 1) * self.chunksize)
         coords = self.molecules.cartesian_at(sl, self.output_shape, self.scale)
         subvols = _utils.multi_map_coordinates(
             image, coords, order=self.order, cval=np.mean
         )
-        subvols = ip.asarray(subvols, axes="pzyx")
-        subvols.set_scale(image)
         return subvols
-    
+
     def construct_dask(self) -> da.core.Array:
         delayed_get_subtomogram = delayed(self.get_subtomogram_chunk)
         n_full_chunk, resid = divmod(len(self), self.chunksize)
         shapes = [self.chunksize] * n_full_chunk + [resid]
-        
+
         arrays = [
             da.from_delayed(
                 delayed_get_subtomogram(i),
@@ -719,6 +689,7 @@ class ChunkedSubtomogramLoader(SubtomogramLoader):
     zRotvec = "rotvec-z"
     yRotvec = "rotvec-y"
     xRotvec = "rotvec-x"
+
 
 def get_features(corr_max, local_shifts, rotvec) -> pd.DataFrame:
     features = {

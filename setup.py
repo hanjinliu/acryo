@@ -18,7 +18,10 @@ setup(
     license="BSD 3-Clause",
     packages=find_packages(exclude=["tests", "tests.*"]),
     install_requires=[
-        "impy-array>=2.0.0",
+        "numpy>=1.21",
+        "scipy>=1.7.3",
+        "pandas>=1.3",
+        "dask>=2021.6.0",
     ],
     python_requires=">=3.8",
 )
