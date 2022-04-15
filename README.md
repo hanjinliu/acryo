@@ -1,2 +1,2 @@
-# tomtools
-An extensible subtomogram averaging toolkit for Python
+# acryo
+An extensible cryo-EM/ET toolkit for Python.

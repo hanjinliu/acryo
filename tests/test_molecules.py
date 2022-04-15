@@ -1,4 +1,4 @@
-from tomtools import Molecules
+from acryo import Molecules
 import numpy as np
 from numpy.testing import assert_allclose
 import pytest

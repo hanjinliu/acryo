@@ -1,6 +1,6 @@
 from setuptools import setup, find_packages
 
-with open("tomtools/__init__.py", encoding="utf-8") as f:
+with open("acryo/__init__.py", encoding="utf-8") as f:
     line = next(f)
     VERSION = line.strip().split()[-1][1:-1]
 
@@ -8,9 +8,9 @@ with open("README.md", "r") as f:
     readme = f.read()
 
 setup(
-    name="tomtools",
+    name="acryo",
     version=VERSION,
-    description="An extensible subtomogram averaging toolkit for Python.",
+    description="An extensible cryo-EM/ET toolkit for Python.",
     long_description=readme,
     long_description_content_type="text/markdown",
     author="Hanjin Liu",
