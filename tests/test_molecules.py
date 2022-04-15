@@ -149,6 +149,6 @@ def test_features():
 def test_random_shift():
     mol = Molecules(np.random.random((24, 3)) * 10, Rotation.random(24))
     mol_shifted = mol.translate_random(2.5)
-    dvec = mol.pos - mol_shifted.pos
+    dvec = mol.pos - mol_shifted.pos  # type: ignore
     dist = np.sqrt(np.sum((dvec) ** 2, axis=1))
     assert np.all(dist <= 2.5)

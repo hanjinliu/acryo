@@ -18,12 +18,12 @@ def _normalize_a_range(rng: RangeLike) -> RangeLike:
     return float(max_rot), float(drot)
 
 
-def _normalize_ranges(rng: Ranges) -> Ranges:
+def _normalize_ranges(rng: RangeLike | Ranges) -> Ranges:
     if isinstance(rng, (tuple, list)) and isinstance(rng[0], tuple):
-        return tuple(_normalize_a_range(r) for r in rng)
+        return tuple(_normalize_a_range(r) for r in rng)  # type: ignore
     else:
-        rng = _normalize_a_range(rng)
-        return (rng,) * 3
+        rng_ = _normalize_a_range(rng)  # type: ignore
+        return (rng_,) * 3
 
 
 def normalize_rotations(rotations: Ranges | None) -> np.ndarray:
@@ -264,7 +264,11 @@ def subpixel_zncc(
 
     if upsample_factor > 1:
         coords = _create_mesh(
-            upsample_factor, maxima, max_shifts, midpoints, pad_width_eff  # type: ignore
+            upsample_factor,
+            maxima,  # type: ignore
+            max_shifts,  # type: ignore
+            midpoints,  # type: ignore
+            pad_width_eff,  # type: ignore
         )
         local_response: np.ndarray = ndi.map_coordinates(
             response, coords, order=3, mode="reflect", prefilter=True

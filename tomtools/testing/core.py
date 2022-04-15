@@ -103,7 +103,9 @@ class TomogramGenerator:
         )
 
 
-def _missing_wedge_mask(shape, tilt_range: tuple[degree, degree]) -> np.ndarray:
+def _missing_wedge_mask(
+    shape: tuple[int, int, int], tilt_range: tuple[degree, degree]
+) -> np.ndarray:
     """
     Create a missing-wedge binary mask image.
 

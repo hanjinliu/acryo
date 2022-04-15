@@ -68,8 +68,9 @@ class BaseAlignmentModel(ABC):
         """
         Returns proper template image for alignment.
 
-        Template dimensionality will be dispatched according to the input parameters.
-        Returned template should be used in line of the :func:`get_alignment_function`.
+        Template dimensionality will be dispatched according to the input
+        parameters. Returned template should be used in line of the
+        :func:`get_alignment_function`.
 
         Returns
         -------
@@ -235,19 +236,21 @@ class SupportRotation(BaseAlignmentModel):
         """
         Returns proper template image for alignment.
 
-        Template dimensionality will be dispatched according to the input parameters.
-        Returned template should be used in line of the :func:`get_alignment_function`.
+        Template dimensionality will be dispatched according to the input
+        parameters. Returned template should be used in line of the
+        :func:`get_alignment_function`.
 
         Returns
         -------
         np.ndarray
             Template image(s). Its axes varies depending on the input.
 
-            - no rotation, single template image ... "zyx"
-            - has rotation, single template image ... "pzyx"
-            - no rotation, many template images ... "pzyx"
-            - has rotation, many template images ... "pzyx" and when iterated over the
-              first axis yielded images will be (rot0, temp0), (rot0, temp1), ...
+            - no rotation, single template image ... 3D
+            - has rotation, single template image ... 4D
+            - no rotation, many template images ... 4D
+            - has rotation, many template images ... 4D and when iterated over
+              the first axis yielded images will be (rot0, temp0),
+              (rot0, temp1), ...
         """
         if self._n_rotations > 1:
             rotators = [Rotation.from_quat(r).inv() for r in self.quaternions]
@@ -299,8 +302,8 @@ class FrequencyCutoffInput(SupportRotation):
     """
     An alignment model that supports frequency-based pre-filtering.
 
-    This class can be used for implementing such as low-pass filter or high-pass
-    filter before alignment.
+    This class can be used for implementing such as low-pass filter or high-
+    pass filter before alignment.
     """
 
     def __init__(

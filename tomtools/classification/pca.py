@@ -23,9 +23,10 @@ class PcaClassifier:
         from sklearn.cluster import KMeans
 
         if mask_image is None:
-            mask_image = 1
+            self._mask = 1
+        else:
+            self._mask = mask_image
         self._image = image_stack
-        self._mask = mask_image
         self._n_image = image_stack.shape[0]
         self._shape = image_stack.shape[1:]  # shape of a single image
         self.n_components = n_components
@@ -106,10 +107,10 @@ class PcaClassifier:
         Returns
         -------
         np.ndarray
-            Same axes as input image stack, while the axis "p" corresponds to the identifier
-            of bases.
+            Same axes as input image stack, while the axis "p" corresponds to
+            the identifier of bases.
         """
-        return self.pca.components_.reshape(self.n_components, *self._shape)
+        return self.pca.components_.reshape(self.n_components, *self._shape)  # type: ignore
 
     def split_clusters(self) -> list[np.ndarray]:
         """
