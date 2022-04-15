@@ -126,8 +126,7 @@ def subpixel_pcc(
     if isinstance(max_shifts, (int, float)):
         max_shifts = (max_shifts,) * f0.ndim
     product = f0 * f1.conj()
-    cross_correlation = np.fft.ifftn(product)
-    power = abs2(cross_correlation)
+    power = abs2(np.fft.ifftn(product))
     if max_shifts is not None:
         max_shifts = np.asarray(max_shifts)
         power = crop_by_max_shifts(power, max_shifts, max_shifts)
@@ -145,11 +144,15 @@ def subpixel_pcc(
         dftshift = np.fix(upsampled_region_size / 2.0)
         # Matrix multiply DFT around the current shift estimate
         sample_region_offset = dftshift - shifts * upsample_factor
-        cross_correlation = _upsampled_dft(
-            product.conj(), upsampled_region_size, upsample_factor, sample_region_offset
-        ).conj()
         # Locate maximum and map back to original pixel grid
-        power = abs2(cross_correlation)
+        power = abs2(
+            _upsampled_dft(
+                product.conj(),
+                upsampled_region_size,
+                upsample_factor,
+                sample_region_offset,
+            )
+        )
 
         if max_shifts is not None:
             _upsampled_left_shifts = (shifts + max_shifts) * upsample_factor
@@ -271,7 +274,7 @@ def subpixel_zncc(
             pad_width_eff,  # type: ignore
         )
         local_response: np.ndarray = ndi.map_coordinates(
-            response, coords, order=3, mode="reflect", prefilter=True
+            response, coords, order=3, mode="constant", cval=-1.0, prefilter=True
         )
         local_maxima = np.unravel_index(np.argmax(local_response), local_response.shape)
         zncc = local_response[local_maxima]

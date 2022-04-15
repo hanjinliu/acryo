@@ -1,6 +1,5 @@
 from __future__ import annotations
 from typing import Iterable
-import warnings
 import numpy as np
 import pandas as pd
 from numpy.typing import ArrayLike
@@ -103,25 +102,25 @@ class Molecules:
         return cls(pos, rotator, features)
 
     @classmethod
-    def from_csv(cls, path: str, **kwargs) -> Molecules:
+    def from_csv(
+        cls,
+        path: str,
+        pos_cols: list[str] = ["z", "y", "x"],
+        rot_cols: list[str] = ["zvec", "yvec", "xvec"],
+        **pd_kwargs,
+    ) -> Molecules:
         """Load csv as a Molecules object."""
-        df: pd.DataFrame = pd.read_csv(path, **kwargs)  # type: ignore
-        if df.shape[1] < 6:
-            raise ValueError(
-                "CSV must have more than or equal six columns but got "
-                f"shape {df.shape}"
-            )
-        if list(df.columns)[:6] != _CSV_COLUMNS:
-            warnings.warn(
-                f"Columns {df.columns} does not match the standard column "
-                "names for Molecules object.",
-                UserWarning,
-            )
-
+        pos_cols = pos_cols.copy()
+        rot_cols = rot_cols.copy()
+        df: pd.DataFrame = pd.read_csv(path, **pd_kwargs)  # type: ignore
+        pos = df[pos_cols]
+        rotvec = df[rot_cols]
+        cols = pos + rotvec
+        others = df.iloc[:, np.array([c not in cols for c in df.columns])]
         return cls(
-            df.iloc[:, :3],
-            Rotation.from_rotvec(df.iloc[:, 3:6]),
-            features=df.iloc[:, 6:],
+            pos,
+            Rotation.from_rotvec(rotvec),
+            features=others,
         )
 
     @property
@@ -300,9 +299,9 @@ class Molecules:
             vec_y = self._rotator[index].apply([0.0, 1.0, 0.0])
             vec_z = -np.cross(vec_x, vec_y)
             ind_z, ind_y, ind_x = [np.arange(s) - c for s, c in zip(shape, center)]
-            x_ax = vec_x[:, np.newaxis] * ind_x
-            y_ax = vec_y[:, np.newaxis] * ind_y
-            z_ax = vec_z[:, np.newaxis] * ind_z
+            x_ax: np.ndarray = vec_x[:, np.newaxis] * ind_x
+            y_ax: np.ndarray = vec_y[:, np.newaxis] * ind_y
+            z_ax: np.ndarray = vec_z[:, np.newaxis] * ind_z
 
             # There will be many points so data type should be converted into 32-bit
             x_ax = x_ax.astype(np.float32)

@@ -28,59 +28,6 @@ _A = TypeVar("_A", np.ndarray, da.core.Array)
 _R = TypeVar("_R")
 
 
-def subtomogram_loader(
-    image: np.ndarray | da.core.Array,
-    molecules: Molecules,
-    output_shape: pixel | tuple[pixel, pixel, pixel],
-    order: int = 3,
-    scale: nm = 1.0,
-    chunksize: int = 1,
-) -> SubtomogramLoader | ChunkedSubtomogramLoader:
-    """
-    Return a proper subtomogram loader object.
-
-    Parameters
-    ----------
-    image : np.ndarray or da.core.Array
-        Tomogram image. Must be 3-D.
-    molecules : Molecules
-        Molecules object that represents positions and orientations of
-        subtomograms.
-    output_shape : int or tuple of int
-        Shape of output subtomogram in pixel.
-    order : int, default is 3
-        Interpolation order of subtomogram sampling.
-        - 0 = Nearest neighbor
-        - 1 = Linear interpolation
-        - 3 = Cubic interpolation
-    scale : float, default is 1.0
-        Physical scale of pixel, such as nm. This value does not affect
-        averaging/alignment results but molecule coordinates are multiplied
-        by this value. This parameter is useful when another loader with
-        binned image is created.
-    chunksize : int, default is 1
-        Set to >1 if adjacent molecules are physically adjacent.
-
-    Returns
-    -------
-    SubtomogramLoader or ChunkedSubtomogramLoader object
-        Proper subtomogram loader object.
-    """
-    if not image.ndim == 3:
-        raise TypeError("Input image must be 3D.")
-    kwargs = dict(
-        image=image,
-        molecules=molecules,
-        output_shape=output_shape,
-        order=order,
-        scale=scale,
-    )
-    if chunksize == 1:
-        return SubtomogramLoader(**kwargs)  # type: ignore
-    else:
-        return ChunkedSubtomogramLoader(**kwargs, chunksize=chunksize)  # type: ignore
-
-
 class SubtomogramLoader:
     """A basic subtomogram loader class."""
 
@@ -256,17 +203,6 @@ class SubtomogramLoader:
             self._output_shape = template.shape
         return None
 
-    def get_subtomogram(self, i: int) -> np.ndarray:
-        if self._cached_dask_array is not None:
-            return da.compute(self._cached_dask_array[i])[0]
-
-        image = self.image
-        scale = self.scale
-        coords = self.molecules.cartesian_at(i, self.output_shape, scale)
-        mapped = _utils.map_coordinates(image, coords, order=self.order, cval=np.mean)
-        subvol = np.stack(list(mapped), axis=0)
-        return subvol
-
     def construct_dask(self) -> da.core.Array:
         """
         Construct a dask array of subtomograms.
@@ -281,17 +217,33 @@ class SubtomogramLoader:
         """
         if self._cached_dask_array is not None:
             return self._cached_dask_array
-        delayed_get_subtomogram = delayed(self.get_subtomogram)
 
-        arrays = [
-            da.from_delayed(
-                delayed_get_subtomogram(i),
-                shape=self.output_shape,
-                dtype=np.float32,
+        image = self.image
+        scale = self.scale
+        if isinstance(image, np.ndarray):
+            image = da.from_array(image)
+        arrays = []
+        for i in range(len(self)):
+            subvol, mtx = _utils.crop_subtomogram(
+                image,
+                self.molecules.pos[i] / scale,
+                self.output_shape,
+                self.molecules.rotator[i],
             )
-            for i in range(len(self))
-        ]
-        return da.stack(arrays, axis=0)
+            task = _utils.crop_func(
+                subvol,
+                mtx,
+                shape=self.output_shape,
+                order=self.order,
+                mode="constant",
+                cval=np.mean,
+            )
+            arrays.append(
+                da.from_delayed(task, shape=self.output_shape, dtype=np.float32)
+            )
+
+        out = da.stack(arrays, axis=0)
+        return out
 
     def construct_map(self, f: Callable, *args, **kwargs) -> list[da.core.Delayed]:
         dask_array = self.construct_dask()
@@ -670,112 +622,6 @@ class SubtomogramLoader:
         out: dict[str, np.ndarray] = {"freq": freq}  # type: ignore
         out.update(fsc_all)
         return pd.DataFrame(out)
-
-
-class ChunkedSubtomogramLoader(SubtomogramLoader):
-    """A subtomogram loader class for chunkwise loading."""
-
-    def __init__(
-        self,
-        image: _A,
-        molecules: Molecules,
-        output_shape: int | tuple[int, int, int],
-        order: int = 3,
-        scale: nm = 1.0,
-        chunksize: int = 100,
-    ) -> None:
-        """
-        A SubtomogramLoader class equipped with chunkwise subtomogram loading.
-
-        Parameters
-        ----------
-        image : np.ndarray or da.core.Array
-            Tomogram image. Must be 3-D.
-        molecules : Molecules
-            Molecules object that represents positions and orientations of
-            subtomograms.
-        output_shape : int or tuple of int
-            Shape of output subtomogram in pixel.
-        order : int, default is 3
-            Interpolation order of subtomogram sampling.
-            - 0 = Nearest neighbor
-            - 1 = Linear interpolation
-            - 3 = Cubic interpolation
-        scale : float, default is 1.0
-            Physical scale of pixel, such as nm. This value does not affect
-            averaging/alignment results but molecule coordinates are multiplied
-            by this value. This parameter is useful when another loader with
-            binned image is created.
-        chunksize : int, default is 1
-            How many subtomogram will be loaded at the same time.
-        """
-        super().__init__(image, molecules, output_shape, order, scale=scale)
-        self._chunksize = chunksize
-
-    @property
-    def chunksize(self) -> int:
-        """Return the chunk size on subtomogram loading."""
-        return self._chunksize
-
-    def replace(
-        self,
-        molecules: Molecules | None = None,
-        output_shape: int | tuple[int, int, int] | None = None,
-        order: int | None = None,
-        scale: float | None = None,
-        chunksize: int | None = None,
-    ) -> Self:
-        """Return a new instance with different parameter(s)."""
-        if molecules is None:
-            molecules = self.molecules
-        if output_shape is None:
-            output_shape = self.output_shape
-        if order is None:
-            order = self.order
-        if scale is None:
-            scale = self.scale
-        if chunksize is None:
-            chunksize = self.chunksize
-        return self.__class__(
-            self.image,
-            molecules=molecules,
-            output_shape=output_shape,
-            order=order,
-            scale=scale,
-            chunksize=chunksize,
-        )
-
-    def get_subtomogram_chunk(self, chunk_index: int) -> np.ndarray:
-        """Generate subtomogram list chunk-wise."""
-        image = self.image
-        sl = slice(chunk_index * self.chunksize, (chunk_index + 1) * self.chunksize)
-        coords = self.molecules.cartesian_at(sl, self.output_shape, self.scale)
-        subvols = _utils.multi_map_coordinates(
-            image, coords, order=self.order, cval=np.mean
-        )
-        return subvols
-
-    def construct_dask(self) -> da.core.Array:
-        delayed_get_subtomogram = delayed(self.get_subtomogram_chunk)
-        n_full_chunk, resid = divmod(len(self), self.chunksize)
-        shapes = [self.chunksize] * n_full_chunk + [resid]
-
-        arrays = [
-            da.from_delayed(
-                delayed_get_subtomogram(i),
-                shape=(c,) + self.output_shape,
-                dtype=np.float32,
-            )
-            for i, c in enumerate(shapes)
-        ]
-        return da.concatenate(arrays, axis=0)
-
-    zShift = "shift-z"
-    yShift = "shift-y"
-    xShift = "shift-x"
-    zRotvec = "rotvec-z"
-    yRotvec = "rotvec-y"
-    xRotvec = "rotvec-x"
 
 
 def get_features(corr_max, local_shifts, rotvec) -> pd.DataFrame:

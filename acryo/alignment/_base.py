@@ -20,6 +20,12 @@ class AlignmentResult(NamedTuple):
 
 
 class BaseAlignmentModel(ABC):
+    """
+    The base class to implement alignment method.
+
+    Must implement ``optimize`` and ``pre_transform``.
+    """
+
     def __init__(
         self,
         template: np.ndarray | Sequence[np.ndarray],
@@ -56,9 +62,37 @@ class BaseAlignmentModel(ABC):
         self,
         subvolume: np.ndarray,
         template: np.ndarray,
-        max_shifts: tuple[float, float, float],
+        max_shifts: tuple[float, ...],
     ) -> tuple[np.ndarray, np.ndarray, float]:
-        """Optimize."""
+        """
+        Optimization of shift and rotation of subvolume.
+
+        This method uses a subvolume and a template image to find the optimal
+        shift/rotation to fit subvolume to template under the restriction of
+        maximum shifts.
+
+        Parameters
+        ----------
+        subvolume : np.ndarray
+            Input subvolume. This array has the same dimensionality as the template.
+        template : np.ndarray
+            Template image.
+        max_shifts : tuple of float
+            Maximum shifts in each axis. This value should be float pixel. If
+            optimization requires integer input, it is better to convert this
+            parameter to tuple of integers.
+
+        Returns
+        -------
+        (3,) np.ndarray, (4,) np.ndarray and float
+            Local shift, local rotation and score. "Local" means you don't have
+            to consider the position and orientation of molecules.
+            - shift ... Shift in pixel.
+            - rotation ... Rotation in quaternion. If this cannot be optimized by the
+              implemented algorithm, this value can be ``[0., 0., 0., 0.]``.
+            - score ... This value Must be a float and larger value should represent
+              better results.
+        """
 
     @abstractmethod
     def pre_transform(self, img: np.ndarray) -> np.ndarray:
@@ -77,9 +111,8 @@ class BaseAlignmentModel(ABC):
         ip.ImgArray
             Template image(s). Its axes varies depending on the input.
 
-            - single template image ... "zyx"
-            - many template images ... "pzyx"
-
+            - single template image ... 3D
+            - many template images ... 4D
         """
         if self.is_multi_templates:
             template_input = np.stack(
@@ -142,7 +175,7 @@ class BaseAlignmentModel(ABC):
         """
         result = self.align(img, max_shifts=max_shifts)
         rotator = Rotation.from_quat(result.quat)
-        matrix = compose_matrices(img.shape, [rotator])[0]
+        matrix = compose_matrices(np.array(img.shape) / 2 - 0.5, [rotator])[0]  #
         if cval is None:
             _cval = np.percentile(img, 1)
         else:
@@ -254,7 +287,9 @@ class SupportRotation(BaseAlignmentModel):
         """
         if self._n_rotations > 1:
             rotators = [Rotation.from_quat(r).inv() for r in self.quaternions]
-            matrices = compose_matrices(self._template.shape[-3:], rotators)
+            matrices = compose_matrices(
+                np.array(self._template.shape[-3:]) / 2 - 0.5, rotators
+            )
             cval = np.percentile(self._template, 1)
             if self.is_multi_templates:
                 all_templates: list[np.ndarray] = []

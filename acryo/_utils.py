@@ -1,114 +1,17 @@
 from __future__ import annotations
 import numpy as np
-from dask import array as da
+from dask import array as da, delayed
 from scipy import ndimage as ndi
 from scipy.fft import fftn
-from typing import Callable, TYPE_CHECKING
+from typing import Sequence, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from scipy.spatial.transform import Rotation
 
 
-def map_coordinates(
-    input: np.ndarray | da.core.Array,
-    coordinates: np.ndarray,
-    order: int = 3,
-    mode: str = "constant",
-    cval: float | Callable[[np.ndarray], float] = 0.0,
-) -> np.ndarray:
-    """
-    Modified version of ``scipy.ndimage.map_coordinates``.
-
-    This function crops the inputimage at the edges of coordinates before
-    calling ``ndi.map_coordinates`` to avoid loading entire array into memory.
-    """
-    coordinates = coordinates.copy()
-    shape = input.shape
-    sl = []
-    for i in range(input.ndim):
-        imin = int(np.min(coordinates[i])) - order
-        imax = int(np.ceil(np.max(coordinates[i]))) + order + 1
-        _sl, _pad = make_slice_and_pad(imin, imax, shape[i])
-        sl.append(_sl)
-        coordinates[i] -= _sl.start
-
-    img = input[tuple(sl)]
-    if isinstance(img, da.core.Array):
-        img = img.compute()
-    if callable(cval):
-        cval = cval(img)
-
-    return ndi.map_coordinates(
-        img,
-        coordinates=coordinates,
-        order=order,
-        mode=mode,
-        cval=cval,
-        prefilter=order > 1,
-    )
-
-
-def multi_map_coordinates(
-    input: np.ndarray | da.core.Array,
-    coordinates: np.ndarray,
-    order: int = 3,
-    mode: str = "constant",
-    cval: float | Callable[[np.ndarray], float] = 0.0,
-) -> np.ndarray:
-    """
-    Multiple map-coordinate.
-
-    Result of this function is identical to following code.
-
-    .. code-block:: python
-
-        outputs = []
-        for i in range(len(coordinates)):
-            out = ndi.map_coordinates(input, coordinates[i], ...)
-            outputs.append(out)
-
-    """
-    shape = input.shape
-    coordinates = coordinates.copy()
-
-    if coordinates.ndim != input.ndim + 2:
-        if coordinates.ndim == input.ndim + 1:
-            coordinates = coordinates[np.newaxis]
-        else:
-            raise ValueError(f"Coordinates have wrong dimension: {coordinates.shape}.")
-
-    sl = []
-    for i in range(coordinates.shape[1]):
-        imin = int(np.min(coordinates[:, i])) - order
-        imax = int(np.ceil(np.max(coordinates[:, i]))) + order + 1
-        _sl, _pad = make_slice_and_pad(imin, imax, shape[i])
-        sl.append(_sl)
-        coordinates[:, i] -= _sl.start
-
-    img = input[tuple(sl)]
-    if isinstance(img, da.core.Array):
-        img = img.compute()
-    if callable(cval):
-        cval = cval(img)
-    input_img = img
-
-    imgs: list[np.ndarray] = []
-    for crds in coordinates:
-        imgs.append(
-            ndi.map_coordinates(
-                input_img,
-                crds,
-                mode=mode,
-                cval=cval,
-                order=order,
-                prefilter=order > 1,
-            )
-        )
-
-    return np.stack(imgs, axis=0)
-
-
-def make_slice_and_pad(z0: int, z1: int, size: int) -> tuple[slice, tuple[int, int]]:
+def _make_slice_and_pad(
+    z0: int, z1: int, size: int
+) -> tuple[slice, tuple[int, int], bool]:
     """
     Helper function for cropping images.
 
@@ -129,16 +32,19 @@ def make_slice_and_pad(z0: int, z1: int, size: int) -> tuple[slice, tuple[int, i
     elif z1 < 0:
         raise ValueError(f"Specified size is {size} but need to slice at {z0}:{z1}.")
 
-    return slice(z0, z1), (z0_pad, z1_pad)
+    return slice(z0, z1), (z0_pad, z1_pad), z0_pad != 0 or z1_pad != 0
 
 
 def compose_matrices(
-    shape: tuple[int, int, int],
+    center: Sequence[float] | np.ndarray,
     rotators: list[Rotation],
+    output_center: Sequence[float] | np.ndarray | None = None,
 ):
     """Compose Affine matrices from an array shape and a Rotation object."""
 
-    dz, dy, dx = (np.array(shape) - 1) / 2
+    dz, dy, dx = center
+    if output_center is None:
+        output_center = center
     # center to corner
     translation_0 = np.array(
         [
@@ -150,6 +56,7 @@ def compose_matrices(
         dtype=np.float32,
     )
     # corner to center
+    dz, dy, dx = output_center
     translation_1 = np.array(
         [
             [1.0, 0.0, 0.0, -dz],
@@ -221,6 +128,7 @@ def fourier_shell_correlation(
 
 
 def bin_image(img: np.ndarray | da.core.Array, binsize: int) -> np.ndarray:
+    """Bin an image."""
     _slices: list[slice] = []
     _shapes: list[int] = []
     for s in img.shape:
@@ -232,3 +140,53 @@ def bin_image(img: np.ndarray | da.core.Array, binsize: int) -> np.ndarray:
     img_reshaped = np.reshape(img[slices], shapes)
     axis = tuple(i * 2 + 1 for i in range(img.ndim))
     return np.sum(img_reshaped, axis=axis)
+
+
+def crop_subtomogram(
+    img: da.core.Array,
+    center: tuple[int, ...],
+    shape,
+    rot: Rotation,
+    order: int = 1,
+):
+    max_len = np.sqrt(np.sum(np.asarray(shape, dtype=np.float32) ** 2))
+    output_center = np.array(shape) / 2 - 0.5
+    half_len = max_len / 2
+    slices: list[slice] = []
+    pads: list[tuple[int, ...]] = []
+    new_center: list[float] = []
+    need_pad = False
+    for c, s in zip(center, img.shape):
+        x0 = int(c - half_len - order)
+        x1 = int(x0 + max_len + 2 * order + 1)
+        _sl, _pad, _need_pad = _make_slice_and_pad(x0, x1, s)
+        slices.append(_sl)
+        pads.append(_pad)
+        new_center.append(c - x0)
+        need_pad = need_pad or _need_pad
+
+    img0 = img[tuple(slices)]
+    if need_pad:
+        subimg = da.pad(img0, pads)
+    else:
+        subimg = img0
+
+    mtx = compose_matrices(new_center, [rot], output_center=output_center)[0]
+    return subimg, mtx
+
+
+@delayed
+def crop_func(subimg: np.ndarray, mtx: np.ndarray, shape, order, mode, cval):
+    if callable(cval):
+        cval = cval(subimg)
+
+    out = ndi.affine_transform(
+        subimg,
+        matrix=mtx,
+        output_shape=shape,
+        order=order,
+        prefilter=order > 1,
+        mode=mode,
+        cval=cval,
+    )
+    return out

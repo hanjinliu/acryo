@@ -54,7 +54,7 @@ class TomogramGenerator:
         from scipy.spatial.transform import Rotation
 
         rotators = [Rotation.from_quat(self.quaternions[idx]) for idx in quat_idx]
-        return compose_matrices(self.template.shape, rotators)
+        return compose_matrices(np.array(self.template.shape) / 2 - 0.5, rotators)
 
     def get_tomogram(
         self, pad_width: int = 0, tilt_range: tuple[degree, degree] = (-90, 90)
