@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import (
     Callable,
     TYPE_CHECKING,
+    Sequence,
     TypeVar,
 )
 import warnings
@@ -28,6 +29,14 @@ _A = TypeVar("_A", np.ndarray, da.core.Array)
 _R = TypeVar("_R")
 
 
+class Unset:
+    def __bool__(self) -> bool:
+        return False
+
+
+_UNSET = Unset()
+
+
 class SubtomogramLoader:
     """A basic subtomogram loader class."""
 
@@ -35,9 +44,9 @@ class SubtomogramLoader:
         self,
         image: _A,
         molecules: Molecules,
-        output_shape: pixel | tuple[pixel, pixel, pixel],
         order: int = 3,
         scale: nm = 1.0,
+        output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = _UNSET,
         corner_safe: bool = False,
     ) -> None:
         """
@@ -55,8 +64,6 @@ class SubtomogramLoader:
         molecules : Molecules
             Molecules object that represents positions and orientations of
             subtomograms.
-        output_shape : int or tuple of int
-            Shape of output subtomogram in pixel.
         order : int, default is 3
             Interpolation order of subtomogram sampling.
             - 0 = Nearest neighbor
@@ -67,6 +74,8 @@ class SubtomogramLoader:
             averaging/alignment results but molecule coordinates are multiplied
             by this value. This parameter is useful when another loader with
             binned image is created.
+        output_shape : int or tuple of int, optional
+            Shape of output subtomogram in pixel.
         corner_safe : bool, default is False
             If true, regions around molecules will be cropped at a volume larger
             than ``output_shape`` so that densities at the corners will not be
@@ -100,10 +109,10 @@ class SubtomogramLoader:
         self._order = order
 
         # check output_shape
-        if isinstance(output_shape, int):
-            self._output_shape = (output_shape,) * image.ndim
+        if isinstance(output_shape, Unset):
+            self._output_shape = output_shape
         else:
-            self._output_shape = tuple(output_shape)
+            self._output_shape = _normalize_shape(output_shape, ndim=image.ndim)
 
         # check scale
         self._scale = float(scale)
@@ -139,7 +148,7 @@ class SubtomogramLoader:
         return self._scale
 
     @property
-    def output_shape(self) -> tuple[pixel, ...]:
+    def output_shape(self) -> tuple[pixel, ...] | Unset:
         """Return the output subtomogram shape."""
         return self._output_shape
 
@@ -164,7 +173,7 @@ class SubtomogramLoader:
     def replace(
         self,
         molecules: Molecules | None = None,
-        output_shape: pixel | tuple[pixel, pixel, pixel] | None = None,
+        output_shape: pixel | tuple[pixel, pixel, pixel] | Unset | None = None,
         order: int | None = None,
         scale: float | None = None,
         corner_safe: bool | None = None,
@@ -207,6 +216,8 @@ class SubtomogramLoader:
         return out
 
     def _check_shape(self, template: np.ndarray, name: str = "template") -> None:
+        if isinstance(self.output_shape, Unset):
+            return None
         if template.shape != self.output_shape:
             warnings.warn(
                 f"'output_shape' of {self.__class__.__name__} object "
@@ -217,7 +228,10 @@ class SubtomogramLoader:
             self._output_shape = template.shape
         return None
 
-    def construct_loading_tasks(self) -> list[da.core.Delayed]:
+    def construct_loading_tasks(
+        self,
+        output_shape: pixel | tuple[pixel, ...] | None = None,
+    ) -> list[da.core.Delayed]:
         """
         Construct a list of subtomogram lazy loader.
 
@@ -231,6 +245,8 @@ class SubtomogramLoader:
         if isinstance(image, np.ndarray):
             image = da.from_array(image)
 
+        output_shape = self._get_output_shape(output_shape)
+
         if self.corner_safe:
             _prep = _utils.prepare_affine_cornersafe
         else:
@@ -240,13 +256,13 @@ class SubtomogramLoader:
             subvol, mtx = _prep(
                 image,
                 self.molecules.pos[i] / scale,
-                self.output_shape,
+                output_shape,
                 self.molecules.rotator[i],
             )
             task = _utils.rotated_crop(
                 subvol,
                 mtx,
-                shape=self.output_shape,
+                shape=output_shape,
                 order=self.order,
                 mode="constant",
                 cval=np.mean,
@@ -255,7 +271,10 @@ class SubtomogramLoader:
 
         return tasks
 
-    def construct_dask(self) -> da.core.Array:
+    def construct_dask(
+        self,
+        output_shape: pixel | tuple[pixel, ...] | None = None,
+    ) -> da.core.Array:
         """
         Construct a dask array of subtomograms.
 
@@ -270,7 +289,7 @@ class SubtomogramLoader:
         if self._cached_dask_array is not None:
             return self._cached_dask_array
 
-        tasks = self.construct_loading_tasks()
+        tasks = self.construct_loading_tasks(output_shape=output_shape)
         arrays = []
         for task in tasks:
             arrays.append(
@@ -281,14 +300,22 @@ class SubtomogramLoader:
         return out
 
     def construct_mapping_tasks(
-        self, func: Callable, *args, **kwargs
+        self,
+        func: Callable,
+        *args,
+        output_shape: pixel | tuple[pixel, ...] | None = None,
+        **kwargs,
     ) -> list[da.core.Delayed]:
-        dask_array = self.construct_loading_tasks()
+        dask_array = self.construct_loading_tasks(output_shape=output_shape)
         delayed_f = delayed(func)
         tasks = [delayed_f(ar, *args, **kwargs) for ar in dask_array]
         return tasks
 
-    def create_cache(self, path: str | None = None) -> da.core.Array:
+    def create_cache(
+        self,
+        output_shape: pixel | tuple[pixel] | None = None,
+        path: str | None = None,
+    ) -> da.core.Array:
         """
         Create cached stack of subtomograms.
 
@@ -316,8 +343,9 @@ class SubtomogramLoader:
         >>> avg = np.mean(arr, axis=0).mean()
 
         """
-        dask_array = self.construct_dask()
-        shape = (len(self.molecules),) + self.output_shape
+        output_shape = self._get_output_shape(output_shape)
+        dask_array = self.construct_dask(output_shape=output_shape)
+        shape = (len(self.molecules),) + output_shape
         kwargs = dict(dtype=np.float32, mode="w+", shape=shape)
         if path is None:
             with tempfile.NamedTemporaryFile() as ntf:
@@ -340,6 +368,7 @@ class SubtomogramLoader:
 
     def average(
         self,
+        output_shape: pixel | tuple[pixel] | None = None,
     ) -> np.ndarray:
         """
         Calculate the average of subtomograms.
@@ -352,7 +381,7 @@ class SubtomogramLoader:
         np.ndarray
             Averaged image
         """
-        dask_array = self.construct_dask()
+        dask_array = self.construct_dask(output_shape=output_shape)
         return da.compute(da.mean(dask_array, axis=0))[0]
 
     def average_split(
@@ -360,6 +389,7 @@ class SubtomogramLoader:
         n_set: int = 1,
         seed: int | None = 0,
         squeeze: bool = True,
+        output_shape: pixel | tuple[pixel] | None = None,
     ) -> np.ndarray:
         """
         Split subtomograms into two set and average separately.
@@ -381,6 +411,7 @@ class SubtomogramLoader:
             Averaged image
         """
         nmole = len(self)
+        output_shape = self._get_output_shape(output_shape)
         np.random.seed(seed)
         tasks = []
         for _ in range(n_set):
@@ -395,7 +426,7 @@ class SubtomogramLoader:
             tasks.extend([dask_avg0, dask_avg1])
         np.random.seed(None)
         out = da.compute(tasks)[0]
-        stack = np.stack(out, axis=0).reshape(n_set, 2, *self.output_shape)
+        stack = np.stack(out, axis=0).reshape(n_set, 2, *output_shape)
         if squeeze and n_set == 1:
             stack = stack[0]
         return stack
@@ -444,7 +475,9 @@ class SubtomogramLoader:
             mask=mask,
             **align_kwargs,
         )
-        tasks = self.construct_mapping_tasks(model.align, _max_shifts_px)
+        tasks = self.construct_mapping_tasks(
+            model.align, _max_shifts_px, output_shape=template.shape
+        )
         all_results = da.compute(tasks)[0]
 
         local_shifts, local_rot, scores = _allocate(len(self))
@@ -462,13 +495,14 @@ class SubtomogramLoader:
             get_features(scores, local_shifts, rotator.as_rotvec()),
         )
 
-        return self.replace(molecules=mole_aligned)
+        return self.replace(molecules=mole_aligned, output_shape=template.shape)
 
     def align_no_template(
         self,
         *,
         mask: np.ndarray | Callable[[np.ndarray], np.ndarray] | None = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
+        output_shape: pixel | tuple[pixel] | None = None,
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
         **align_kwargs,
     ) -> Self:
@@ -497,20 +531,23 @@ class SubtomogramLoader:
         SubtomogramLoader
             An loader instance with updated molecules.
         """
-        all_subvols = self.create_cache()
+        if output_shape is None and isinstance(mask, np.ndarray):
+            output_shape = mask.shape
+
+        all_subvols = self.create_cache(output_shape=output_shape)
 
         template = da.compute(da.mean(all_subvols, axis=0))[0]
 
         # get mask image
         if isinstance(mask, np.ndarray):
-            mask = mask
+            _mask = mask
         elif callable(mask):
-            mask = mask(template)
+            _mask = mask(template)
         else:
-            mask = mask
+            _mask = mask
         return self.align(
             template,
-            mask=mask,
+            mask=_mask,
             max_shifts=max_shifts,
             alignment_model=alignment_model,
             **align_kwargs,
@@ -566,7 +603,9 @@ class SubtomogramLoader:
             mask=mask,
             **align_kwargs,
         )
-        tasks = self.construct_mapping_tasks(model.align, _max_shifts_px)
+        tasks = self.construct_mapping_tasks(
+            model.align, _max_shifts_px, output_shape=templates[0].shape
+        )
         all_results = da.compute(tasks)[0]
 
         local_shifts, local_rot, scores = _allocate(len(self))
@@ -592,7 +631,7 @@ class SubtomogramLoader:
             axis=1,
         )
 
-        return self.replace(molecules=mole_aligned)
+        return self.replace(molecules=mole_aligned, output_shape=templates[0].shape)
 
     def subtomoprops(
         self,
@@ -600,14 +639,16 @@ class SubtomogramLoader:
         func: Callable[[np.ndarray, np.ndarray], _R],
         mask: np.ndarray | None = None,
     ) -> list[_R]:
-
+        self._check_shape(template)
         if mask is None:
-            _mask = 1
+            _mask = 1.0
         else:
             _mask = mask
         template_masked = template * _mask
 
-        tasks = self.construct_mapping_tasks(func, template_masked)
+        tasks = self.construct_mapping_tasks(
+            func, template_masked, output_shape=template.shape
+        )
         all_results: list[_R] = da.compute(tasks)[0]
 
         return all_results
@@ -660,6 +701,17 @@ class SubtomogramLoader:
         out.update(fsc_all)
         return pd.DataFrame(out)
 
+    def _get_output_shape(
+        self, output_shape: pixel | tuple[pixel] | None
+    ) -> tuple[pixel, ...]:
+        if output_shape is None:
+            if isinstance(self.output_shape, Unset):
+                raise ValueError("Output shape is unknown.")
+            _output_shape = self.output_shape
+        else:
+            _output_shape = _normalize_shape(output_shape, ndim=self.image.ndim)
+        return _output_shape
+
 
 def get_features(corr_max, local_shifts, rotvec) -> pd.DataFrame:
     features = {
@@ -696,3 +748,11 @@ def _allocate(size: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     local_rot[:, 3] = 1  # identity map in quaternion
 
     return local_shifts, local_rot, corr_max
+
+
+def _normalize_shape(a: pixel | Sequence[pixel], ndim: int):
+    if isinstance(a, int):
+        _output_shape = (a,) * ndim
+    else:
+        _output_shape = tuple(a)
+    return _output_shape

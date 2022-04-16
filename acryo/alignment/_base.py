@@ -5,7 +5,6 @@ import numpy as np
 from scipy import ndimage as ndi
 from scipy.spatial.transform import Rotation
 from dask import array as da, delayed
-from functools import cached_property
 
 from ._utils import normalize_rotations, lowpass_filter, lowpass_filter_ft
 from .._types import Ranges
@@ -35,6 +34,7 @@ class BaseAlignmentModel(ABC):
     ):
         if isinstance(template, np.ndarray):
             self._template = template
+            self._n_templates = 1
             self._ndim = template.ndim
         else:
             self._template: np.ndarray = np.stack(template, axis=0)
@@ -52,13 +52,16 @@ class BaseAlignmentModel(ABC):
             self.mask = mask
 
         self._align_func = self._get_alignment_function()
+        self._template_input: np.ndarray | None = None
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(shape={self._template.shape})"
 
-    @cached_property
+    @property
     def template_input(self) -> np.ndarray:
-        return self._get_template_input()
+        if self._template_input is None:
+            self._template_input = self._get_template_input()
+        return self._template_input
 
     @abstractmethod
     def optimize(
