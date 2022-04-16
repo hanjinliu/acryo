@@ -38,6 +38,7 @@ class SubtomogramLoader:
         output_shape: pixel | tuple[pixel, pixel, pixel],
         order: int = 3,
         scale: nm = 1.0,
+        corner_safe: bool = False,
     ) -> None:
         """
         A class for efficient loading of subtomograms.
@@ -66,6 +67,11 @@ class SubtomogramLoader:
             averaging/alignment results but molecule coordinates are multiplied
             by this value. This parameter is useful when another loader with
             binned image is created.
+        corner_safe : bool, default is False
+            If true, regions around molecules will be cropped at a volume larger
+            than ``output_shape`` so that densities at the corners will not be
+            lost due to rotation. If target density is globular, this parameter
+            should be set false to save computation time.
         """
         # check type of input image
         if isinstance(image, np.ndarray):
@@ -104,6 +110,7 @@ class SubtomogramLoader:
         if self._scale <= 0:
             raise ValueError("Negative scale is not allowed.")
 
+        self._corner_safe = corner_safe
         self._cached_dask_array: da.core.Array | None = None
 
     def __repr__(self) -> str:
@@ -146,6 +153,10 @@ class SubtomogramLoader:
         """Return the interpolation order."""
         return self._order
 
+    @property
+    def corner_safe(self) -> bool:
+        return self._corner_safe
+
     def __len__(self) -> int:
         """Return the number of subtomograms."""
         return self.molecules.pos.shape[0]
@@ -156,6 +167,7 @@ class SubtomogramLoader:
         output_shape: pixel | tuple[pixel, pixel, pixel] | None = None,
         order: int | None = None,
         scale: float | None = None,
+        corner_safe: bool | None = None,
     ) -> Self:
         """Return a new instance with different parameter(s)."""
         if molecules is None:
@@ -166,6 +178,8 @@ class SubtomogramLoader:
             order = self.order
         if scale is None:
             scale = self.scale
+        if corner_safe is None:
+            corner_safe = self.corner_safe
         return self.__class__(
             self.image,
             molecules=molecules,
@@ -203,6 +217,44 @@ class SubtomogramLoader:
             self._output_shape = template.shape
         return None
 
+    def construct_loading_tasks(self) -> list[da.core.Delayed]:
+        """
+        Construct a list of subtomogram lazy loader.
+
+        Returns
+        -------
+        list of Delayed object
+            Each object returns a subtomogram on execution by ``da.compute``.
+        """
+        image = self.image
+        scale = self.scale
+        if isinstance(image, np.ndarray):
+            image = da.from_array(image)
+
+        if self.corner_safe:
+            _prep = _utils.prepare_affine_cornersafe
+        else:
+            _prep = _utils.prepare_affine
+        tasks = []
+        for i in range(len(self)):
+            subvol, mtx = _prep(
+                image,
+                self.molecules.pos[i] / scale,
+                self.output_shape,
+                self.molecules.rotator[i],
+            )
+            task = _utils.rotated_crop(
+                subvol,
+                mtx,
+                shape=self.output_shape,
+                order=self.order,
+                mode="constant",
+                cval=np.mean,
+            )
+            tasks.append(task)
+
+        return tasks
+
     def construct_dask(self) -> da.core.Array:
         """
         Construct a dask array of subtomograms.
@@ -218,26 +270,9 @@ class SubtomogramLoader:
         if self._cached_dask_array is not None:
             return self._cached_dask_array
 
-        image = self.image
-        scale = self.scale
-        if isinstance(image, np.ndarray):
-            image = da.from_array(image)
+        tasks = self.construct_loading_tasks()
         arrays = []
-        for i in range(len(self)):
-            subvol, mtx = _utils.crop_subtomogram(
-                image,
-                self.molecules.pos[i] / scale,
-                self.output_shape,
-                self.molecules.rotator[i],
-            )
-            task = _utils.crop_func(
-                subvol,
-                mtx,
-                shape=self.output_shape,
-                order=self.order,
-                mode="constant",
-                cval=np.mean,
-            )
+        for task in tasks:
             arrays.append(
                 da.from_delayed(task, shape=self.output_shape, dtype=np.float32)
             )
@@ -245,9 +280,11 @@ class SubtomogramLoader:
         out = da.stack(arrays, axis=0)
         return out
 
-    def construct_map(self, f: Callable, *args, **kwargs) -> list[da.core.Delayed]:
-        dask_array = self.construct_dask()
-        delayed_f = delayed(f)
+    def construct_mapping_tasks(
+        self, func: Callable, *args, **kwargs
+    ) -> list[da.core.Delayed]:
+        dask_array = self.construct_loading_tasks()
+        delayed_f = delayed(func)
         tasks = [delayed_f(ar, *args, **kwargs) for ar in dask_array]
         return tasks
 
@@ -258,7 +295,7 @@ class SubtomogramLoader:
         Parameters
         ----------
         path : str, optional
-            File path of the temporary file. If not given file will be created  by
+            File path of the temporary file. If not given file will be created by
             ``tempfile.NamedTemporaryFile`` function.
 
         Returns
@@ -270,13 +307,13 @@ class SubtomogramLoader:
         --------
         1. Get i-th subtomogram.
 
-        >>> arr = loader.to_lazy_imgarray()  # axes = "pzyx"
+        >>> arr = loader.create_cache()
         >>> arr[i]
 
         2. Subtomogram averaging.
 
-        >>> arr = loader.to_lazy_imgarray()  # axes = "pzyx"
-        >>> avg = arr.proj("p")  # identical to np.mean(arr, axis=0)
+        >>> arr = loader.create_cache()
+        >>> avg = np.mean(arr, axis=0).mean()
 
         """
         dask_array = self.construct_dask()
@@ -407,7 +444,7 @@ class SubtomogramLoader:
             mask=mask,
             **align_kwargs,
         )
-        tasks = self.construct_map(model.align, _max_shifts_px)
+        tasks = self.construct_mapping_tasks(model.align, _max_shifts_px)
         all_results = da.compute(tasks)[0]
 
         local_shifts, local_rot, scores = _allocate(len(self))
@@ -529,7 +566,7 @@ class SubtomogramLoader:
             mask=mask,
             **align_kwargs,
         )
-        tasks = self.construct_map(model.align, _max_shifts_px)
+        tasks = self.construct_mapping_tasks(model.align, _max_shifts_px)
         all_results = da.compute(tasks)[0]
 
         local_shifts, local_rot, scores = _allocate(len(self))
@@ -570,7 +607,7 @@ class SubtomogramLoader:
             _mask = mask
         template_masked = template * _mask
 
-        tasks = self.construct_map(func, template_masked)
+        tasks = self.construct_mapping_tasks(func, template_masked)
         all_results: list[_R] = da.compute(tasks)[0]
 
         return all_results

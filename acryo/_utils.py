@@ -142,7 +142,38 @@ def bin_image(img: np.ndarray | da.core.Array, binsize: int) -> np.ndarray:
     return np.sum(img_reshaped, axis=axis)
 
 
-def crop_subtomogram(
+def prepare_affine(
+    img: da.core.Array,
+    center: tuple[int, ...],
+    output_shape,
+    rot: Rotation,
+    order: int = 1,
+):
+    output_center = np.array(output_shape) / 2 - 0.5
+    slices: list[slice] = []
+    pads: list[tuple[int, ...]] = []
+    new_center: list[float] = []
+    need_pad = False
+    for c, s, s0 in zip(center, output_shape, img.shape):
+        x0 = int(c - s / 2 - order)
+        x1 = int(x0 + s + 2 * order + 1)
+        _sl, _pad, _need_pad = _make_slice_and_pad(x0, x1, s0)
+        slices.append(_sl)
+        pads.append(_pad)
+        new_center.append(c - x0)
+        need_pad = need_pad or _need_pad
+
+    img0 = img[tuple(slices)]
+    if need_pad:
+        input = da.pad(img0, pads)
+    else:
+        input = img0
+
+    mtx = compose_matrices(new_center, [rot], output_center=output_center)[0]
+    return input, mtx
+
+
+def prepare_affine_cornersafe(
     img: da.core.Array,
     center: tuple[int, ...],
     shape,
@@ -156,10 +187,10 @@ def crop_subtomogram(
     pads: list[tuple[int, ...]] = []
     new_center: list[float] = []
     need_pad = False
-    for c, s in zip(center, img.shape):
+    for c, s0 in zip(center, img.shape):
         x0 = int(c - half_len - order)
         x1 = int(x0 + max_len + 2 * order + 1)
-        _sl, _pad, _need_pad = _make_slice_and_pad(x0, x1, s)
+        _sl, _pad, _need_pad = _make_slice_and_pad(x0, x1, s0)
         slices.append(_sl)
         pads.append(_pad)
         new_center.append(c - x0)
@@ -167,16 +198,16 @@ def crop_subtomogram(
 
     img0 = img[tuple(slices)]
     if need_pad:
-        subimg = da.pad(img0, pads)
+        input = da.pad(img0, pads)
     else:
-        subimg = img0
+        input = img0
 
     mtx = compose_matrices(new_center, [rot], output_center=output_center)[0]
-    return subimg, mtx
+    return input, mtx
 
 
 @delayed
-def crop_func(subimg: np.ndarray, mtx: np.ndarray, shape, order, mode, cval):
+def rotated_crop(subimg: np.ndarray, mtx: np.ndarray, shape, order, mode, cval):
     if callable(cval):
         cval = cval(subimg)
 
