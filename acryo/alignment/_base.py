@@ -4,6 +4,8 @@ from typing import Iterable, NamedTuple, Sequence
 import numpy as np
 from scipy import ndimage as ndi
 from scipy.spatial.transform import Rotation
+from dask import array as da, delayed
+from functools import cached_property
 
 from ._utils import normalize_rotations, lowpass_filter, lowpass_filter_ft
 from .._types import Ranges
@@ -16,7 +18,7 @@ class AlignmentResult(NamedTuple):
     label: int
     shift: np.ndarray
     quat: np.ndarray
-    corr: float
+    score: float
 
 
 class BaseAlignmentModel(ABC):
@@ -32,22 +34,17 @@ class BaseAlignmentModel(ABC):
         mask: np.ndarray | None = None,
     ):
         if isinstance(template, np.ndarray):
-            if template.ndim in (3, 4):
-                self._template = np.asarray(template)
-                if template.ndim == 3:
-                    self._n_templates = 1
-                else:
-                    self._n_templates = template.shape[0]
-            else:
-                raise TypeError("ndim must be 3 or 4.")
+            self._template = template
+            self._ndim = template.ndim
         else:
             self._template: np.ndarray = np.stack(template, axis=0)
             self._n_templates = self._template.shape[0]
+            self._ndim = self._template.ndim - 1
 
         if mask is None:
             self.mask = 1
         else:
-            if self._template.shape[-3:] != mask.shape:
+            if self._template.shape[-self._ndim :] != mask.shape:
                 raise ValueError(
                     "Shape mismatch in zyx axes between tempalte image "
                     f"{self._template.shape} and mask image {mask.shape})."
@@ -55,7 +52,13 @@ class BaseAlignmentModel(ABC):
             self.mask = mask
 
         self._align_func = self._get_alignment_function()
-        self.template_input = self._get_template_input()
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(shape={self._template.shape})"
+
+    @cached_property
+    def template_input(self) -> np.ndarray:
+        return self._get_template_input()
 
     @abstractmethod
     def optimize(
@@ -263,7 +266,102 @@ class SupportRotation(BaseAlignmentModel):
         """
         iopt, shift, _, corr = super().align(img, max_shifts)
         quat = self.quaternions[iopt % self._n_rotations]
-        return AlignmentResult(label=iopt, shift=shift, quat=quat, corr=corr)
+        return AlignmentResult(label=iopt, shift=shift, quat=quat, score=corr)
+
+    def fit(
+        self,
+        img: np.ndarray,
+        max_shifts: tuple[float, float, float],
+        cval: float | None = None,
+    ) -> tuple[np.ndarray, AlignmentResult]:
+        """
+        Fit image to template based on the alignment model.
+
+        Parameters
+        ----------
+        img : np.ndarray
+            Input image that will be transformed.
+        max_shifts : tuple[float, float, float]
+            Maximum shifts along z, y, x axis in pixel.
+        cval : float, optional
+            Constant value for padding.
+
+        Returns
+        -------
+        np.ndarray, AlignmentResult
+            Transformed input image and the alignment result.
+        """
+        img_masked = img * self.mask
+        delayed_optimize = delayed(self.optimize)
+        delayed_transform = delayed(self._transform_template)
+        template_masked = self._template * self.mask
+        cval = np.percentile(self._template, 1)
+        rotators = [Rotation.from_quat(r).inv() for r in self.quaternions]
+        matrices = compose_matrices(
+            np.array(self._template.shape[-self._ndim :]) / 2 - 0.5, rotators
+        )
+        tasks = []
+        for mat in matrices:
+            tmp = delayed_transform(template_masked, mat, cval=cval)
+            task = delayed_optimize(
+                img_masked,
+                tmp,
+                max_shifts,
+            )
+            tasks.append(task)
+        results: list[tuple] = da.compute(tasks)[0]
+        scores = [x[2] for x in results]
+        iopt = np.argmax(scores)
+        opt_result = results[iopt]
+        result = AlignmentResult(
+            0, opt_result[0], self.quaternions[iopt], opt_result[2]
+        )
+
+        rotator = Rotation.from_quat(result.quat)
+        matrix = compose_matrices(np.array(img.shape) / 2 - 0.5, [rotator])[0]
+        if cval is None:
+            _cval = np.percentile(img, 1)
+        else:
+            _cval = cval
+        img_shifted = ndi.shift(img, result.shift, cval=_cval)
+        img_trans = ndi.affine_transform(img_shifted, matrix, cval=_cval)
+        return img_trans, result
+
+    @delayed
+    def _delayed_optimize(
+        self,
+        subvol: np.ndarray,
+        template_list: Iterable[np.ndarray],
+        max_shifts: tuple[float, float, float],
+    ) -> AlignmentResult:
+        all_shifts: list[np.ndarray] = []
+        all_quat: list[np.ndarray] = []
+        all_score: list[float] = []
+        for template in template_list:
+            shift, quat, score = self.optimize(
+                subvol,
+                template,
+                max_shifts,
+            )
+            all_shifts.append(shift)
+            all_quat.append(quat)
+            all_score.append(score)
+
+        iopt = int(np.argmax(all_score))
+        return AlignmentResult(iopt, all_shifts[iopt], all_quat[iopt], all_score[iopt])
+
+    def _transform_template(
+        self,
+        temp: np.ndarray,
+        matrix: np.ndarray,
+        cval: float | None = None,
+    ) -> np.ndarray:
+        if cval is None:
+            _cval = np.percentile(temp, 1)
+        else:
+            _cval = cval
+
+        return self.pre_transform(ndi.affine_transform(temp, matrix=matrix, cval=_cval))
 
     def _get_template_input(self) -> np.ndarray:
         """
@@ -295,22 +393,17 @@ class SupportRotation(BaseAlignmentModel):
                 all_templates: list[np.ndarray] = []
                 for mat in matrices:
                     for tmp in self._template:
-                        tmp: np.ndarray
-                        cval = np.percentile(tmp, 1)
                         all_templates.append(
-                            self.pre_transform(
-                                ndi.affine_transform(tmp, mat, cval=cval)
-                            )
+                            self._transform_template(tmp * self.mask, mat)
                         )
+
                 template_input: np.ndarray = np.stack(all_templates, axis=0)
 
             else:
                 template_masked = self._template * self.mask
                 template_input: np.ndarray = np.stack(
                     [
-                        self.pre_transform(
-                            ndi.affine_transform(template_masked, mat, cval=cval)
-                        )
+                        self._transform_template(template_masked, mat, cval=cval)
                         for mat in matrices
                     ],
                     axis=0,
