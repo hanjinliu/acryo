@@ -11,6 +11,7 @@ class PCCAlignment(FourierLowpassInput):
         subvolume: np.ndarray,
         template: np.ndarray,
         max_shifts: tuple[float, float, float],
+        quaternion: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray, float]:
         """Optimize."""
         shift, pcc = subpixel_pcc(
@@ -27,6 +28,7 @@ class ZNCCAlignment(RealLowpassInput):
         subvolume: np.ndarray,
         template: np.ndarray,
         max_shifts: tuple[float, float, float],
+        quaternion: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray, float]:
         """Optimize."""
         shift, zncc = subpixel_zncc(

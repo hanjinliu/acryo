@@ -4,7 +4,7 @@ from ._base import (
     BaseAlignmentModel,
     AlignmentResult,
     RotationImplemented,
-    FrequencyCutoffInput,
+    FrequencyCutoffImplemented,
 )
 from ._concrete import PCCAlignment, ZNCCAlignment
 from ._utils import normalize_rotations, rotate, euler_to_quat
@@ -17,7 +17,7 @@ __all__ = [
     "ZNCCAlignment",
     "BaseAlignmentModel",
     "RotationImplemented",
-    "FrequencyCutoffInput",
+    "FrequencyCutoffImplemented",
     "normalize_rotations",
     "rotate",
     "euler_to_quat",

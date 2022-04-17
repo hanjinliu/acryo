@@ -317,13 +317,21 @@ class SubtomogramLoader:
     def construct_mapping_tasks(
         self,
         func: Callable,
-        *args,
+        *const_args,
         output_shape: pixel | tuple[pixel, ...] | None = None,
-        **kwargs,
+        var_kwarg: dict[str, Any] | None = None,
+        **const_kwargs,
     ) -> list[da.core.Delayed]:
         dask_array = self.construct_loading_tasks(output_shape=output_shape)
         delayed_f = delayed(func)
-        tasks = [delayed_f(ar, *args, **kwargs) for ar in dask_array]
+        if var_kwarg is None:
+            tasks = [delayed_f(ar, *const_args, **const_kwargs) for ar in dask_array]
+        else:
+
+            tasks = [
+                delayed_f(ar, *const_args, **const_kwargs, **kw)
+                for ar, kw in zip(dask_array, _dict_iterrows(var_kwarg))
+            ]
         return tasks
 
     def create_cache(
@@ -490,7 +498,10 @@ class SubtomogramLoader:
             **align_kwargs,
         )
         tasks = self.construct_mapping_tasks(
-            model.align, _max_shifts_px, output_shape=template.shape
+            model.align,
+            max_shifts=_max_shifts_px,
+            output_shape=template.shape,
+            var_kwarg=dict(quaternion=self.molecules.quaternion()),
         )
         all_results = da.compute(tasks)[0]
 
@@ -619,7 +630,10 @@ class SubtomogramLoader:
             **align_kwargs,
         )
         tasks = self.construct_mapping_tasks(
-            model.align, _max_shifts_px, output_shape=templates[0].shape
+            model.align,
+            max_shifts=_max_shifts_px,
+            output_shape=templates[0].shape,
+            var_kwargs=dict(quaternion=self.molecules.quaternion()),
         )
         all_results = da.compute(tasks)[0]
 
@@ -782,3 +796,17 @@ def _normalize_shape(a: pixel | Sequence[pixel], ndim: int):
     else:
         _output_shape = tuple(a)
     return _output_shape
+
+
+def _dict_iterrows(d: dict[str, Sequence[Any]]):
+    keys = d.keys()
+    value_iters = [iter(v) for v in d.values()]
+
+    dict_out = dict.fromkeys(keys, None)
+    while True:
+        try:
+            for k, viter in zip(keys, value_iters):
+                dict_out[k] = next(viter)
+            yield dict_out
+        except StopIteration:
+            break

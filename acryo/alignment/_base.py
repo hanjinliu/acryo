@@ -24,7 +24,13 @@ class BaseAlignmentModel(ABC):
     """
     The base class to implement alignment method.
 
-    Must implement ``optimize`` and ``pre_transform``.
+    Abstract Methods
+    ----------------
+    >>> def optimize(self, subvolume, reference, max_shifts, quaternion):
+    >>>     ...
+    >>> def pre_transform(self, image):
+    >>>     ...
+
     """
 
     def __init__(
@@ -69,6 +75,7 @@ class BaseAlignmentModel(ABC):
         subvolume: np.ndarray,
         template: np.ndarray,
         max_shifts: tuple[float, ...],
+        quaternion: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray, float]:
         """
         Optimization of shift and rotation of subvolume.
@@ -101,7 +108,7 @@ class BaseAlignmentModel(ABC):
         """
 
     @abstractmethod
-    def pre_transform(self, img: np.ndarray) -> np.ndarray:
+    def pre_transform(self, image: np.ndarray) -> np.ndarray:
         """Pre-transformation applied to input images (including template)."""
 
     def _get_template_input(self) -> np.ndarray:
@@ -133,6 +140,7 @@ class BaseAlignmentModel(ABC):
         self,
         img: np.ndarray,
         max_shifts: tuple[float, float, float],
+        quaternion: np.ndarray | None = None,
     ) -> AlignmentResult:
         """
         Align an image using current alignment parameters.
@@ -150,10 +158,15 @@ class BaseAlignmentModel(ABC):
             Result of alignment.
         """
         img_masked = img * self.mask
+        if quaternion is None:
+            _quat = np.array([0.0, 0.0, 0.0, 1.0])
+        else:
+            _quat = quaternion
         return self._align_func(
             self.pre_transform(img_masked),
             self.template_input,
             max_shifts,
+            _quat,
         )
 
     def fit(
@@ -179,7 +192,7 @@ class BaseAlignmentModel(ABC):
         np.ndarray, AlignmentResult
             Transformed input image and the alignment result.
         """
-        result = self.align(img, max_shifts=max_shifts)
+        result = self.align(img, max_shifts=max_shifts, quaternion=None)
         rotator = Rotation.from_quat(result.quat)
         matrix = compose_matrices(np.array(img.shape) / 2 - 0.5, [rotator])[0]
         if cval is None:
@@ -192,27 +205,30 @@ class BaseAlignmentModel(ABC):
 
     def _optimize_single(
         self,
-        subvol: np.ndarray,
+        subvolume: np.ndarray,
         template: np.ndarray,
         max_shifts: tuple[float, float, float],
+        quaternion: np.ndarray,
     ) -> AlignmentResult:
-        out = self.optimize(subvol, template, max_shifts)
+        out = self.optimize(subvolume, template, max_shifts, quaternion)
         return AlignmentResult(0, *out)
 
     def _optimize_multiple(
         self,
-        subvol: np.ndarray,
+        subvolume: np.ndarray,
         template_list: Iterable[np.ndarray],
         max_shifts: tuple[float, float, float],
+        quaternion: np.ndarray,
     ) -> AlignmentResult:
         all_shifts: list[np.ndarray] = []
         all_quat: list[np.ndarray] = []
         all_score: list[float] = []
         for template in template_list:
             shift, quat, score = self.optimize(
-                subvol,
+                subvolume,
                 template,
                 max_shifts,
+                quaternion,
             )
             all_shifts.append(shift)
             all_quat.append(quat)
@@ -237,6 +253,14 @@ class BaseAlignmentModel(ABC):
 
 
 class RotationImplemented(BaseAlignmentModel):
+    """
+    An alignment model implemented with default rotation optimizer.
+
+    If ``optimize`` does not support rotation optimization, this class implements
+    simple parameter searching algorithm to it. Thus, ``optimize`` only has to
+    optimize shift of images.
+    """
+
     def __init__(
         self,
         template: np.ndarray | Sequence[np.ndarray],
@@ -251,6 +275,7 @@ class RotationImplemented(BaseAlignmentModel):
         self,
         img: np.ndarray,
         max_shifts: tuple[subpixel, subpixel, subpixel],
+        quaternion: np.ndarray | None,
     ) -> AlignmentResult:
         """
         Align an image using current alignment parameters.
@@ -267,7 +292,7 @@ class RotationImplemented(BaseAlignmentModel):
         AlignmentResult
             Result of alignment.
         """
-        iopt, shift, _, corr = super().align(img, max_shifts)
+        iopt, shift, _, corr = super().align(img, max_shifts, quaternion)
         quat = self.quaternions[iopt % self._n_rotations]
         return AlignmentResult(label=iopt, shift=shift, quat=quat, score=corr)
 
@@ -280,11 +305,14 @@ class RotationImplemented(BaseAlignmentModel):
         """
         Fit image to template based on the alignment model.
 
+        Unlike ``BaseAlignmentModel``, rotation optimization is executed in
+        parallel to boost calculation.
+
         Parameters
         ----------
         img : np.ndarray
             Input image that will be transformed.
-        max_shifts : tuple[float, float, float]
+        max_shifts : tuple of float
             Maximum shifts along z, y, x axis in pixel.
         cval : float, optional
             Constant value for padding.
@@ -307,9 +335,7 @@ class RotationImplemented(BaseAlignmentModel):
         for mat in matrices:
             tmp = delayed_transform(template_masked, mat, cval=cval)
             task = delayed_optimize(
-                img_masked,
-                tmp,
-                max_shifts,
+                img_masked, tmp, max_shifts, np.array([0.0, 0.0, 0.0, 1.0])
             )
             tasks.append(task)
         results: list[tuple] = da.compute(tasks)[0]
@@ -336,6 +362,7 @@ class RotationImplemented(BaseAlignmentModel):
         subvol: np.ndarray,
         template_list: Iterable[np.ndarray],
         max_shifts: tuple[subpixel, subpixel, subpixel],
+        quaternion: np.ndarray,
     ) -> AlignmentResult:
         all_shifts: list[np.ndarray] = []
         all_quat: list[np.ndarray] = []
@@ -345,6 +372,7 @@ class RotationImplemented(BaseAlignmentModel):
                 subvol,
                 template,
                 max_shifts,
+                quaternion,
             )
             all_shifts.append(shift)
             all_quat.append(quat)
@@ -429,7 +457,7 @@ class RotationImplemented(BaseAlignmentModel):
             return self._optimize_single
 
 
-class FrequencyCutoffInput(RotationImplemented):
+class FrequencyCutoffImplemented(RotationImplemented):
     """
     An alignment model that supports frequency-based pre-filtering.
 
@@ -448,17 +476,17 @@ class FrequencyCutoffInput(RotationImplemented):
         super().__init__(template, mask, rotations)
 
 
-class FourierLowpassInput(FrequencyCutoffInput):
+class FourierLowpassInput(FrequencyCutoffImplemented):
     """Abstract model that uses low-pass-filtrated Fourier images as inputs."""
 
-    def pre_transform(self, img: np.ndarray) -> np.ndarray:
+    def pre_transform(self, image: np.ndarray) -> np.ndarray:
         """Apply low-pass filter without IFFT."""
-        return lowpass_filter_ft(img, cutoff=self._cutoff)
+        return lowpass_filter_ft(image, cutoff=self._cutoff)
 
 
-class RealLowpassInput(FrequencyCutoffInput):
+class RealLowpassInput(FrequencyCutoffImplemented):
     """Abstract model that uses low-pass-filtrated real images as inputs."""
 
-    def pre_transform(self, img: np.ndarray) -> np.ndarray:
+    def pre_transform(self, image: np.ndarray) -> np.ndarray:
         """Apply low-pass filter."""
-        return lowpass_filter(img, cutoff=self._cutoff)
+        return lowpass_filter(image, cutoff=self._cutoff)

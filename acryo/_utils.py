@@ -165,7 +165,7 @@ def prepare_affine(
 
     img0 = img[tuple(slices)]
     if need_pad:
-        input = da.pad(img0, pads, mode="nearest")
+        input = da.pad(img0, pads, mode="mean")
     else:
         input = img0
     mtx = compose_matrices(new_center, [rot], output_center=output_center)[0]
@@ -197,7 +197,7 @@ def prepare_affine_cornersafe(
 
     img0 = img[tuple(slices)]
     if need_pad:
-        input = da.pad(img0, pads, mode="nearest")
+        input = da.pad(img0, pads, mode="mean")
     else:
         input = img0
     mtx = compose_matrices(new_center, [rot], output_center=output_center)[0]
