@@ -25,3 +25,16 @@ def test_run(alignment_model: type[BaseAlignmentModel], rotations):
     ave = out.average()
     coef = np.corrcoef(ave.ravel(), temp.ravel())
     assert coef[0, 1] > 0.75  # check results are well aligned
+
+
+def test_fsc():
+    scale = 0.32
+    temp = spiral()
+    gen = TomogramGenerator(temp, grid_shape=(3, 3), noise_sigma=0.5)
+    tomo = gen.get_tomogram()
+    mole = gen.sample_molecules(max_distance=0.1, scale=scale)
+    loader = SubtomogramLoader(
+        tomo, mole, order=0, scale=scale, output_shape=temp.shape
+    )
+    loader.fsc()
+    loader.fsc(mask=temp > np.mean(temp))

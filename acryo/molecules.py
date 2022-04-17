@@ -1,10 +1,12 @@
 from __future__ import annotations
-from typing import Iterable
+from typing import Iterable, TYPE_CHECKING
 import numpy as np
-import pandas as pd
 from numpy.typing import ArrayLike
 from scipy.spatial.transform import Rotation
 from ._types import nm
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 _CSV_COLUMNS = ["z", "y", "x", "zvec", "yvec", "xvec"]
 
@@ -117,6 +119,8 @@ class Molecules:
         **pd_kwargs,
     ) -> Molecules:
         """Load csv as a Molecules object."""
+        import pandas as pd
+
         pos_cols = pos_cols.copy()
         rot_cols = rot_cols.copy()
         df: pd.DataFrame = pd.read_csv(path, **pd_kwargs)  # type: ignore
@@ -134,6 +138,8 @@ class Molecules:
     def features(self) -> pd.DataFrame:
         """Molecules features."""
         if self._features is None:
+            import pandas as pd
+
             return pd.DataFrame(None)
         return self._features
 
@@ -142,6 +148,8 @@ class Molecules:
         if value is None:
             self._features = None
         else:
+            import pandas as pd
+
             df = pd.DataFrame(value)
             if len(df) != self.pos.shape[0]:
                 raise ValueError(
@@ -153,6 +161,8 @@ class Molecules:
 
     def to_dataframe(self) -> pd.DataFrame:
         """Convert coordinates, rotation and features into a single data frame."""
+        import pandas as pd
+
         rotvec = self.rotvec()
         data = np.concatenate([self.pos, rotvec], axis=1)
         df = pd.DataFrame(data, columns=_CSV_COLUMNS)
@@ -219,6 +229,8 @@ class Molecules:
         all_pos = np.concatenate(pos, axis=0)
         all_quat = np.concatenate(quat, axis=0)
         if concat_features:
+            import pandas as pd
+
             all_features = pd.concat(features, axis=0)
         else:
             all_features = None

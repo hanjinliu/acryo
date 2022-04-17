@@ -8,7 +8,6 @@ from typing import (
 )
 import weakref
 import tempfile
-import pandas as pd
 from scipy.spatial.transform import Rotation
 import numpy as np
 from dask import array as da, delayed
@@ -25,6 +24,7 @@ from . import _utils
 
 if TYPE_CHECKING:
     from typing_extensions import Self
+    import pandas as pd
 
 _A = TypeVar("_A", np.ndarray, da.core.Array)
 _R = TypeVar("_R")
@@ -602,6 +602,8 @@ class SubtomogramLoader:
         SubtomogramLoader
             An loader instance with updated molecules.
         """
+        import pandas as pd
+
         n_templates = len(templates)
 
         local_shifts, local_rot, corr_max = _allocate(len(self))
@@ -691,6 +693,8 @@ class SubtomogramLoader:
         pd.DataFrame
             A data frame with FSC results.
         """
+        import pandas as pd
+
         if mask is None:
             _mask = 1.0
             output_shape = self.output_shape
@@ -734,6 +738,8 @@ class SubtomogramLoader:
 
 
 def get_features(corr_max, local_shifts, rotvec) -> pd.DataFrame:
+    import pandas as pd
+
     features = {
         "score": corr_max,
         "shift-z": np.round(local_shifts[:, 0], 2),
