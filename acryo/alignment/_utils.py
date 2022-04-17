@@ -1,10 +1,11 @@
 from __future__ import annotations
 import itertools
 from functools import reduce, lru_cache
-from typing import Sequence
+from typing import Callable, Sequence
 import numpy as np
 from scipy.fft import rfftn, irfftn, fftn
 from scipy.signal import fftconvolve
+from scipy.spatial.transform import Rotation
 from scipy import ndimage as ndi
 
 from .._types import Ranges, RangeLike, pixel
@@ -60,6 +61,39 @@ def normalize_rotations(rotations: Ranges | None) -> np.ndarray:
         quats = np.array([[0.0, 0.0, 0.0, 1.0]])
 
     return quats
+
+
+def rotate(
+    image: np.ndarray,
+    degrees: tuple[float, float, float] | Sequence[float],
+    order: int = 3,
+    mode="constant",
+    cval: Callable | float = np.mean,
+):
+    from .._utils import compose_matrices
+
+    quat = euler_to_quat(degrees)
+    rotator = Rotation.from_quat(quat).inv()
+    matrix = compose_matrices(
+        np.array(image.shape[-image.ndim :]) / 2 - 0.5, [rotator]
+    )[0]
+    if callable(cval):
+        _cval = cval(image)
+    else:
+        _cval = cval
+
+    return ndi.affine_transform(
+        image,
+        matrix=matrix,
+        order=order,
+        mode=mode,
+        cval=_cval,
+        prefilter=order > 1,
+    )
+
+
+def euler_to_quat(degrees):
+    return from_euler_xyz_coords(np.array(degrees), "zyx", degrees=True).as_quat()
 
 
 # lowpass filter

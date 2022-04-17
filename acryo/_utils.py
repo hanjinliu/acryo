@@ -199,6 +199,8 @@ def prepare_affine_cornersafe(
     img0 = img[tuple(slices)]
     if need_pad:
         input = da.pad(img0, pads)
+        lower = np.array([l for l, r in pads])
+        output_center += lower
     else:
         input = img0
 
