@@ -15,7 +15,7 @@ from dask import array as da, delayed
 from .alignment import (
     BaseAlignmentModel,
     ZNCCAlignment,
-    SupportRotation,
+    RotationImplemented,
 )
 from ._types import nm, pixel
 from ._reader import imread
@@ -270,9 +270,9 @@ class SubtomogramLoader:
         for i in range(len(self)):
             subvol, mtx = _prep(
                 image,
-                self.molecules.pos[i] / scale,
-                output_shape,
-                self.molecules.rotator[i],
+                center=self.molecules.pos[i] / scale,
+                output_shape=output_shape,
+                rot=self.molecules.rotator[i],
             )
             task = _utils.rotated_crop(
                 subvol,
@@ -633,7 +633,7 @@ class SubtomogramLoader:
             rotator,
         )
 
-        if isinstance(model, SupportRotation) and model._n_rotations > 1:
+        if isinstance(model, RotationImplemented) and model._n_rotations > 1:
             labels %= n_templates
         labels = labels.astype(np.uint8)
 

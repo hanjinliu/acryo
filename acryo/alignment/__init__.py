@@ -3,7 +3,7 @@ from ._base import (
     RealLowpassInput,
     BaseAlignmentModel,
     AlignmentResult,
-    SupportRotation,
+    RotationImplemented,
     FrequencyCutoffInput,
 )
 from ._concrete import PCCAlignment, ZNCCAlignment
@@ -16,7 +16,7 @@ __all__ = [
     "PCCAlignment",
     "ZNCCAlignment",
     "BaseAlignmentModel",
-    "SupportRotation",
+    "RotationImplemented",
     "FrequencyCutoffInput",
     "normalize_rotations",
     "rotate",

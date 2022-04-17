@@ -7,7 +7,7 @@ from scipy.spatial.transform import Rotation
 from dask import array as da, delayed
 
 from ._utils import normalize_rotations, lowpass_filter, lowpass_filter_ft
-from .._types import Ranges
+from .._types import Ranges, subpixel
 from .._utils import compose_matrices
 
 
@@ -236,7 +236,7 @@ class BaseAlignmentModel(ABC):
         return self._n_templates > 1
 
 
-class SupportRotation(BaseAlignmentModel):
+class RotationImplemented(BaseAlignmentModel):
     def __init__(
         self,
         template: np.ndarray | Sequence[np.ndarray],
@@ -250,7 +250,7 @@ class SupportRotation(BaseAlignmentModel):
     def align(
         self,
         img: np.ndarray,
-        max_shifts: tuple[float, float, float],
+        max_shifts: tuple[subpixel, subpixel, subpixel],
     ) -> AlignmentResult:
         """
         Align an image using current alignment parameters.
@@ -259,7 +259,7 @@ class SupportRotation(BaseAlignmentModel):
         ----------
         img : np.ndarray
             Subvolume to be aligned
-        max_shifts : tuple[float, float, float]
+        max_shifts : tuple of float
             Maximum shifts along z, y, x axis in pixel.
 
         Returns
@@ -274,7 +274,7 @@ class SupportRotation(BaseAlignmentModel):
     def fit(
         self,
         img: np.ndarray,
-        max_shifts: tuple[float, float, float],
+        max_shifts: tuple[subpixel, subpixel, subpixel],
         cval: float | None = None,
     ) -> tuple[np.ndarray, AlignmentResult]:
         """
@@ -335,7 +335,7 @@ class SupportRotation(BaseAlignmentModel):
         self,
         subvol: np.ndarray,
         template_list: Iterable[np.ndarray],
-        max_shifts: tuple[float, float, float],
+        max_shifts: tuple[subpixel, subpixel, subpixel],
     ) -> AlignmentResult:
         all_shifts: list[np.ndarray] = []
         all_quat: list[np.ndarray] = []
@@ -429,7 +429,7 @@ class SupportRotation(BaseAlignmentModel):
             return self._optimize_single
 
 
-class FrequencyCutoffInput(SupportRotation):
+class FrequencyCutoffInput(RotationImplemented):
     """
     An alignment model that supports frequency-based pre-filtering.
 

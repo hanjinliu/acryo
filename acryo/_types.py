@@ -7,3 +7,4 @@ Ranges = tuple[RangeLike, RangeLike, RangeLike]
 nm: TypeAlias = float  # nm is just an example. Can be angstrom or others.
 degree: TypeAlias = float
 pixel: TypeAlias = int
+subpixel: TypeAlias = float

@@ -144,8 +144,8 @@ def bin_image(img: np.ndarray | da.core.Array, binsize: int) -> np.ndarray:
 
 def prepare_affine(
     img: da.core.Array,
-    center: tuple[int, ...],
-    output_shape,
+    center: Sequence[float],
+    output_shape: Sequence[int],
     rot: Rotation,
     order: int = 1,
 ):
@@ -165,7 +165,7 @@ def prepare_affine(
 
     img0 = img[tuple(slices)]
     if need_pad:
-        input = da.pad(img0, pads)
+        input = da.pad(img0, pads, mode="nearest")
     else:
         input = img0
     mtx = compose_matrices(new_center, [rot], output_center=output_center)[0]
@@ -174,13 +174,13 @@ def prepare_affine(
 
 def prepare_affine_cornersafe(
     img: da.core.Array,
-    center: tuple[int, ...],
-    shape,
+    center: Sequence[float],
+    output_shape: Sequence[int],
     rot: Rotation,
     order: int = 1,
 ):
-    max_len = np.sqrt(np.sum(np.asarray(shape, dtype=np.float32) ** 2))
-    output_center = np.array(shape) / 2 - 0.5
+    max_len = np.sqrt(np.sum(np.asarray(output_shape, dtype=np.float32) ** 2))
+    output_center = np.array(output_shape) / 2 - 0.5
     half_len = max_len / 2
     slices: list[slice] = []
     pads: list[tuple[int, ...]] = []
@@ -197,7 +197,7 @@ def prepare_affine_cornersafe(
 
     img0 = img[tuple(slices)]
     if need_pad:
-        input = da.pad(img0, pads)
+        input = da.pad(img0, pads, mode="nearest")
     else:
         input = img0
     mtx = compose_matrices(new_center, [rot], output_center=output_center)[0]
