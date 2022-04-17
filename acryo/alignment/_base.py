@@ -181,12 +181,12 @@ class BaseAlignmentModel(ABC):
         """
         result = self.align(img, max_shifts=max_shifts)
         rotator = Rotation.from_quat(result.quat)
-        matrix = compose_matrices(np.array(img.shape) / 2 - 0.5, [rotator])[0]  #
+        matrix = compose_matrices(np.array(img.shape) / 2 - 0.5, [rotator])[0]
         if cval is None:
             _cval = np.percentile(img, 1)
         else:
             _cval = cval
-        img_shifted = ndi.shift(img, result.shift, cval=_cval)
+        img_shifted = ndi.shift(img, -result.shift, cval=_cval)
         img_trans = ndi.affine_transform(img_shifted, matrix, cval=_cval)
         return img_trans, result
 
@@ -326,7 +326,7 @@ class SupportRotation(BaseAlignmentModel):
             _cval = np.percentile(img, 1)
         else:
             _cval = cval
-        img_shifted = ndi.shift(img, result.shift, cval=_cval)
+        img_shifted = ndi.shift(img, -result.shift, cval=_cval)
         img_trans = ndi.affine_transform(img_shifted, matrix, cval=_cval)
         return img_trans, result
 

@@ -9,6 +9,7 @@ from acryo.alignment import (
     euler_to_quat,
 )
 from acryo.testing import TomogramGenerator, spiral
+from scipy import ndimage as ndi
 import pytest
 
 
@@ -53,8 +54,9 @@ def test_fit():
     rotations = ((15, 15), (15, 15), (15, 15))
     model = ZNCCAlignment(temp, rotations=rotations)
 
-    img = rotate(temp, [15, 0, 15], cval=np.min)
-    imgout, result = model.fit(img, (1, 1, 1))
+    img = ndi.shift(rotate(temp, [15, 0, 15], cval=np.min), shift=[1, 2, 2])
+    imgout, result = model.fit(img, (3, 3, 3))
     assert_allclose(result.quat, euler_to_quat([15, 0, 15]))
+    assert_allclose(result.shift, [1, 2, 2])
     coef = np.corrcoef(imgout.ravel(), temp.ravel())
     assert coef[0, 1] > 0.95  # check results are well aligned
