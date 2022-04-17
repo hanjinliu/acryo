@@ -166,9 +166,11 @@ def prepare_affine(
     img0 = img[tuple(slices)]
     if need_pad:
         input = da.pad(img0, pads)
+        lower = np.array([l for l, r in pads])
+        new_center += lower
+        output_center += lower
     else:
         input = img0
-
     mtx = compose_matrices(new_center, [rot], output_center=output_center)[0]
     return input, mtx
 
@@ -200,10 +202,10 @@ def prepare_affine_cornersafe(
     if need_pad:
         input = da.pad(img0, pads)
         lower = np.array([l for l, r in pads])
+        new_center += lower
         output_center += lower
     else:
         input = img0
-
     mtx = compose_matrices(new_center, [rot], output_center=output_center)[0]
     return input, mtx
 
