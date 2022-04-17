@@ -8,7 +8,7 @@ from scipy.signal import fftconvolve
 from scipy import ndimage as ndi
 
 from .._types import Ranges, RangeLike, pixel
-from ..molecules import from_euler
+from ..molecules import from_euler_xyz_coords
 
 
 def _normalize_a_range(rng: RangeLike) -> RangeLike:
@@ -52,7 +52,9 @@ def normalize_rotations(rotations: Ranges | None) -> np.ndarray:
 
         quat: list[np.ndarray] = []
         for angs in itertools.product(*angles):
-            quat.append(from_euler(np.array(angs), "zyx", degrees=True).as_quat())
+            quat.append(
+                from_euler_xyz_coords(np.array(angs), "zyx", degrees=True).as_quat()
+            )
         quats = np.stack(quat, axis=0)
     else:
         quats = np.array([[0.0, 0.0, 0.0, 1.0]])

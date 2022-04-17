@@ -4,8 +4,8 @@ from typing import (
     TYPE_CHECKING,
     Sequence,
     TypeVar,
+    Any,
 )
-import warnings
 import weakref
 import tempfile
 import pandas as pd
@@ -19,6 +19,7 @@ from .alignment import (
     SupportRotation,
 )
 from ._types import nm, pixel
+from ._reader import imread
 from .molecules import Molecules
 from . import _utils
 
@@ -32,6 +33,9 @@ _R = TypeVar("_R")
 class Unset:
     def __bool__(self) -> bool:
         return False
+
+    def __repr__(self) -> str:
+        return "Unset"
 
 
 _UNSET = Unset()
@@ -75,7 +79,8 @@ class SubtomogramLoader:
             by this value. This parameter is useful when another loader with
             binned image is created.
         output_shape : int or tuple of int, optional
-            Shape of output subtomogram in pixel.
+            Shape of output subtomogram in pixel. This parameter is not required
+            if template (or mask) image is available immediately.
         corner_safe : bool, default is False
             If true, regions around molecules will be cropped at a volume larger
             than ``output_shape`` so that densities at the corners will not be
@@ -123,12 +128,35 @@ class SubtomogramLoader:
         self._cached_dask_array: da.core.Array | None = None
 
     def __repr__(self) -> str:
-        shape = "x".join(map(str, self.image.shape))
+        shape = self.image.shape
         mole_repr = repr(self.molecules)
         return (
-            f"{self.__class__.__name__}(tomogram=[{shape}], molecules={mole_repr}, "
+            f"{self.__class__.__name__}(tomogram={shape}, molecules={mole_repr}, "
             f"output_shape={self.output_shape}, order={self.order}, "
             f"scale={self.scale:.4f})"
+        )
+
+    @classmethod
+    def imread(
+        cls,
+        path: str,
+        molecules: Molecules,
+        order: int = 3,
+        scale: nm | None = None,
+        output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = _UNSET,
+        corner_safe: bool = False,
+        chunks: Any = "auto",
+    ):
+        dask_array, _scale = imread(path, chunks)
+        if scale is None:
+            scale = _scale
+        return cls(
+            dask_array,
+            molecules=molecules,
+            order=order,
+            scale=scale,
+            output_shape=output_shape,
+            corner_safe=corner_safe,
         )
 
     @property
@@ -215,19 +243,6 @@ class SubtomogramLoader:
         out._image_ref = weakref.ref(binned_image)
         return out
 
-    def _check_shape(self, template: np.ndarray, name: str = "template") -> None:
-        if isinstance(self.output_shape, Unset):
-            return None
-        if template.shape != self.output_shape:
-            warnings.warn(
-                f"'output_shape' of {self.__class__.__name__} object "
-                f"{self.output_shape!r} differs from the shape of {name} image "
-                f"{template.shape!r}. 'output_shape' is updated.",
-                UserWarning,
-            )
-            self._output_shape = template.shape
-        return None
-
     def construct_loading_tasks(
         self,
         output_shape: pixel | tuple[pixel, ...] | None = None,
@@ -284,7 +299,7 @@ class SubtomogramLoader:
         Returns
         -------
         da.core.Array
-            An 4-D array with axes "pzyx".
+            An 4-D array which ``arr[i]`` corresponds to the ``i``-th subtomogram.
         """
         if self._cached_dask_array is not None:
             return self._cached_dask_array
@@ -412,10 +427,11 @@ class SubtomogramLoader:
         """
         nmole = len(self)
         output_shape = self._get_output_shape(output_shape)
-        np.random.seed(seed)
+        rng = np.random.default_rng(seed=seed)
+
         tasks = []
         for _ in range(n_set):
-            sl = np.random.choice(np.arange(nmole), nmole // 2).tolist()
+            sl = rng.choice(np.arange(nmole), nmole // 2).tolist()
             indices0 = np.zeros(nmole, dtype=bool)
             indices0[sl] = True
             indices1 = np.ones(nmole, dtype=bool)
@@ -424,7 +440,7 @@ class SubtomogramLoader:
             dask_avg0 = da.mean(dask_array[indices0], axis=0)
             dask_avg1 = da.mean(dask_array[indices1], axis=0)
             tasks.extend([dask_avg0, dask_avg1])
-        np.random.seed(None)
+
         out = da.compute(tasks)[0]
         stack = np.stack(out, axis=0).reshape(n_set, 2, *output_shape)
         if squeeze and n_set == 1:
@@ -466,8 +482,6 @@ class SubtomogramLoader:
         SubtomogramLoader
             An loader instance with updated molecules.
         """
-        self._check_shape(template)
-
         _max_shifts_px = np.asarray(max_shifts) / self.scale
 
         model = alignment_model(
@@ -589,7 +603,6 @@ class SubtomogramLoader:
             An loader instance with updated molecules.
         """
         n_templates = len(templates)
-        self._check_shape(templates[0])
 
         local_shifts, local_rot, corr_max = _allocate(len(self))
 
@@ -639,7 +652,6 @@ class SubtomogramLoader:
         func: Callable[[np.ndarray, np.ndarray], _R],
         mask: np.ndarray | None = None,
     ) -> list[_R]:
-        self._check_shape(template)
         if mask is None:
             _mask = 1.0
         else:
@@ -680,15 +692,23 @@ class SubtomogramLoader:
             A data frame with FSC results.
         """
         if mask is None:
-            _mask = 1
+            _mask = 1.0
+            output_shape = self.output_shape
+            if isinstance(output_shape, Unset):
+                raise TypeError("Output shape is unknown.")
         else:
-            self._check_shape(mask, "mask")
             _mask = mask
+            output_shape = mask.shape
 
         if n_set <= 0:
             raise ValueError("'n_set' must be positive.")
 
-        img = self.average_split(n_set=n_set, seed=seed, squeeze=False)
+        img = self.average_split(
+            n_set=n_set,
+            seed=seed,
+            squeeze=False,
+            output_shape=output_shape,
+        )
         fsc_all: dict[str, np.ndarray] = {}
         for i in range(n_set):
             img0, img1 = img[i]

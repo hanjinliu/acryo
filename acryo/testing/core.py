@@ -47,9 +47,9 @@ class TomogramGenerator:
     def noise_sigma(self):
         return self._noise_sigma
 
-    def get_matrices(self):
+    def _get_matrices(self, rng: np.random.Generator):
         gy, gx = self.grid_shape
-        quat_idx = np.random.choice(self.quaternions.shape[0], size=(gy * gx))
+        quat_idx = rng.choice(self.quaternions.shape[0], size=(gy * gx))
 
         from scipy.spatial.transform import Rotation
 
@@ -59,7 +59,7 @@ class TomogramGenerator:
     def get_tomogram(
         self, pad_width: int = 0, tilt_range: tuple[degree, degree] = (-90, 90)
     ) -> np.ndarray:
-        np.random.seed(self._seed)
+        rng = np.random.default_rng(self._seed)
         template = self.template
         if pad_width > 0:
             template = np.pad(template, pad_width, dims="zyx")
@@ -70,14 +70,14 @@ class TomogramGenerator:
             [template.copy() for _ in range(gy)] for _ in range(gx)
         ]
         if self.quaternions.shape[0] > 0:
-            matrices = self.get_matrices()
+            matrices = self._get_matrices(rng)
             mtx_iterator = iter(matrices)
             for i, j in wrange(gy, gx):
                 mtx = next(mtx_iterator)
                 mols[i][j] = ndi.affine_transform(mols[i][j], mtx)
 
         for i, j in wrange(gy, gx):
-            mols[i][j] += np.random.normal(scale=self.noise_sigma, size=template.shape)
+            mols[i][j] += rng.normal(scale=self.noise_sigma, size=template.shape)
 
         if tilt_range != (-90, 90):
             mw = _missing_wedge_mask(template.shape, tilt_range=tilt_range)
@@ -86,7 +86,6 @@ class TomogramGenerator:
                 mols[i][j] = np.real(np.fft.ifftshift(ifftn(ft * mw)))
 
         tomogram: np.ndarray = np.block(mols)
-        np.random.seed(None)
         return tomogram
 
     def sample_molecules(self, max_distance: nm = 3.0, scale: nm = 1.0):

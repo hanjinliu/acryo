@@ -70,8 +70,9 @@ class Molecules:
         if sum((_ax is not None) for _ax in [z, y, x]) != 2:
             raise TypeError("You must specify two out of z, y, and x.")
 
-        # NOTE: np.cross assumes vectors are in xyz order. However, all the arrays here are defined
-        # in zyx order. To build right-handed coordinates, we must invert signs when using np.cross.
+        # NOTE: np.cross assumes vectors are in xyz order. However, all the arrays here
+        # are defined in zyx order. To build right-handed coordinates, we must invert
+        # signs when using np.cross.
         if z is None:
             if x is None or y is None:
                 raise TypeError("Two of x, y, z is needed.")
@@ -92,13 +93,19 @@ class Molecules:
     def from_euler(
         cls,
         pos: np.ndarray,
-        angles: np.ndarray,
+        angles: ArrayLike,
         seq: str = "ZXZ",
         degrees: bool = False,
+        order: str = "xyz",
         features: pd.DataFrame | None = None,
     ):
         """Create molecules from Euler angles."""
-        rotator = from_euler(angles, seq, degrees)
+        if order == "xyz":
+            rotator = from_euler_xyz_coords(angles, seq, degrees)
+        elif order == "zyx":
+            rotator = Rotation.from_euler(seq, angles, degrees)
+        else:
+            raise ValueError("'order' must be 'xyz' or 'zyx'.")
         return cls(pos, rotator, features)
 
     @classmethod
@@ -574,6 +581,7 @@ class Molecules:
         angles: ArrayLike,
         seq: str = "ZXZ",
         degrees: bool = False,
+        order: str = "xyz",
         copy: bool = True,
     ) -> Molecules:
         """
@@ -592,7 +600,12 @@ class Molecules:
         Molecules
             Instance with updated orientation.
         """
-        rotator = from_euler(np.asarray(angles), seq, degrees)
+        if order == "xyz":
+            rotator = from_euler_xyz_coords(angles, seq, degrees)
+        elif order == "zyx":
+            rotator = Rotation.from_euler(seq, angles, degrees)
+        else:
+            raise ValueError("'order' must be 'xyz' or 'zyx'.")
         return self.rotate_by(rotator, copy)
 
     def rotate_by_rotvec(self, vector: ArrayLike, copy: bool = True) -> Molecules:
@@ -673,9 +686,12 @@ def _translate_euler(seq: str) -> str:
     return seq[::-1].translate(table)
 
 
-def from_euler(angles: np.ndarray, seq: str = "ZXZ", degrees: bool = False) -> Rotation:
-    """Create a rotator from Euler angles using zyx-coordinate system."""
+def from_euler_xyz_coords(
+    angles: ArrayLike, seq: str = "ZXZ", degrees: bool = False
+) -> Rotation:
+    """Create a rotator using zyx-coordinate system, from Euler angles."""
     seq = _translate_euler(seq)
+    angles = np.asarray(angles)
     return Rotation.from_euler(seq, angles[..., ::-1], degrees)
 
 
