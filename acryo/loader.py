@@ -6,7 +6,6 @@ from typing import (
     TypeVar,
     Any,
 )
-import weakref
 import tempfile
 from scipy.spatial.transform import Rotation
 import numpy as np
@@ -26,7 +25,6 @@ if TYPE_CHECKING:
     from typing_extensions import Self
     import pandas as pd
 
-_A = TypeVar("_A", np.ndarray, da.core.Array)
 _R = TypeVar("_R")
 
 
@@ -46,7 +44,7 @@ class SubtomogramLoader:
 
     def __init__(
         self,
-        image: _A,
+        image: np.ndarray | da.core.Array,
         molecules: Molecules,
         order: int = 3,
         scale: nm = 1.0,
@@ -88,15 +86,13 @@ class SubtomogramLoader:
             should be set false to save computation time.
         """
         # check type of input image
-        if isinstance(image, np.ndarray):
-            self._image_ref = weakref.ref(image)
-        elif isinstance(image, da.core.Array):
-            self._image_ref = image
-        else:
+        if not isinstance(image, (np.ndarray, da.core.Array)):
             raise TypeError(
                 "Input image of a SubtomogramLoader instance must be np.ndarray "
                 f"or dask.core.Array, got {type(image)}."
             )
+
+        self._image = image
 
         # check type of molecules
         if not isinstance(molecules, Molecules):
@@ -160,15 +156,9 @@ class SubtomogramLoader:
         )
 
     @property
-    def image(self) -> _A:
+    def image(self) -> np.ndarray | da.core.Array:
         """Return tomogram image."""
-        if isinstance(self._image_ref, weakref.ReferenceType):
-            image = self._image_ref()
-        else:
-            image = self._image_ref
-        if image is None:
-            raise ValueError("No tomogram found.")
-        return image  # type: ignore
+        return self._image
 
     @property
     def scale(self) -> nm:
@@ -240,7 +230,7 @@ class SubtomogramLoader:
             scale=self.scale * binsize,
         )
 
-        out._image_ref = weakref.ref(binned_image)
+        out._image = binned_image
         return out
 
     def construct_loading_tasks(
