@@ -460,6 +460,14 @@ class RotationImplemented(BaseAlignmentModel):
 
 
 class TomographyInput(RotationImplemented):
+    """
+    An alignment model that implements missing-wedge masking and low-pass filter.
+
+    This alignment model is useful for subtomogram averaging of real experimental
+    data with limited tilt ranges. Template image will be masked with synthetic
+    missing-wedge mask in the frequency domain.
+    """
+
     def __init__(
         self,
         template: np.ndarray | Sequence[np.ndarray],
