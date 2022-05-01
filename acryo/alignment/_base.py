@@ -285,6 +285,8 @@ class RotationImplemented(BaseAlignmentModel):
     optimize shift of images.
     """
 
+    _DUMMY_QUAT = np.array([0.0, 0.0, 0.0, 1.0])
+
     def __init__(
         self,
         template: np.ndarray | Sequence[np.ndarray],
@@ -346,7 +348,7 @@ class RotationImplemented(BaseAlignmentModel):
         np.ndarray, AlignmentResult
             Transformed input image and the alignment result.
         """
-        img_masked = img * self.mask
+        img_input = self.pre_transform(img * self.mask)
         delayed_optimize = delayed(self.optimize)
         delayed_transform = delayed(self._transform_template)
         template_masked = self._template * self.mask
@@ -356,18 +358,19 @@ class RotationImplemented(BaseAlignmentModel):
             np.array(self._template.shape[-self._ndim :]) / 2 - 0.5, rotators
         )
         tasks = []
-        for mat in matrices:
+        for mat, quat in zip(matrices, self.quaternions):
             tmp = delayed_transform(template_masked, mat, cval=cval)
-            task = delayed_optimize(
-                img_masked, tmp, max_shifts, np.array([0.0, 0.0, 0.0, 1.0])
-            )
+            task = delayed_optimize(img_input, tmp, max_shifts, quat)
             tasks.append(task)
         results: list[tuple] = da.compute(tasks)[0]
         scores = [x[2] for x in results]
         iopt = np.argmax(scores)
         opt_result = results[iopt]
         result = AlignmentResult(
-            0, opt_result[0], self.quaternions[iopt], opt_result[2]
+            label=0,
+            shift=opt_result[0],
+            quat=self.quaternions[iopt],
+            score=opt_result[2],
         )
 
         rotator = Rotation.from_quat(result.quat)

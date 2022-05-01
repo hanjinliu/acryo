@@ -22,7 +22,7 @@ class PCCAlignment(TomographyInput):
             upsample_factor=20,
             max_shifts=max_shifts,
         )
-        return shift, np.zeros(4), pcc
+        return shift, self._DUMMY_QUAT, pcc
 
 
 class ZNCCAlignment(TomographyInput):
@@ -43,4 +43,4 @@ class ZNCCAlignment(TomographyInput):
             upsample_factor=20,
             max_shifts=max_shifts,
         )
-        return shift, np.zeros(4), zncc
+        return shift, self._DUMMY_QUAT, zncc
