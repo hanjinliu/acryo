@@ -1,9 +1,10 @@
 import numpy as np
-from ._base import FourierLowpassInput, RealLowpassInput
+from scipy.fft import ifftn
+from ._base import TomographyInput
 from ._utils import subpixel_pcc, subpixel_zncc
 
 
-class PCCAlignment(FourierLowpassInput):
+class PCCAlignment(TomographyInput):
     """Alignment model using phase cross correlation."""
 
     def optimize(
@@ -14,13 +15,17 @@ class PCCAlignment(FourierLowpassInput):
         quaternion: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray, float]:
         """Optimize."""
+        missing_wedge = self._get_missing_wedge_mask(quaternion)
         shift, pcc = subpixel_pcc(
-            subvolume, template, upsample_factor=20, max_shifts=max_shifts
+            subvolume,
+            template * missing_wedge,
+            upsample_factor=20,
+            max_shifts=max_shifts,
         )
-        return shift, np.zeros(4), pcc
+        return shift, self._DUMMY_QUAT, pcc
 
 
-class ZNCCAlignment(RealLowpassInput):
+class ZNCCAlignment(TomographyInput):
     """Alignment model using zero-mean normalized cross correlation."""
 
     def optimize(
@@ -31,7 +36,11 @@ class ZNCCAlignment(RealLowpassInput):
         quaternion: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray, float]:
         """Optimize."""
+        missing_wedge = self._get_missing_wedge_mask(quaternion)
         shift, zncc = subpixel_zncc(
-            subvolume, template, upsample_factor=20, max_shifts=max_shifts
+            np.real(ifftn(subvolume)),
+            np.real(ifftn(template * missing_wedge)),
+            upsample_factor=20,
+            max_shifts=max_shifts,
         )
-        return shift, np.zeros(4), zncc
+        return shift, self._DUMMY_QUAT, zncc

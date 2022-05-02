@@ -29,6 +29,7 @@ def test_run(alignment_model: type[BaseAlignmentModel], rotations):
         max_shifts=1.2,
         alignment_model=alignment_model,
         rotations=rotations,
+        tilt_range=(-60, 60),
     )
     ave = out.average()
     coef = np.corrcoef(ave.ravel(), temp.ravel())

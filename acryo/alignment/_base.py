@@ -1,13 +1,14 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
+from functools import lru_cache
 from typing import Iterable, NamedTuple, Sequence
 import numpy as np
 from scipy import ndimage as ndi
 from scipy.spatial.transform import Rotation
 from dask import array as da, delayed
 
-from ._utils import normalize_rotations, lowpass_filter, lowpass_filter_ft
-from .._types import Ranges, subpixel
+from ._utils import lowpass_filter_ft, normalize_rotations
+from .._types import Ranges, subpixel, degree
 from .._utils import compose_matrices
 
 
@@ -23,6 +24,22 @@ class AlignmentResult(NamedTuple):
 class BaseAlignmentModel(ABC):
     """
     The base class to implement alignment method.
+
+    This class supports subvolume masking, pre-transformation of subvolumes and
+    template, optimization of spatial transformation.
+
+    subvolume    template
+        |            |
+        v            v
+       ( soft-masking )
+        |            |
+        v            v
+      (pre-transformation)
+        |            |
+        +-----+------+
+              |
+              v
+         (alignment)
 
     Abstract Methods
     ----------------
@@ -59,15 +76,22 @@ class BaseAlignmentModel(ABC):
 
         self._align_func = self._get_alignment_function()
         self._template_input: np.ndarray | None = None
+        self._template_input_ft: np.ndarray | None = None
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(shape={self._template.shape})"
 
     @property
     def template_input(self) -> np.ndarray:
+        """Create (a stack of) template images (and will be cached)."""
         if self._template_input is None:
             self._template_input = self._get_template_input()
         return self._template_input
+
+    @property
+    def input_shape(self) -> tuple[int, ...]:
+        """Return the array shape of input images and template."""
+        return self._template.shape[-self._ndim :]
 
     @abstractmethod
     def optimize(
@@ -261,6 +285,8 @@ class RotationImplemented(BaseAlignmentModel):
     optimize shift of images.
     """
 
+    _DUMMY_QUAT = np.array([0.0, 0.0, 0.0, 1.0])
+
     def __init__(
         self,
         template: np.ndarray | Sequence[np.ndarray],
@@ -322,7 +348,7 @@ class RotationImplemented(BaseAlignmentModel):
         np.ndarray, AlignmentResult
             Transformed input image and the alignment result.
         """
-        img_masked = img * self.mask
+        img_input = self.pre_transform(img * self.mask)
         delayed_optimize = delayed(self.optimize)
         delayed_transform = delayed(self._transform_template)
         template_masked = self._template * self.mask
@@ -332,18 +358,19 @@ class RotationImplemented(BaseAlignmentModel):
             np.array(self._template.shape[-self._ndim :]) / 2 - 0.5, rotators
         )
         tasks = []
-        for mat in matrices:
+        for mat, quat in zip(matrices, self.quaternions):
             tmp = delayed_transform(template_masked, mat, cval=cval)
-            task = delayed_optimize(
-                img_masked, tmp, max_shifts, np.array([0.0, 0.0, 0.0, 1.0])
-            )
+            task = delayed_optimize(img_input, tmp, max_shifts, quat)
             tasks.append(task)
         results: list[tuple] = da.compute(tasks)[0]
         scores = [x[2] for x in results]
         iopt = np.argmax(scores)
         opt_result = results[iopt]
         result = AlignmentResult(
-            0, opt_result[0], self.quaternions[iopt], opt_result[2]
+            label=0,
+            shift=opt_result[0],
+            quat=self.quaternions[iopt],
+            score=opt_result[2],
         )
 
         rotator = Rotation.from_quat(result.quat)
@@ -355,31 +382,6 @@ class RotationImplemented(BaseAlignmentModel):
         img_shifted = ndi.shift(img, -result.shift, cval=_cval)
         img_trans = ndi.affine_transform(img_shifted, matrix, cval=_cval)
         return img_trans, result
-
-    @delayed
-    def _delayed_optimize(
-        self,
-        subvol: np.ndarray,
-        template_list: Iterable[np.ndarray],
-        max_shifts: tuple[subpixel, subpixel, subpixel],
-        quaternion: np.ndarray,
-    ) -> AlignmentResult:
-        all_shifts: list[np.ndarray] = []
-        all_quat: list[np.ndarray] = []
-        all_score: list[float] = []
-        for template in template_list:
-            shift, quat, score = self.optimize(
-                subvol,
-                template,
-                max_shifts,
-                quaternion,
-            )
-            all_shifts.append(shift)
-            all_quat.append(quat)
-            all_score.append(score)
-
-        iopt = int(np.argmax(all_score))
-        return AlignmentResult(iopt, all_shifts[iopt], all_quat[iopt], all_score[iopt])
 
     def _transform_template(
         self,
@@ -457,12 +459,13 @@ class RotationImplemented(BaseAlignmentModel):
             return self._optimize_single
 
 
-class FrequencyCutoffImplemented(RotationImplemented):
+class TomographyInput(RotationImplemented):
     """
-    An alignment model that supports frequency-based pre-filtering.
+    An alignment model that implements missing-wedge masking and low-pass filter.
 
-    This class can be used for implementing such as low-pass filter or high-
-    pass filter before alignment.
+    This alignment model is useful for subtomogram averaging of real experimental
+    data with limited tilt ranges. Template image will be masked with synthetic
+    missing-wedge mask in the frequency domain.
     """
 
     def __init__(
@@ -471,22 +474,66 @@ class FrequencyCutoffImplemented(RotationImplemented):
         mask: np.ndarray | None = None,
         rotations: Ranges | None = None,
         cutoff: float | None = None,
+        tilt_range: tuple[degree, degree] | None = None,
     ):
         self._cutoff = cutoff or 1.0
+        if tilt_range is not None:
+            deg0, deg1 = tilt_range
+            if deg0 >= deg1:
+                raise ValueError("Tilt range must be in form of (min, max).")
+        self._tilt_range = tilt_range
         super().__init__(template, mask, rotations)
-
-
-class FourierLowpassInput(FrequencyCutoffImplemented):
-    """Abstract model that uses low-pass-filtrated Fourier images as inputs."""
 
     def pre_transform(self, image: np.ndarray) -> np.ndarray:
         """Apply low-pass filter without IFFT."""
         return lowpass_filter_ft(image, cutoff=self._cutoff)
 
+    def _get_missing_wedge_mask(self, quat: np.ndarray) -> np.ndarray | float:
+        """
+        Create a binary mask that covers tomographical missing wedge.
 
-class RealLowpassInput(FrequencyCutoffImplemented):
-    """Abstract model that uses low-pass-filtrated real images as inputs."""
+        Parameters
+        ----------
+        quat : (4,) array
+            Quaternion representation of the orientation of the subvolume.
 
-    def pre_transform(self, image: np.ndarray) -> np.ndarray:
-        """Apply low-pass filter."""
-        return lowpass_filter(image, cutoff=self._cutoff)
+        Returns
+        -------
+        np.ndarray or float
+            Missing wedge mask. If ``tilt_range`` is None, 1 will be returned.
+        """
+        if self._tilt_range is None:
+            return 1.0
+        shape = self.input_shape
+        normal0, normal1 = _get_unrotated_normals(self._tilt_range)
+        rot = Rotation.from_quat(quat)
+        normal0 = rot.apply(normal0)
+        normal1 = rot.apply(normal1)
+        zz, yy, xx = _get_indices(shape)
+
+        vectors = np.stack([zz, yy, xx], axis=-1)
+        dot0 = vectors.dot(normal0)
+        dot1 = vectors.dot(normal1)
+        missing = dot0 * dot1 < 0
+        return np.fft.ifftshift(np.rot90(missing, axes=(0, 2)))
+
+
+@lru_cache
+def _get_unrotated_normals(
+    tilt_range: tuple[degree, degree]
+) -> tuple[np.ndarray, np.ndarray]:
+    radmin, radmax = np.deg2rad(tilt_range)
+    ang0 = np.pi / 2 - radmin
+    ang1 = np.pi / 2 - radmax
+    return (
+        np.array([np.cos(ang0), 0, np.sin(ang0)]),
+        np.array([np.cos(ang1), 0, np.sin(ang1)]),
+    )
+
+
+@lru_cache
+def _get_indices(shape: tuple[int, ...]):
+    inds = np.indices(shape, dtype=np.float32)
+    for ind, s in zip(inds, shape):
+        ind -= s / 2 - 0.5
+    return inds

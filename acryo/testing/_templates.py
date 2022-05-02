@@ -23,7 +23,7 @@ def blobs() -> np.ndarray:
     return img
 
 
-def spiral(radius=4, freq=1) -> np.ndarray:
+def spiral(radius: float = 4.0, freq: float = 1.0) -> np.ndarray:
     shape = (40, 40, 40)
     img = np.zeros(shape, dtype=np.float32)
     inds = np.indices(shape, dtype=np.float32)
