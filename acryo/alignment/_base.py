@@ -388,13 +388,19 @@ class RotationImplemented(BaseAlignmentModel):
         temp: np.ndarray,
         matrix: np.ndarray,
         cval: float | None = None,
+        order: int = 3,
+        prefilter: bool = True,
     ) -> np.ndarray:
         if cval is None:
             _cval = np.percentile(temp, 1)
         else:
             _cval = cval
 
-        return self.pre_transform(ndi.affine_transform(temp, matrix=matrix, cval=_cval))
+        return self.pre_transform(
+            ndi.affine_transform(
+                temp, matrix=matrix, cval=_cval, order=order, prefilter=prefilter
+            )
+        )
 
     def _get_template_input(self) -> np.ndarray:
         """
@@ -424,19 +430,37 @@ class RotationImplemented(BaseAlignmentModel):
             cval = np.percentile(self._template, 1)
             if self.is_multi_templates:
                 all_templates: list[np.ndarray] = []
+                inputs_templates = [
+                    ndi.spline_filter(
+                        tmp * self.mask,
+                        order=3,
+                        mode="constant",
+                        output=np.float32,  # type: ignore
+                    )
+                    for tmp in self._template
+                ]
                 for mat in matrices:
-                    for tmp in self._template:
+                    for tmp in inputs_templates:
                         all_templates.append(
-                            self._transform_template(tmp * self.mask, mat)
+                            self._transform_template(
+                                tmp, mat, order=3, cval=cval, prefilter=False
+                            )
                         )
 
                 template_input: np.ndarray = np.stack(all_templates, axis=0)
 
             else:
-                template_masked = self._template * self.mask
+                template_masked = ndi.spline_filter(
+                    self._template * self.mask,
+                    order=3,
+                    output=np.float32,  # type: ignore
+                    mode="constant",
+                )
                 template_input: np.ndarray = np.stack(
                     [
-                        self._transform_template(template_masked, mat, cval=cval)
+                        self._transform_template(
+                            template_masked, mat, order=3, cval=cval, prefilter=False
+                        )
                         for mat in matrices
                     ],
                     axis=0,

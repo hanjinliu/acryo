@@ -1,4 +1,4 @@
-__version__ = "0.0.2"
+__version__ = "0.0.3.dev0"
 
 from .loader import SubtomogramLoader
 from .molecules import Molecules
