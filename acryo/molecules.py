@@ -220,7 +220,7 @@ class Molecules:
         """Concatenate Molecules objects."""
         pos: list[np.ndarray] = []
         quat: list[np.ndarray] = []
-        features: list[pd.DataFrame | None] = []
+        features: list[pd.DataFrame] = []
         for mol in moles:
             pos.append(mol.pos)
             quat.append(mol.quaternion())
@@ -709,7 +709,7 @@ def from_euler_xyz_coords(
 
 def _normalize(a: np.ndarray) -> np.ndarray:
     """Normalize vectors to length 1. Input must be (N, 3)."""
-    return a / np.sqrt(np.sum(a ** 2, axis=1))[:, np.newaxis]
+    return a / np.sqrt(np.sum(a**2, axis=1))[:, np.newaxis]
 
 
 def _extract_orthogonal(a: np.ndarray, b: np.ndarray) -> np.ndarray:

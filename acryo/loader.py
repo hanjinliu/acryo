@@ -44,7 +44,7 @@ class SubtomogramLoader:
 
     def __init__(
         self,
-        image: np.ndarray | da.core.Array,
+        image: np.ndarray | da.Array,
         molecules: Molecules,
         order: int = 3,
         scale: nm = 1.0,
@@ -61,7 +61,7 @@ class SubtomogramLoader:
 
         Parameters
         ----------
-        image : np.ndarray or da.core.Array
+        image : np.ndarray or da.Array
             Tomogram image. Must be 3-D.
         molecules : Molecules
             Molecules object that represents positions and orientations of
@@ -86,10 +86,10 @@ class SubtomogramLoader:
             should be set false to save computation time.
         """
         # check type of input image
-        if not isinstance(image, (np.ndarray, da.core.Array)):
+        if not isinstance(image, (np.ndarray, da.Array)):
             raise TypeError(
                 "Input image of a SubtomogramLoader instance must be np.ndarray "
-                f"or dask.core.Array, got {type(image)}."
+                f"or dask.Array, got {type(image)}."
             )
 
         self._image = image
@@ -121,7 +121,7 @@ class SubtomogramLoader:
             raise ValueError("Negative scale is not allowed.")
 
         self._corner_safe = corner_safe
-        self._cached_dask_array: da.core.Array | None = None
+        self._cached_dask_array: da.Array | None = None
 
     def __repr__(self) -> str:
         shape = self.image.shape
@@ -156,7 +156,7 @@ class SubtomogramLoader:
         )
 
     @property
-    def image(self) -> np.ndarray | da.core.Array:
+    def image(self) -> np.ndarray | da.Array:
         """Return tomogram image."""
         return self._image
 
@@ -223,7 +223,7 @@ class SubtomogramLoader:
         tr = -(binsize - 1) / 2 * self.scale
         molecules = self.molecules.translate([tr, tr, tr])
         binned_image = _utils.bin_image(self.image, binsize=binsize)
-        if isinstance(binned_image, da.core.Array) and compute:
+        if isinstance(binned_image, da.Array) and compute:
             binned_image = binned_image.compute()
         out = self.replace(
             molecules=molecules,
@@ -279,7 +279,7 @@ class SubtomogramLoader:
     def construct_dask(
         self,
         output_shape: pixel | tuple[pixel, ...] | None = None,
-    ) -> da.core.Array:
+    ) -> da.Array:
         """
         Construct a dask array of subtomograms.
 
@@ -288,7 +288,7 @@ class SubtomogramLoader:
 
         Returns
         -------
-        da.core.Array
+        da.Array
             An 4-D array which ``arr[i]`` corresponds to the ``i``-th subtomogram.
         """
         if self._cached_dask_array is not None:
@@ -328,7 +328,7 @@ class SubtomogramLoader:
         self,
         output_shape: pixel | tuple[pixel] | None = None,
         path: str | None = None,
-    ) -> da.core.Array:
+    ) -> da.Array:
         """
         Create cached stack of subtomograms.
 
@@ -340,7 +340,7 @@ class SubtomogramLoader:
 
         Returns
         -------
-        da.core.Array
+        da.Array
             A lazy-loading array that uses the memory-mapped array.
 
         Examples

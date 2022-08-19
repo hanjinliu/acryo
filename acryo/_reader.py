@@ -6,7 +6,7 @@ from dask import array as da
 
 
 class ImageData(NamedTuple):
-    image: da.core.Array
+    image: da.Array
     scale: float
 
 
@@ -68,7 +68,7 @@ def open_tif(path: str):
         tags = {v.name: v.value for v in pagetag.values()}
         scale = tags["XResolution"][1]
 
-        img = tif.asarray(out="memmap")
+        img: np.memmap = tif.asarray(out="memmap")  # type: ignore
 
     return img, scale
 
@@ -86,13 +86,13 @@ def open_mrc(path: str):
         raise e
 
     with mrcfile.mmap(path, mode="r") as mrc:
-        scale = mrc.voxel_size.x
-        img = mrc.data
+        scale: float = mrc.voxel_size.x
+        img: np.memmap = mrc.data  # type: ignore
 
     return img, scale
 
 
-def as_dask(mmap: np.memmap, chunks: Any = "auto") -> da.core.Array:
+def as_dask(mmap: np.memmap, chunks: Any = "auto") -> da.Array:
     img = da.from_array(mmap, chunks=chunks, meta=np.array([])).map_blocks(
         np.asarray, dtype=mmap.dtype
     )

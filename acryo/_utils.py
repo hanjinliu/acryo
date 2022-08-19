@@ -103,7 +103,7 @@ def fourier_shell_correlation(
         *[np.fft.fftshift(np.fft.fftfreq(s)) for s in shape], indexing="ij"
     )
 
-    r: np.ndarray = np.sqrt(sum(f ** 2 for f in freqs))
+    r: np.ndarray = np.sqrt(sum(f**2 for f in freqs))
 
     # make radially separated labels
     labels = (r / dfreq).astype(np.uint16)
@@ -119,15 +119,15 @@ def fourier_shell_correlation(
     f1: np.ndarray = np.fft.fftshift(fftn(img1))
 
     cov = f0.real * f1.real + f0.imag * f1.imag  # type: ignore
-    pw0 = f0.real ** 2 + f0.imag ** 2  # type: ignore
-    pw1 = f1.real ** 2 + f1.imag ** 2  # type: ignore
+    pw0 = f0.real**2 + f0.imag**2  # type: ignore
+    pw1 = f1.real**2 + f1.imag**2  # type: ignore
 
     out = radial_sum(cov) / np.sqrt(radial_sum(pw0) * radial_sum(pw1))
     freq = (np.arange(len(out)) + 0.5) * dfreq
     return freq, out
 
 
-def bin_image(img: np.ndarray | da.core.Array, binsize: int) -> np.ndarray:
+def bin_image(img: np.ndarray | da.Array, binsize: int) -> np.ndarray:
     """Bin an image."""
     _slices: list[slice] = []
     _shapes: list[int] = []
@@ -143,7 +143,7 @@ def bin_image(img: np.ndarray | da.core.Array, binsize: int) -> np.ndarray:
 
 
 def prepare_affine(
-    img: da.core.Array,
+    img: da.Array,
     center: Sequence[float],
     output_shape: Sequence[int],
     rot: Rotation,
@@ -173,7 +173,7 @@ def prepare_affine(
 
 
 def prepare_affine_cornersafe(
-    img: da.core.Array,
+    img: da.Array,
     center: Sequence[float],
     output_shape: Sequence[int],
     rot: Rotation,
