@@ -24,6 +24,7 @@ from . import _utils
 if TYPE_CHECKING:
     from typing_extensions import Self
     import pandas as pd
+    from dask.delayed import Delayed
 
 _R = TypeVar("_R")
 
@@ -40,8 +41,6 @@ _UNSET = Unset()
 
 
 class SubtomogramLoader:
-    """A basic subtomogram loader class."""
-
     def __init__(
         self,
         image: np.ndarray | da.Array,
@@ -236,7 +235,7 @@ class SubtomogramLoader:
     def construct_loading_tasks(
         self,
         output_shape: pixel | tuple[pixel, ...] | None = None,
-    ) -> list[da.core.Delayed]:
+    ) -> list[Delayed]:
         """
         Construct a list of subtomogram lazy loader.
 
@@ -311,13 +310,30 @@ class SubtomogramLoader:
         output_shape: pixel | tuple[pixel, ...] | None = None,
         var_kwarg: dict[str, Any] | None = None,
         **const_kwargs,
-    ) -> list[da.core.Delayed]:
+    ) -> list[Delayed]:
+        """
+        Construct a delayed mapping tasks using subtomograms.
+
+        Parameters
+        ----------
+        func : Callable
+            Mapping function. The first argument of the function is the subtomogram.
+        output_shape : int or tuple of int, optional
+            Shape of subtomograms.
+        var_kwarg : dict, optional
+            Variable keyword arguments. The length of each argument must be the same
+            as the number of subtomograms.
+
+        Returns
+        -------
+        list of da.delayed.Delayed object
+            List of delayed tasks that are ready for ``da.compute``.
+        """
         dask_array = self.construct_loading_tasks(output_shape=output_shape)
         delayed_f = delayed(func)
         if var_kwarg is None:
             tasks = [delayed_f(ar, *const_args, **const_kwargs) for ar in dask_array]
         else:
-
             tasks = [
                 delayed_f(ar, *const_args, **const_kwargs, **kw)
                 for ar, kw in zip(dask_array, _dict_iterrows(var_kwarg))
