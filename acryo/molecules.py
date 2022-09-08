@@ -224,7 +224,7 @@ class Molecules:
         for mol in moles:
             pos.append(mol.pos)
             quat.append(mol.quaternion())
-            features.append(mol._features)
+            features.append(mol.features)
 
         all_pos = np.concatenate(pos, axis=0)
         all_quat = np.concatenate(quat, axis=0)

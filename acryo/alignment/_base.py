@@ -5,7 +5,8 @@ from typing import Iterable, NamedTuple, Sequence
 import numpy as np
 from scipy import ndimage as ndi
 from scipy.spatial.transform import Rotation
-from dask import array as da, delayed
+from dask import array as da
+from dask.delayed import delayed
 
 from ._utils import lowpass_filter_ft, normalize_rotations
 from .._types import Ranges, subpixel, degree
@@ -219,10 +220,7 @@ class BaseAlignmentModel(ABC):
         result = self.align(img, max_shifts=max_shifts, quaternion=None)
         rotator = Rotation.from_quat(result.quat)
         matrix = compose_matrices(np.array(img.shape) / 2 - 0.5, [rotator])[0]
-        if cval is None:
-            _cval = np.percentile(img, 1)
-        else:
-            _cval = cval
+        _cval = _normalize_cval(cval, img)
         img_shifted = ndi.shift(img, -result.shift, cval=_cval)
         img_trans = ndi.affine_transform(img_shifted, matrix, cval=_cval)
         return img_trans, result
@@ -352,17 +350,17 @@ class RotationImplemented(BaseAlignmentModel):
         delayed_optimize = delayed(self.optimize)
         delayed_transform = delayed(self._transform_template)
         template_masked = self._template * self.mask
-        cval = np.percentile(self._template, 1)
+        _cval = _normalize_cval(cval, img)
         rotators = [Rotation.from_quat(r).inv() for r in self.quaternions]
         matrices = compose_matrices(
             np.array(self._template.shape[-self._ndim :]) / 2 - 0.5, rotators
         )
         tasks = []
         for mat, quat in zip(matrices, self.quaternions):
-            tmp = delayed_transform(template_masked, mat, cval=cval)
+            tmp = delayed_transform(template_masked, mat, cval=_cval)
             task = delayed_optimize(img_input, tmp, max_shifts, quat)
             tasks.append(task)
-        results: list[tuple] = da.compute(tasks)[0]
+        results: list[tuple] = da.compute(tasks)[0]  # type: ignore
         scores = [x[2] for x in results]
         iopt = np.argmax(scores)
         opt_result = results[iopt]
@@ -375,10 +373,6 @@ class RotationImplemented(BaseAlignmentModel):
 
         rotator = Rotation.from_quat(result.quat)
         matrix = compose_matrices(np.array(img.shape) / 2 - 0.5, [rotator])[0]
-        if cval is None:
-            _cval = np.percentile(img, 1)
-        else:
-            _cval = cval
         img_shifted = ndi.shift(img, -result.shift, cval=_cval)
         img_trans = ndi.affine_transform(img_shifted, matrix, cval=_cval)
         return img_trans, result
@@ -391,10 +385,7 @@ class RotationImplemented(BaseAlignmentModel):
         order: int = 3,
         prefilter: bool = True,
     ) -> np.ndarray:
-        if cval is None:
-            _cval = np.percentile(temp, 1)
-        else:
-            _cval = cval
+        _cval = _normalize_cval(cval, temp)
 
         return self.pre_transform(
             ndi.affine_transform(
@@ -427,7 +418,7 @@ class RotationImplemented(BaseAlignmentModel):
             matrices = compose_matrices(
                 np.array(self._template.shape[-3:]) / 2 - 0.5, rotators
             )
-            cval = np.percentile(self._template, 1)
+            cval = float(np.percentile(self._template, 1))
             if self.is_multi_templates:
                 all_templates: list[np.ndarray] = []
                 inputs_templates = [
@@ -561,3 +552,11 @@ def _get_indices(shape: tuple[int, ...]):
     for ind, s in zip(inds, shape):
         ind -= s / 2 - 0.5
     return inds
+
+
+def _normalize_cval(cval: float | None, img: np.ndarray) -> float:
+    if cval is None:
+        _cval = float(np.percentile(img, 1))
+    else:
+        _cval = cval
+    return _cval

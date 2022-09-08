@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import (
     Callable,
     TYPE_CHECKING,
+    Iterable,
     Sequence,
     TypeVar,
     Any,
@@ -308,7 +309,7 @@ class SubtomogramLoader:
         func: Callable,
         *const_args,
         output_shape: pixel | tuple[pixel, ...] | None = None,
-        var_kwarg: dict[str, Any] | None = None,
+        var_kwarg: dict[str, Iterable[Any]] | None = None,
         **const_kwargs,
     ) -> list[Delayed]:
         """
@@ -804,7 +805,14 @@ def _normalize_shape(a: pixel | Sequence[pixel], ndim: int):
     return _output_shape
 
 
-def _dict_iterrows(d: dict[str, Sequence[Any]]):
+def _dict_iterrows(d: dict[str, Iterable[Any]]):
+    """
+    Generater similar to pd.DataFrame.iterrows().
+
+    >>> _dict_iterrows({'a': [1, 2, 3], 'b': [4, 5, 6]})
+
+    will yield {'a': 1, 'b': 4}, {'a': 2, 'b': 5}, {'a': 3, 'b': 6}.
+    """
     keys = d.keys()
     value_iters = [iter(v) for v in d.values()]
 

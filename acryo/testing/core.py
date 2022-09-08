@@ -1,7 +1,18 @@
 from __future__ import annotations
+
+from typing import TYPE_CHECKING
 import numpy as np
 from scipy import ndimage as ndi
-from scipy.fft import fftn, ifftn
+
+if TYPE_CHECKING:
+    # To avoid mypy error caused by scipy.
+    # fmt: off
+    def fftn(arr: np.ndarray) -> np.ndarray: ...
+    def ifftn(arr: np.ndarray) -> np.ndarray: ...
+    # fmt: on
+else:
+    from scipy.fft import fftn, ifftn
+
 from ..molecules import Molecules
 from .._utils import compose_matrices
 from ..alignment._utils import normalize_rotations
@@ -62,7 +73,7 @@ class TomogramGenerator:
         rng = np.random.default_rng(self._seed)
         template = self.template
         if pad_width > 0:
-            template = np.pad(template, pad_width, dims="zyx")
+            template = np.pad(template, pad_width, dims="zyx")  # type: ignore
 
         gy, gx = self.grid_shape
 
@@ -85,7 +96,7 @@ class TomogramGenerator:
                 ft = np.fft.fftshift(fftn(mols[i][j]))
                 mols[i][j] = np.real(np.fft.ifftshift(ifftn(ft * mw)))
 
-        tomogram: np.ndarray = np.block(mols)
+        tomogram: np.ndarray = np.block(mols)  # type: ignore
         return tomogram
 
     def sample_molecules(self, max_distance: nm = 3.0, scale: nm = 1.0):
