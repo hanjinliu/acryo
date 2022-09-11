@@ -81,13 +81,13 @@ class Molecules:
                 raise TypeError("Two of x, y, z is needed.")
             x = np.atleast_2d(x)
             y = np.atleast_2d(y)
-            z = -np.cross(x, y, axis=1)
+            z = cross(x, y, axis=1)
         elif y is None:
             if x is None or z is None:
                 raise TypeError("Two of x, y, z is needed.")
             z = np.atleast_2d(z)
             x = np.atleast_2d(x)
-            y = -np.cross(z, x, axis=1)
+            y = cross(z, x, axis=1)
 
         rotator = axes_to_rotator(z, y)
         return cls(pos, rotator)
@@ -345,7 +345,7 @@ class Molecules:
             center = np.array(shape) / 2 - 0.5
             vec_x = self._rotator[index].apply([0.0, 0.0, 1.0])
             vec_y = self._rotator[index].apply([0.0, 1.0, 0.0])
-            vec_z = -np.cross(vec_x, vec_y)
+            vec_z = cross(vec_x, vec_y)
             ind_z, ind_y, ind_x = [np.arange(s) - c for s, c in zip(shape, center)]
             x_ax: np.ndarray = vec_x[:, np.newaxis] * ind_x
             y_ax: np.ndarray = vec_y[:, np.newaxis] * ind_y
@@ -566,7 +566,7 @@ class Molecules:
         vector = np.atleast_2d(vector)
         vec_x = self.x
         vec_y = self.y
-        vec_z = -np.cross(vec_x, vec_y, axis=1)
+        vec_z = cross(vec_x, vec_y, axis=1)
         world_rotvec = (
             vec_z * vector[:, 0][:, np.newaxis]
             + vec_y * vector[:, 1][:, np.newaxis]
@@ -776,3 +776,8 @@ def axes_to_rotator(z, y) -> Rotation:
     rot2 = Rotation.from_rotvec(rot_vec_zx)
 
     return rot1 * rot2
+
+
+def cross(x: ArrayLike, y: ArrayLike, axis=None) -> np.ndarray:
+    """Vector outer product in zyx coordinate."""
+    return -np.cross(x, y, axis=axis)  # type: ignore
