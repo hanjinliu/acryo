@@ -7,6 +7,7 @@ from ._types import nm
 
 if TYPE_CHECKING:
     import pandas as pd
+    from typing_extensions import Self
 
 _CSV_COLUMNS = ["z", "y", "x", "zvec", "yvec", "xvec"]
 
@@ -111,13 +112,43 @@ class Molecules:
         return cls(pos, rotator, features)
 
     @classmethod
+    def from_quat(
+        cls,
+        pos: np.ndarray,
+        quat: ArrayLike,
+        features: pd.DataFrame | None = None,
+    ) -> Self:
+        """Create molecules from quaternions."""
+        return cls(pos, Rotation.from_quat(quat), features)
+
+    @classmethod
+    def from_rotvec(
+        cls,
+        pos: np.ndarray,
+        vec: ArrayLike,
+        features: pd.DataFrame | None = None,
+    ) -> Self:
+        """Create molecules from rotation vectors."""
+        return cls(pos, Rotation.from_rotvec(vec), features)
+
+    @classmethod
+    def from_matrix(
+        cls,
+        pos: np.ndarray,
+        matrix: np.ndarray,
+        features: pd.DataFrame | None = None,
+    ) -> Self:
+        """Create molecules from rotation matrices."""
+        return cls(pos, Rotation.from_matrix(matrix), features)
+
+    @classmethod
     def from_csv(
         cls,
         path: str,
         pos_cols: list[str] = ["z", "y", "x"],
         rot_cols: list[str] = ["zvec", "yvec", "xvec"],
         **pd_kwargs,
-    ) -> Molecules:
+    ) -> Self:
         """Load csv as a Molecules object."""
         import pandas as pd
 
@@ -185,7 +216,7 @@ class Molecules:
         """Return the number of molecules."""
         return self._pos.shape[0]
 
-    def __getitem__(self, key: int | slice | list[int] | np.ndarray) -> Molecules:
+    def __getitem__(self, key: int | slice | list[int] | np.ndarray) -> Self:
         return self.subset(key)
 
     @property
@@ -214,9 +245,7 @@ class Molecules:
         return self._rotator
 
     @classmethod
-    def concat(
-        cls, moles: Iterable[Molecules], concat_features: bool = True
-    ) -> Molecules:
+    def concat(cls, moles: Iterable[Molecules], concat_features: bool = True) -> Self:
         """Concatenate Molecules objects."""
         pos: list[np.ndarray] = []
         quat: list[np.ndarray] = []
@@ -237,7 +266,7 @@ class Molecules:
 
         return cls(all_pos, Rotation(all_quat), features=all_features)
 
-    def subset(self, spec: int | slice | list[int] | np.ndarray) -> Molecules:
+    def subset(self, spec: int | slice | list[int] | np.ndarray) -> Self:
         """
         Create a subset of molecules by slicing.
 
@@ -410,7 +439,7 @@ class Molecules:
         """
         return self._rotator.as_rotvec()
 
-    def translate(self, shifts: ArrayLike, copy: bool = True) -> Molecules:
+    def translate(self, shifts: ArrayLike, copy: bool = True) -> Self:
         """
         Translate molecule positions by ``shifts``.
 
@@ -444,7 +473,7 @@ class Molecules:
             out = self
         return out
 
-    def translate_internal(self, shifts: ArrayLike, *, copy: bool = True) -> Molecules:
+    def translate_internal(self, shifts: ArrayLike, *, copy: bool = True) -> Self:
         """
         Translate molecule positions internally by ``shifts``.
 
@@ -476,7 +505,7 @@ class Molecules:
         *,
         seed: int | None = None,
         copy: bool = True,
-    ) -> Molecules:
+    ) -> Self:
         """
         Apply random translation to each molecule.
 
@@ -516,9 +545,7 @@ class Molecules:
         )
         return self.translate(shifts, copy=copy)
 
-    def rotate_by_rotvec_internal(
-        self, vector: ArrayLike, copy: bool = True
-    ) -> Molecules:
+    def rotate_by_rotvec_internal(self, vector: ArrayLike, copy: bool = True) -> Self:
         """
         Rotate molecules using internal rotation vector.
 
@@ -547,7 +574,7 @@ class Molecules:
         )
         return self.rotate_by_rotvec(world_rotvec, copy=copy)
 
-    def rotate_by_matrix(self, matrix: ArrayLike, copy: bool = True) -> Molecules:
+    def rotate_by_matrix(self, matrix: ArrayLike, copy: bool = True) -> Self:
         """
         Rotate molecules using rotation matrices, **with their position unchanged**.
 
@@ -568,7 +595,7 @@ class Molecules:
         rotator = Rotation.from_matrix(matrix)
         return self.rotate_by(rotator, copy)
 
-    def rotate_by_quaternion(self, quat: ArrayLike, copy: bool = True) -> Molecules:
+    def rotate_by_quaternion(self, quat: ArrayLike, copy: bool = True) -> Self:
         """
         Rotate molecules using quaternions, **with their position unchanged**.
 
@@ -595,7 +622,7 @@ class Molecules:
         degrees: bool = False,
         order: str = "xyz",
         copy: bool = True,
-    ) -> Molecules:
+    ) -> Self:
         """
         Rotate molecules using Euler angles, **with their position unchanged**.
 
@@ -620,7 +647,7 @@ class Molecules:
             raise ValueError("'order' must be 'xyz' or 'zyx'.")
         return self.rotate_by(rotator, copy)
 
-    def rotate_by_rotvec(self, vector: ArrayLike, copy: bool = True) -> Molecules:
+    def rotate_by_rotvec(self, vector: ArrayLike, copy: bool = True) -> Self:
         """
         Rotate molecules using rotation vectors, **with their position unchanged**.
 
@@ -640,7 +667,7 @@ class Molecules:
         rotator = Rotation.from_rotvec(vector)
         return self.rotate_by(rotator, copy)
 
-    def rotate_by(self, rotator: Rotation, copy: bool = True) -> Molecules:
+    def rotate_by(self, rotator: Rotation, copy: bool = True) -> Self:
         """
         Rotate molecule with a ``Rotation`` object.
 
@@ -678,7 +705,7 @@ class Molecules:
         shift: ArrayLike,
         rotator: Rotation,
         inv: bool = False,
-    ) -> Molecules:
+    ) -> Self:
         """Shift and rotate molecules around their own coordinate."""
         rotvec = rotator.as_rotvec()
         if inv:
