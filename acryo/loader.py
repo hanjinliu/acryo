@@ -215,6 +215,7 @@ class SubtomogramLoader:
             output_shape=output_shape,
             order=order,
             scale=scale,
+            corner_safe=corner_safe,
         )
 
     def copy(self) -> Self:

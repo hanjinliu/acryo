@@ -4,8 +4,6 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, NamedTuple, Sequence
 import numpy as np
 from scipy import ndimage as ndi
-from dask import array as da
-from dask.array.core import Array as daskArray
 from ._types import nm, pixel
 from .molecules import Molecules
 
@@ -58,8 +56,38 @@ class TomogramSimulator:
         return self._order
 
     @property
+    def scale(self) -> float:
+        """The physical scale of the tomogram."""
+        return self._scale
+
+    @property
     def corner_safe(self) -> bool:
         return self._corner_safe
+
+    def replace(
+        self,
+        order: int | None = None,
+        scale: float | None = None,
+        corner_safe: bool | None = None,
+    ) -> Self:
+        """Return a new instance with different parameter(s)."""
+        if order is None:
+            order = self.order
+        if scale is None:
+            scale = self.scale
+        if corner_safe is None:
+            corner_safe = self.corner_safe
+        out = self.__class__(
+            order=order,
+            scale=scale,
+            corner_safe=corner_safe,
+        )
+        out._components = self._components.copy()
+        return out
+
+    def copy(self) -> Self:
+        """Create a shallow copy of the loader."""
+        return self.replace()
 
     def add_molecules(
         self,
@@ -93,7 +121,7 @@ class TomogramSimulator:
             name = f"component<{hex(id(molecules))}>"
         if not overwrite and name in self._components:
             raise ValueError(f"Component of name {name!r} already exists.")
-        self._components[name] = Component(molecules, image)
+        self._components[name] = Component(molecules, image.astype(np.float32))
         return self
 
     def subset(self, names: str | Sequence[str]) -> Self:
@@ -122,12 +150,10 @@ class TomogramSimulator:
                 new._components[name] = comp
         return new
 
-    def simulate_dask(
-        self, shape: tuple[pixel, pixel, pixel], chunks="auto"
-    ) -> daskArray:
-        tomogram: daskArray = da.zeros(shape, chunks=chunks, dtype=np.float32)
+    def simulate(self, shape: tuple[pixel, pixel, pixel]) -> np.ndarray:
+        tomogram = np.zeros(shape, dtype=np.float32)
         for mol, image in self._components.values():
-            pos = mol.pos
+            pos = mol.pos / self._scale
             intpos = pos.astype(np.int32)
             residue = pos - intpos.astype(np.float32)
             template_shape = image.shape
@@ -146,27 +172,27 @@ class TomogramSimulator:
                 # To avoid out-of-boundary, we need to clip the start and stop
                 sl_src: list[slice] = []
                 sl_dst: list[slice] = []
-                for s, e, size in zip(start, stop, shape):
+                for s, e, size, tsize in zip(start, stop, shape, template_shape):
                     _sl, _pads, _out_of_bound = _utils.make_slice_and_pad(s, e, size)
                     sl_dst.append(_sl)
                     if _out_of_bound:
                         s0, s1 = _pads
-                        sl_src.append(slice(s0, size - s1))
+                        sl_src.append(slice(s0, tsize - s1))
                     else:
                         sl_src.append(slice(None))
 
-                tomogram[tuple(sl_dst)] += _utils.delayed_affine(
+                tomogram[tuple(sl_dst)] += ndi.affine_transform(
                     image,
                     mtx,
                     mode="constant",
                     cval=0.0,
                     order=self.order,
                     prefilter=False,
-                )[tuple(sl_src)]
-        return tomogram
+                )[
+                    tuple(sl_src)
+                ]  # type: ignore
 
-    def simulate(self, shape: tuple[pixel, pixel, pixel]) -> np.ndarray:
-        return self.simulate_dask(shape).compute()
+        return tomogram
 
 
 def _compose_affine_matrices(
