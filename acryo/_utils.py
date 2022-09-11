@@ -1,6 +1,8 @@
 from __future__ import annotations
 import numpy as np
-from dask import array as da, delayed
+from dask import array as da
+from dask.array.core import Array as daskArray
+from dask.delayed import delayed
 from scipy import ndimage as ndi
 from scipy.fft import fftn
 from typing import Sequence, TYPE_CHECKING
@@ -9,7 +11,7 @@ if TYPE_CHECKING:
     from scipy.spatial.transform import Rotation
 
 
-def _make_slice_and_pad(
+def make_slice_and_pad(
     z0: int, z1: int, size: int
 ) -> tuple[slice, tuple[int, int], bool]:
     """
@@ -32,7 +34,8 @@ def _make_slice_and_pad(
     elif z1 < 0:
         raise ValueError(f"Specified size is {size} but need to slice at {z0}:{z1}.")
 
-    return slice(z0, z1), (z0_pad, z1_pad), z0_pad != 0 or z1_pad != 0
+    out_of_bound = z0_pad != 0 or z1_pad != 0
+    return slice(z0, z1), (z0_pad, z1_pad), out_of_bound
 
 
 def compose_matrices(
@@ -127,7 +130,7 @@ def fourier_shell_correlation(
     return freq, out
 
 
-def bin_image(img: np.ndarray | da.Array, binsize: int) -> np.ndarray:
+def bin_image(img: np.ndarray | daskArray, binsize: int) -> np.ndarray:
     """Bin an image."""
     _slices: list[slice] = []
     _shapes: list[int] = []
@@ -143,7 +146,7 @@ def bin_image(img: np.ndarray | da.Array, binsize: int) -> np.ndarray:
 
 
 def prepare_affine(
-    img: da.Array,
+    img: daskArray,
     center: Sequence[float],
     output_shape: Sequence[int],
     rot: Rotation,
@@ -157,7 +160,7 @@ def prepare_affine(
     for c, s, s0 in zip(center, output_shape, img.shape):
         x0 = int(c - s / 2 - order)
         x1 = int(x0 + s + 2 * order + 1)
-        _sl, _pad, _need_pad = _make_slice_and_pad(x0, x1, s0)
+        _sl, _pad, _need_pad = make_slice_and_pad(x0, x1, s0)
         slices.append(_sl)
         pads.append(_pad)
         new_center.append(c - x0)
@@ -173,7 +176,7 @@ def prepare_affine(
 
 
 def prepare_affine_cornersafe(
-    img: da.Array,
+    img: daskArray,
     center: Sequence[float],
     output_shape: Sequence[int],
     rot: Rotation,
@@ -189,7 +192,7 @@ def prepare_affine_cornersafe(
     for c, s0 in zip(center, img.shape):
         x0 = int(c - half_len - order)
         x1 = int(x0 + max_len + 2 * order + 1)
-        _sl, _pad, _need_pad = _make_slice_and_pad(x0, x1, s0)
+        _sl, _pad, _need_pad = make_slice_and_pad(x0, x1, s0)
         slices.append(_sl)
         pads.append(_pad)
         new_center.append(c - x0)
@@ -219,3 +222,20 @@ def rotated_crop(subimg: np.ndarray, mtx: np.ndarray, shape, order, mode, cval):
         cval=cval,
     )
     return out
+
+
+_delayed_affine_transform = delayed(ndi.affine_transform)
+
+
+def delayed_affine(
+    input: np.ndarray,
+    matrix: np.ndarray,
+    order: int = 3,
+    mode: str = "constant",
+    cval: float = 0.0,
+    prefilter: bool = True,
+) -> daskArray:
+    out = _delayed_affine_transform(
+        input, matrix, order=order, mode=mode, cval=cval, prefilter=prefilter
+    )
+    return da.from_delayed(out, shape=input.shape, dtype=input.dtype)
