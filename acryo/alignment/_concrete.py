@@ -1,5 +1,16 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 import numpy as np
-from scipy.fft import ifftn
+
+if TYPE_CHECKING:
+    # To avoid mypy error caused by scipy.
+    # fmt: off
+    def ifftn(arr: np.ndarray) -> np.ndarray: ...
+    # fmt: on
+else:
+    from scipy.fft import ifftn
+
 from ._base import TomographyInput
 from ._utils import subpixel_pcc, subpixel_zncc
 

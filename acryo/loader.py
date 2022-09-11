@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import (
     Callable,
     TYPE_CHECKING,
+    Iterable,
     Sequence,
     TypeVar,
     Any,
@@ -9,7 +10,9 @@ from typing import (
 import tempfile
 from scipy.spatial.transform import Rotation
 import numpy as np
-from dask import array as da, delayed
+from dask import array as da
+from dask.array.core import Array as daskArray
+from dask.delayed import delayed
 
 from .alignment import (
     BaseAlignmentModel,
@@ -43,7 +46,7 @@ _UNSET = Unset()
 class SubtomogramLoader:
     def __init__(
         self,
-        image: np.ndarray | da.Array,
+        image: np.ndarray | daskArray,
         molecules: Molecules,
         order: int = 3,
         scale: nm = 1.0,
@@ -85,7 +88,7 @@ class SubtomogramLoader:
             should be set false to save computation time.
         """
         # check type of input image
-        if not isinstance(image, (np.ndarray, da.Array)):
+        if not isinstance(image, (np.ndarray, daskArray)):
             raise TypeError(
                 "Input image of a SubtomogramLoader instance must be np.ndarray "
                 f"or dask.Array, got {type(image)}."
@@ -120,7 +123,7 @@ class SubtomogramLoader:
             raise ValueError("Negative scale is not allowed.")
 
         self._corner_safe = corner_safe
-        self._cached_dask_array: da.Array | None = None
+        self._cached_dask_array: daskArray | None = None
 
     def __repr__(self) -> str:
         shape = self.image.shape
@@ -155,7 +158,7 @@ class SubtomogramLoader:
         )
 
     @property
-    def image(self) -> np.ndarray | da.Array:
+    def image(self) -> np.ndarray | daskArray:
         """Return tomogram image."""
         return self._image
 
@@ -212,6 +215,7 @@ class SubtomogramLoader:
             output_shape=output_shape,
             order=order,
             scale=scale,
+            corner_safe=corner_safe,
         )
 
     def copy(self) -> Self:
@@ -222,7 +226,7 @@ class SubtomogramLoader:
         tr = -(binsize - 1) / 2 * self.scale
         molecules = self.molecules.translate([tr, tr, tr])
         binned_image = _utils.bin_image(self.image, binsize=binsize)
-        if isinstance(binned_image, da.Array) and compute:
+        if isinstance(binned_image, daskArray) and compute:
             binned_image = binned_image.compute()
         out = self.replace(
             molecules=molecules,
@@ -278,7 +282,7 @@ class SubtomogramLoader:
     def construct_dask(
         self,
         output_shape: pixel | tuple[pixel, ...] | None = None,
-    ) -> da.Array:
+    ) -> daskArray:
         """
         Construct a dask array of subtomograms.
 
@@ -308,7 +312,7 @@ class SubtomogramLoader:
         func: Callable,
         *const_args,
         output_shape: pixel | tuple[pixel, ...] | None = None,
-        var_kwarg: dict[str, Any] | None = None,
+        var_kwarg: dict[str, Iterable[Any]] | None = None,
         **const_kwargs,
     ) -> list[Delayed]:
         """
@@ -344,7 +348,7 @@ class SubtomogramLoader:
         self,
         output_shape: pixel | tuple[pixel] | None = None,
         path: str | None = None,
-    ) -> da.Array:
+    ) -> daskArray:
         """
         Create cached stack of subtomograms.
 
@@ -804,7 +808,14 @@ def _normalize_shape(a: pixel | Sequence[pixel], ndim: int):
     return _output_shape
 
 
-def _dict_iterrows(d: dict[str, Sequence[Any]]):
+def _dict_iterrows(d: dict[str, Iterable[Any]]):
+    """
+    Generater similar to pd.DataFrame.iterrows().
+
+    >>> _dict_iterrows({'a': [1, 2, 3], 'b': [4, 5, 6]})
+
+    will yield {'a': 1, 'b': 4}, {'a': 2, 'b': 5}, {'a': 3, 'b': 6}.
+    """
     keys = d.keys()
     value_iters = [iter(v) for v in d.values()]
 
