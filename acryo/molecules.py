@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Iterable, TYPE_CHECKING
 import numpy as np
-from numpy.typing import ArrayLike
+from numpy.typing import ArrayLike, NDArray
 from scipy.spatial.transform import Rotation
 from ._types import nm
 
@@ -37,7 +37,7 @@ class Molecules:
         rot: Rotation | None = None,
         features: pd.DataFrame | ArrayLike | dict[str, ArrayLike] | None = None,
     ):
-        pos = np.atleast_2d(pos)
+        pos = np.atleast_2d(pos).astype(np.float32)
 
         if pos.shape[1] != 3:
             raise ValueError("Shape of pos must be (N, 3).")
@@ -66,7 +66,7 @@ class Molecules:
         z: np.ndarray | None = None,
         y: np.ndarray | None = None,
         x: np.ndarray | None = None,
-    ) -> Molecules:
+    ) -> Self:
         """Construct molecule cloud with orientation from two of their local axes."""
         pos = np.atleast_2d(pos)
 
@@ -101,7 +101,7 @@ class Molecules:
         degrees: bool = False,
         order: str = "xyz",
         features: pd.DataFrame | None = None,
-    ):
+    ) -> Self:
         """Create molecules from Euler angles."""
         if order == "xyz":
             rotator = from_euler_xyz_coords(angles, seq, degrees)
@@ -220,22 +220,22 @@ class Molecules:
         return self.subset(key)
 
     @property
-    def pos(self) -> np.ndarray:
+    def pos(self) -> NDArray[np.float32]:
         """Positions of molecules."""
         return self._pos
 
     @property
-    def x(self) -> np.ndarray:
+    def x(self) -> NDArray[np.float32]:
         """Vectors of x-axis."""
         return self._rotator.apply([0.0, 0.0, 1.0])
 
     @property
-    def y(self) -> np.ndarray:
+    def y(self) -> NDArray[np.float32]:
         """Vectors of y-axis."""
         return self._rotator.apply([0.0, 1.0, 0.0])
 
     @property
-    def z(self) -> np.ndarray:
+    def z(self) -> NDArray[np.float32]:
         """Vectors of z-axis."""
         return self._rotator.apply([1.0, 0.0, 0.0])
 
@@ -297,7 +297,7 @@ class Molecules:
 
     def affine_matrix(
         self, src: np.ndarray, dst: np.ndarray | None = None, inverse: bool = False
-    ) -> np.ndarray:
+    ) -> NDArray[np.float32]:
         """
         Construct affine matrices using positions and angles of molecules.
 
@@ -340,7 +340,7 @@ class Molecules:
         index: int | slice | Iterable[int],
         shape: tuple[int, int, int],
         scale: nm,
-    ) -> np.ndarray:
+    ) -> NDArray[np.float32]:
         if isinstance(index, int):
             center = np.array(shape) / 2 - 0.5
             vec_x = self._rotator[index].apply([0.0, 0.0, 1.0])
@@ -377,7 +377,7 @@ class Molecules:
 
         return coords
 
-    def matrix(self) -> np.ndarray:
+    def matrix(self) -> NDArray[np.float32]:
         """
         Calculate rotation matrices that align molecules in such orientations
         that ``vec`` belong to the object.
@@ -390,7 +390,9 @@ class Molecules:
         """
         return self._rotator.as_matrix()
 
-    def euler_angle(self, seq: str = "ZXZ", degrees: bool = False) -> np.ndarray:
+    def euler_angle(
+        self, seq: str = "ZXZ", degrees: bool = False
+    ) -> NDArray[np.float32]:
         """
         Calculate Euler angles that transforms a source vector to vectors that
         belong to the object.
@@ -415,7 +417,7 @@ class Molecules:
         seq = _translate_euler(seq)
         return self._rotator.as_euler(seq, degrees=degrees)[..., ::-1]
 
-    def quaternion(self) -> np.ndarray:
+    def quaternion(self) -> NDArray[np.float32]:
         """
         Calculate quaternions that transforms a source vector to vectors that
         belong to the object.
@@ -427,7 +429,7 @@ class Molecules:
         """
         return self._rotator.as_quat()
 
-    def rotvec(self) -> np.ndarray:
+    def rotvec(self) -> NDArray[np.float32]:
         """
         Calculate rotation vectors that transforms a source vector to vectors
         that belong to the object.
@@ -462,7 +464,7 @@ class Molecules:
         Molecules
             Instance with updated positional coordinates.
         """
-        coords = self._pos + shifts
+        coords = self._pos + np.asarray(shifts)
         if copy:
             features = self._features
             if features is not None:

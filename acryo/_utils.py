@@ -1,14 +1,18 @@
 from __future__ import annotations
+from typing import Sequence, TYPE_CHECKING
+from functools import lru_cache
+
 import numpy as np
+from numpy.typing import NDArray
 from dask import array as da
 from dask.array.core import Array as daskArray
 from dask.delayed import delayed
 from scipy import ndimage as ndi
 from scipy.fft import fftn
-from typing import Sequence, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from scipy.spatial.transform import Rotation
+    from ._types import degree
 
 
 def make_slice_and_pad(
@@ -42,7 +46,7 @@ def compose_matrices(
     center: Sequence[float] | np.ndarray,
     rotators: list[Rotation],
     output_center: Sequence[float] | np.ndarray | None = None,
-):
+) -> list[NDArray[np.float32]]:
     """Compose Affine matrices from an array shape and a Rotation object."""
 
     dz, dy, dx = center
@@ -70,7 +74,7 @@ def compose_matrices(
         dtype=np.float32,
     )
 
-    matrices = []
+    matrices: list[np.ndarray] = []
     for rot in rotators:
         e_ = np.eye(4)
         e_[:3, :3] = rot.as_matrix()
@@ -103,7 +107,7 @@ def fourier_shell_correlation(
     shape = img0.shape
 
     freqs = np.meshgrid(
-        *[np.fft.fftshift(np.fft.fftfreq(s)) for s in shape], indexing="ij"
+        *[np.fft.fftshift(np.fft.fftfreq(s, d=1.0)) for s in shape], indexing="ij"
     )
 
     r: np.ndarray = np.sqrt(sum(f**2 for f in freqs))
@@ -118,8 +122,8 @@ def fourier_shell_correlation(
         arr = np.asarray(arr)
         return ndi.sum_labels(arr, labels=labels, index=np.arange(0, nlabels))
 
-    f0: np.ndarray = np.fft.fftshift(fftn(img0))
-    f1: np.ndarray = np.fft.fftshift(fftn(img1))
+    f0: np.ndarray = np.fft.fftshift(fftn(img0))  # type: ignore
+    f1: np.ndarray = np.fft.fftshift(fftn(img1))  # type: ignore
 
     cov = f0.real * f1.real + f0.imag * f1.imag  # type: ignore
     pw0 = f0.real**2 + f0.imag**2  # type: ignore
@@ -168,7 +172,7 @@ def prepare_affine(
 
     img0 = img[tuple(slices)]
     if need_pad:
-        input = da.pad(img0, pads, mode="mean")
+        input = da.pad(img0, pads, mode="mean")  # type: ignore
     else:
         input = img0
     mtx = compose_matrices(new_center, [rot], output_center=output_center)[0]
@@ -200,7 +204,7 @@ def prepare_affine_cornersafe(
 
     img0 = img[tuple(slices)]
     if need_pad:
-        input = da.pad(img0, pads, mode="mean")
+        input = da.pad(img0, pads, mode="mean")  # type: ignore
     else:
         input = img0
     mtx = compose_matrices(new_center, [rot], output_center=output_center)[0]
@@ -238,4 +242,53 @@ def delayed_affine(
     out = _delayed_affine_transform(
         input, matrix, order=order, mode=mode, cval=cval, prefilter=prefilter
     )
-    return da.from_delayed(out, shape=input.shape, dtype=input.dtype)
+    return da.from_delayed(out, shape=input.shape, dtype=input.dtype)  # type: ignore
+
+
+def missing_wedge_mask(
+    rotator: Rotation,
+    tilt_range: tuple[degree, degree],
+    shape: tuple[int, int, int],
+) -> np.ndarray | float:
+    """
+    Create a binary mask that covers tomographical missing wedge.
+
+    Parameters
+    ----------
+
+    Returns
+    -------
+    np.ndarray or float
+        Missing wedge mask. If ``tilt_range`` is None, 1 will be returned.
+    """
+    normal0, normal1 = _get_unrotated_normals(tilt_range)
+    normal0 = rotator.apply(normal0)
+    normal1 = rotator.apply(normal1)
+    zz, yy, xx = _get_indices(shape)
+
+    vectors = np.stack([zz, yy, xx], axis=-1)
+    dot0 = vectors.dot(normal0)
+    dot1 = vectors.dot(normal1)
+    missing = dot0 * dot1 < 0
+    return np.fft.ifftshift(np.rot90(missing, axes=(0, 2)))
+
+
+@lru_cache
+def _get_unrotated_normals(
+    tilt_range: tuple[degree, degree]
+) -> tuple[np.ndarray, np.ndarray]:
+    radmin, radmax = np.deg2rad(tilt_range)
+    ang0 = np.pi / 2 - radmin
+    ang1 = np.pi / 2 - radmax
+    return (
+        np.array([np.cos(ang0), 0, np.sin(ang0)]),
+        np.array([np.cos(ang1), 0, np.sin(ang1)]),
+    )
+
+
+@lru_cache
+def _get_indices(shape: tuple[int, ...]):
+    inds = np.indices(shape, dtype=np.float32)
+    for ind, s in zip(inds, shape):
+        ind -= s / 2 - 0.5
+    return inds

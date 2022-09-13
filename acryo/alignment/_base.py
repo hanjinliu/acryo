@@ -1,6 +1,5 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from functools import lru_cache
 from typing import Iterable, NamedTuple, Sequence
 import numpy as np
 from scipy import ndimage as ndi
@@ -10,7 +9,7 @@ from dask.delayed import delayed
 
 from ._utils import lowpass_filter_ft, normalize_rotations
 from .._types import Ranges, subpixel, degree
-from .._utils import compose_matrices
+from .._utils import compose_matrices, missing_wedge_mask
 
 
 class AlignmentResult(NamedTuple):
@@ -519,39 +518,11 @@ class TomographyInput(RotationImplemented):
         """
         if self._tilt_range is None:
             return 1.0
-        shape = self.input_shape
-        normal0, normal1 = _get_unrotated_normals(self._tilt_range)
-        rot = Rotation.from_quat(quat)
-        normal0 = rot.apply(normal0)
-        normal1 = rot.apply(normal1)
-        zz, yy, xx = _get_indices(shape)
-
-        vectors = np.stack([zz, yy, xx], axis=-1)
-        dot0 = vectors.dot(normal0)
-        dot1 = vectors.dot(normal1)
-        missing = dot0 * dot1 < 0
-        return np.fft.ifftshift(np.rot90(missing, axes=(0, 2)))
-
-
-@lru_cache
-def _get_unrotated_normals(
-    tilt_range: tuple[degree, degree]
-) -> tuple[np.ndarray, np.ndarray]:
-    radmin, radmax = np.deg2rad(tilt_range)
-    ang0 = np.pi / 2 - radmin
-    ang1 = np.pi / 2 - radmax
-    return (
-        np.array([np.cos(ang0), 0, np.sin(ang0)]),
-        np.array([np.cos(ang1), 0, np.sin(ang1)]),
-    )
-
-
-@lru_cache
-def _get_indices(shape: tuple[int, ...]):
-    inds = np.indices(shape, dtype=np.float32)
-    for ind, s in zip(inds, shape):
-        ind -= s / 2 - 0.5
-    return inds
+        return missing_wedge_mask(
+            rotator=Rotation.from_quat(quat),
+            tilt_range=self._tilt_range,
+            shape=self.input_shape,
+        )
 
 
 def _normalize_cval(cval: float | None, img: np.ndarray) -> float:

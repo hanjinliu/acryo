@@ -3,10 +3,11 @@ import os
 from typing import Any, NamedTuple, Callable, TypeVar
 import numpy as np
 from dask import array as da
+from dask.array.core import Array as daskArray
 
 
 class ImageData(NamedTuple):
-    image: da.Array
+    image: daskArray
     scale: float
 
 
@@ -92,8 +93,8 @@ def open_mrc(path: str):
     return img, scale
 
 
-def as_dask(mmap: np.memmap, chunks: Any = "auto") -> da.Array:
-    img = da.from_array(mmap, chunks=chunks, meta=np.array([])).map_blocks(
-        np.asarray, dtype=mmap.dtype
-    )
+def as_dask(mmap: np.memmap, chunks: Any = "auto") -> daskArray:
+    img = da.from_array(  # type: ignore
+        mmap, chunks=chunks, meta=np.array([])
+    ).map_blocks(np.asarray, dtype=mmap.dtype)
     return img
