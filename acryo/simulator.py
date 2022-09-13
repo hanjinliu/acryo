@@ -5,11 +5,12 @@ from typing import TYPE_CHECKING, NamedTuple, Sequence
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy import ndimage as ndi
+from scipy.fft import fftn, ifftn
 from scipy.spatial.transform import Rotation
 from dask import array as da
 from dask.delayed import delayed
 
-from ._types import nm, pixel
+from ._types import nm, pixel, degree
 from .molecules import Molecules
 
 from . import _utils
@@ -155,7 +156,12 @@ class TomogramSimulator:
                 new._components[name] = comp
         return new
 
-    def simulate(self, shape: tuple[pixel, pixel, pixel]) -> NDArray[np.float32]:
+    def simulate(
+        self,
+        shape: tuple[pixel, pixel, pixel],
+        *,
+        tilt_range: tuple[degree, degree] | None = None,
+    ) -> NDArray[np.float32]:
         """
         Simulate tomogram.
 
@@ -209,6 +215,12 @@ class TomogramSimulator:
                 )[
                     tuple(sl_src)
                 ]  # type: ignore
+
+        if tilt_range is not None:
+            rot = Rotation.identity()
+            mask = _utils.missing_wedge_mask(rot, tilt_range, tomogram.shape)
+            ft = fftn(tomogram) * mask  # type: ignore
+            tomogram = ifftn(ft).real  # type: ignore
 
         return tomogram
 

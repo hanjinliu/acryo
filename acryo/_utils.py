@@ -9,9 +9,9 @@ from dask.array.core import Array as daskArray
 from dask.delayed import delayed
 from scipy import ndimage as ndi
 from scipy.fft import fftn
+from scipy.spatial.transform import Rotation
 
 if TYPE_CHECKING:
-    from scipy.spatial.transform import Rotation
     from ._types import degree
 
 
@@ -245,16 +245,28 @@ def delayed_affine(
     return da.from_delayed(out, shape=input.shape, dtype=input.dtype)  # type: ignore
 
 
+_R90 = Rotation.from_rotvec([0, -np.pi / 2, 0])
+
+
 def missing_wedge_mask(
     rotator: Rotation,
     tilt_range: tuple[degree, degree],
     shape: tuple[int, int, int],
-) -> np.ndarray | float:
+) -> np.ndarray:
     """
     Create a binary mask that covers tomographical missing wedge.
 
+    Note that the mask is not shifted to the center of the Fourier domain.
+    ``np.fft.fftn(img) * mask`` will be the correct way to apply the mask.
+
     Parameters
     ----------
+    rotator : Rotation
+        The rotation object that describes the direction of the mask.
+    tilt_range : tuple of float
+        The range of tilt angles in degrees.
+    shape : tuple of int
+        The shape of the mask.
 
     Returns
     -------
@@ -262,18 +274,19 @@ def missing_wedge_mask(
         Missing wedge mask. If ``tilt_range`` is None, 1 will be returned.
     """
     normal0, normal1 = _get_unrotated_normals(tilt_range)
-    normal0 = rotator.apply(normal0)
-    normal1 = rotator.apply(normal1)
+    shape_vector = np.array(shape, dtype=np.float32)
+    normal0 = _R90.apply(rotator.apply(normal0 * shape_vector))
+    normal1 = _R90.apply(rotator.apply(normal1 * shape_vector))
     zz, yy, xx = _get_indices(shape)
 
     vectors = np.stack([zz, yy, xx], axis=-1)
     dot0 = vectors.dot(normal0)
     dot1 = vectors.dot(normal1)
     missing = dot0 * dot1 < 0
-    return np.fft.ifftshift(np.rot90(missing, axes=(0, 2)))
+    return np.fft.ifftshift(missing)
 
 
-@lru_cache
+@lru_cache(maxsize=8)
 def _get_unrotated_normals(
     tilt_range: tuple[degree, degree]
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -286,7 +299,7 @@ def _get_unrotated_normals(
     )
 
 
-@lru_cache
+@lru_cache(maxsize=32)
 def _get_indices(shape: tuple[int, ...]):
     inds = np.indices(shape, dtype=np.float32)
     for ind, s in zip(inds, shape):
