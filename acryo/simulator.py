@@ -3,7 +3,12 @@ from __future__ import annotations
 from types import MappingProxyType
 from typing import TYPE_CHECKING, NamedTuple, Sequence
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 from scipy import ndimage as ndi
+from scipy.spatial.transform import Rotation
+from dask import array as da
+from dask.delayed import delayed
+
 from ._types import nm, pixel
 from .molecules import Molecules
 
@@ -150,7 +155,20 @@ class TomogramSimulator:
                 new._components[name] = comp
         return new
 
-    def simulate(self, shape: tuple[pixel, pixel, pixel]) -> np.ndarray:
+    def simulate(self, shape: tuple[pixel, pixel, pixel]) -> NDArray[np.float32]:
+        """
+        Simulate tomogram.
+
+        Parameters
+        ----------
+        shape : tuple of int
+            Shape of the tomogram.
+
+        Returns
+        -------
+        np.ndarray
+            Simulated tomogram image.
+        """
         tomogram = np.zeros(shape, dtype=np.float32)
         for mol, image in self._components.values():
             pos = mol.pos / self._scale
@@ -194,6 +212,43 @@ class TomogramSimulator:
 
         return tomogram
 
+    def simulate_tilt_series(
+        self,
+        shape: tuple[pixel, pixel, pixel],
+        degrees: Sequence[float],
+        central_axis: ArrayLike = (0, 1, 0),
+        order: int = 3,
+    ) -> NDArray[np.float32]:
+        # normalize central axis
+        _central_axis = np.asarray(central_axis, dtype=np.float32)
+        _central_axis /= np.linalg.norm(_central_axis)
+
+        input = self.simulate(shape)
+        matrices = _get_rotation_matrices_for_radon_3d(degrees, _central_axis, shape)
+        if order > 1:
+            input = ndi.spline_filter(input, order=order, mode="constant")
+        tasks = [_radon_transform(input, mtx, order=order) for mtx in matrices]
+        out = np.stack(da.compute(tasks)[0], axis=0)  # type: ignore
+        return out
+
+    # def simulate_tilt_series_2(
+    #     self,
+    #     shape: tuple[pixel, pixel],
+    #     degrees: Sequence[float],
+    #     central_axis: ArrayLike = (0, 1, 0),
+    # ) -> NDArray[np.float32]:
+    #     # normalize central axis
+    #     _central_axis = np.asarray(central_axis, dtype=np.float32)
+    #     _central_axis /= np.linalg.norm(_central_axis)
+    #     tasks = [
+    #         da.from_delayed(
+    #             _simulate_single(shape, degree, _central_axis),
+    #             shape=shape,
+    #             dtype=np.float32
+    #         ) for degree in degrees
+    #     ]
+    #     return da.stack(tasks, axis=0).compute()
+
 
 def _compose_affine_matrices(
     center: np.ndarray,
@@ -228,3 +283,43 @@ def _compose_affine_matrices(
 
 def _eyes(n: int) -> np.ndarray:
     return np.stack([np.eye(4, dtype=np.float32)] * n, axis=0)
+
+
+# @delayed
+# def _simulate_single(
+#     comp: Component,
+#     output_shape: tuple[pixel, pixel],
+#     degree: float,
+#     central_axis: ArrayLike,
+#     order: int = 3,
+# ) -> NDArray[np.float32]:
+#     mol, image = comp
+#     out = np.zeros(output_shape, dtype=np.float32)
+#     center = (np.array(image.shape) - 1.0) / 2.0
+#     rot = Rotation.from_rotvec(central_axis * np.deg2rad(degree))
+#     rot_list = [rot[i] for i in range(len(rot))]
+#     matrices = _utils.compose_matrices(center, rot_list, center)
+
+#     for mtx in matrices:
+#         ndi.affine_transform(image, mtx, order=order, mode="constant", cval=0.0, prefilter=False)
+#     return out
+
+
+@delayed
+def _radon_transform(img: np.ndarray, mtx: np.ndarray, order: int = 3):
+    """Radon transform of 3D image."""
+    img_rot = ndi.affine_transform(img, mtx, order=order, prefilter=False)
+    return np.sum(img_rot, axis=0)
+
+
+def _get_rotation_matrices_for_radon_3d(
+    degrees: Sequence[float],
+    central_axis: np.ndarray,
+    shape: tuple[int, int, int],
+) -> list[NDArray[np.float32]]:
+    from scipy.spatial.transform import Rotation
+
+    vec = np.stack([central_axis * np.deg2rad(deg) for deg in degrees], axis=0)
+    rot = Rotation.from_rotvec(vec)
+    center = (np.array(shape) - 1.0) / 2.0
+    return _utils.compose_matrices(center, [rot[i] for i in range(len(rot))], center)
