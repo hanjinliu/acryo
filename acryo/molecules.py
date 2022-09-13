@@ -37,7 +37,7 @@ class Molecules:
         rot: Rotation | None = None,
         features: pd.DataFrame | ArrayLike | dict[str, ArrayLike] | None = None,
     ):
-        pos = np.atleast_2d(pos).astype(np.float32)
+        pos = np.atleast_2d(pos)
 
         if pos.shape[1] != 3:
             raise ValueError("Shape of pos must be (N, 3).")
@@ -222,7 +222,7 @@ class Molecules:
     @property
     def pos(self) -> NDArray[np.float32]:
         """Positions of molecules."""
-        return self._pos
+        return self._pos  # type: ignore
 
     @property
     def x(self) -> NDArray[np.float32]:
