@@ -50,14 +50,15 @@ def test_fsc():
     loader.fsc()
     loader.fsc(mask=temp > np.mean(temp))
 
-
-def test_fit():
+@pytest.mark.parametrize("shift", [[1, 2, 2], [-4, 3, 2]])
+@pytest.mark.parametrize("rot", [[15, 0, 15], [-15, 15, 15], [0, 0, -15]])
+def test_fit(shift, rot):
     rotations = ((15, 15), (15, 15), (15, 15))
     model = ZNCCAlignment(temp, rotations=rotations)
 
-    img = ndi.shift(rotate(temp, [15, 0, 15], cval=np.min), shift=[1, 2, 2])
-    imgout, result = model.fit(img, (3, 3, 3))
-    assert_allclose(result.quat, euler_to_quat([15, 0, 15]))
-    assert_allclose(result.shift, [1, 2, 2])
+    img = ndi.shift(rotate(temp, rot, cval=np.min), shift=shift)
+    imgout, result = model.fit(img, (5, 5, 5))
+    assert_allclose(result.quat, euler_to_quat(rot))
+    assert_allclose(result.shift, shift)
     coef = np.corrcoef(imgout.ravel(), temp.ravel())
     assert coef[0, 1] > 0.95  # check results are well aligned
