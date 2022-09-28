@@ -349,14 +349,14 @@ class RotationImplemented(BaseAlignmentModel):
         delayed_optimize = delayed(self.optimize)
         delayed_transform = delayed(self._transform_template)
         template_masked = self._template * self.mask
-        _cval = _normalize_cval(cval, img)
+        _temp_cval = _normalize_cval(cval, self._template)
         rotators = [Rotation.from_quat(r).inv() for r in self.quaternions]
         matrices = compose_matrices(
             np.array(self._template.shape[-self._ndim :]) / 2 - 0.5, rotators
         )
         tasks = []
         for mat, quat in zip(matrices, self.quaternions):
-            tmp = delayed_transform(template_masked, mat, cval=_cval)
+            tmp = delayed_transform(template_masked, mat, cval=_temp_cval)
             task = delayed_optimize(img_input, tmp, max_shifts, quat)
             tasks.append(task)
         results: list[tuple] = da.compute(tasks)[0]  # type: ignore
@@ -371,9 +371,10 @@ class RotationImplemented(BaseAlignmentModel):
         )
 
         rotator = Rotation.from_quat(result.quat)
+        _img_cval = _normalize_cval(cval, img)
         matrix = compose_matrices(np.array(img.shape) / 2 - 0.5, [rotator])[0]
-        img_shifted = ndi.shift(img, -result.shift, cval=_cval)
-        img_trans = ndi.affine_transform(img_shifted, matrix, cval=_cval)
+        img_shifted = ndi.shift(img, -result.shift, cval=_img_cval)
+        img_trans = ndi.affine_transform(img_shifted, matrix, cval=_img_cval)
         return img_trans, result
 
     def _transform_template(

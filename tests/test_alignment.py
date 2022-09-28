@@ -55,8 +55,8 @@ def test_fsc():
 def test_fit(shift, rot):
     rotations = ((15, 15), (15, 15), (15, 15))
     model = ZNCCAlignment(temp, rotations=rotations)
-
-    img = ndi.shift(rotate(temp, rot, cval=np.min), shift=shift)
+    temp_transformed = temp * 4 + np.mean(temp)  # linear transformation to input image
+    img = ndi.shift(rotate(temp_transformed, rot, cval=np.min), shift=shift)
     imgout, result = model.fit(img, (5, 5, 5))
     assert_allclose(result.quat, euler_to_quat(rot))
     assert_allclose(result.shift, shift)
