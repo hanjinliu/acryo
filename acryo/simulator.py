@@ -32,7 +32,13 @@ class TomogramSimulator:
     An object for tomogram simulation
 
     A TomogramSimulator contains set(s) of molecules and their corresponding density
-    and additional information for tomogram generation.
+    and additional information for tomogram generation. For instance, to simulate a
+    tomogram with two sets of molecules, you can do
+
+    >>> sim = TomogramSimulator()
+    >>> sim.add_molecules(molecules_a, image_a, name="Molecule-A")
+    >>> sim.add_molecules(molecules_b, image_b, name="Molecule-B")
+    >>> img = sim.simulate(shape=(128, 128, 128))
 
     Parameters
     ----------

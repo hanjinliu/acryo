@@ -44,6 +44,41 @@ _UNSET = Unset()
 
 
 class SubtomogramLoader:
+    """
+    A class for efficient loading of subtomograms.
+
+    A ``SubtomogramLoader`` instance is basically composed of two elements,
+    an image and a Molecules object. A subtomogram is loaded by creating a
+    local rotated Cartesian coordinate at a molecule and calculating mapping
+    from the image to the subtomogram.
+
+    Parameters
+    ----------
+    image : np.ndarray or da.Array
+        Tomogram image. Must be 3-D.
+    molecules : Molecules
+        Molecules object that represents positions and orientations of
+        subtomograms.
+    order : int, default is 3
+        Interpolation order of subtomogram sampling.
+        - 0 = Nearest neighbor
+        - 1 = Linear interpolation
+        - 3 = Cubic interpolation
+    scale : float, default is 1.0
+        Physical scale of pixel, such as nm. This value does not affect
+        averaging/alignment results but molecule coordinates are multiplied
+        by this value. This parameter is useful when another loader with
+        binned image is created.
+    output_shape : int or tuple of int, optional
+        Shape of output subtomogram in pixel. This parameter is not required
+        if template (or mask) image is available immediately.
+    corner_safe : bool, default is False
+        If true, regions around molecules will be cropped at a volume larger
+        than ``output_shape`` so that densities at the corners will not be
+        lost due to rotation. If target density is globular, this parameter
+        should be set false to save computation time.
+    """
+
     def __init__(
         self,
         image: np.ndarray | daskArray,
@@ -53,40 +88,6 @@ class SubtomogramLoader:
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = _UNSET,
         corner_safe: bool = False,
     ) -> None:
-        """
-        A class for efficient loading of subtomograms.
-
-        A ``SubtomogramLoader`` instance is basically composed of two elements,
-        an image and a Molecules object. A subtomogram is loaded by creating a
-        local rotated Cartesian coordinate at a molecule and calculating mapping
-        from the image to the subtomogram.
-
-        Parameters
-        ----------
-        image : np.ndarray or da.Array
-            Tomogram image. Must be 3-D.
-        molecules : Molecules
-            Molecules object that represents positions and orientations of
-            subtomograms.
-        order : int, default is 3
-            Interpolation order of subtomogram sampling.
-            - 0 = Nearest neighbor
-            - 1 = Linear interpolation
-            - 3 = Cubic interpolation
-        scale : float, default is 1.0
-            Physical scale of pixel, such as nm. This value does not affect
-            averaging/alignment results but molecule coordinates are multiplied
-            by this value. This parameter is useful when another loader with
-            binned image is created.
-        output_shape : int or tuple of int, optional
-            Shape of output subtomogram in pixel. This parameter is not required
-            if template (or mask) image is available immediately.
-        corner_safe : bool, default is False
-            If true, regions around molecules will be cropped at a volume larger
-            than ``output_shape`` so that densities at the corners will not be
-            lost due to rotation. If target density is globular, this parameter
-            should be set false to save computation time.
-        """
         # check type of input image
         if not isinstance(image, (np.ndarray, daskArray)):
             raise TypeError(
