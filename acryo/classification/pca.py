@@ -38,24 +38,29 @@ class PcaClassifier:
 
     @property
     def pca(self) -> PCA:
+        """The PCA object."""
         return self._pca
 
     @property
     def kmeans(self) -> KMeans:
+        """The k-means object."""
         return self._kmeans
 
     def run(self) -> Self:
+        """Run PCA and k-means clustering."""
         self._pca.fit(self._image_flat(mask=True))
         self._labels = self._kmeans.fit_predict(self.get_transform())
         return self
 
     def transform(self, input: np.ndarray, mask: bool = True) -> np.ndarray:
+        """Transform the input image into the principal component space."""
         if mask:
             input = input * self._mask
         flat = input.reshape(input.shape[0], -1)
         return self._pca.transform(flat)
 
     def predict(self, input: np.ndarray) -> np.ndarray:
+        """Predict which labels the input images belong to."""
         transformed = self.transform(input)
         labels = self._kmeans.predict(transformed)
         return labels
@@ -90,14 +95,14 @@ class PcaClassifier:
         self,
         labels: Iterable[int] | None = None,
         bases: tuple[int, int] = (0, 1),
-        ax=None,
+        ax: Axes | None = None,  # type: ignore
     ) -> Axes:
         ax0, ax1 = bases
         import matplotlib.pyplot as plt
 
         transformed = self.get_transform(labels)
         if ax is None:
-            ax = plt.gca()
+            ax: Axes = plt.gca()
         ax.scatter(transformed[:, ax0], transformed[:, ax1])
         return ax
 
