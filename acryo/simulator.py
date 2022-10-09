@@ -21,11 +21,33 @@ if TYPE_CHECKING:
 
 
 class Component(NamedTuple):
+    """A component of tomogram."""
+
     molecules: Molecules
     image: np.ndarray
 
 
 class TomogramSimulator:
+    """
+    An object for tomogram simulation
+
+    A TomogramSimulator contains set(s) of molecules and their corresponding density
+    and additional information for tomogram generation.
+
+    Parameters
+    ----------
+    order : int, default is 3
+        Interpolation order for density image.
+        - 0 = Nearest neighbor
+        - 1 = Linear interpolation
+        - 3 = Cubic interpolation
+    scale : float, default is 1.0
+        Scale of the pixel. This value is used to determine the position of the
+        molecules.
+    corner_safe : bool, default is False
+        Not implemented yet.
+    """
+
     def __init__(
         self,
         order: Literal[0, 1, 3] = 3,
