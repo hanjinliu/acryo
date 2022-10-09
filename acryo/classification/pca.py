@@ -6,6 +6,7 @@ if TYPE_CHECKING:
     from matplotlib.axes import Axes
     from sklearn.decomposition import PCA
     from sklearn.cluster import KMeans
+    from typing_extensions import Self
 
 
 class PcaClassifier:
@@ -43,18 +44,18 @@ class PcaClassifier:
     def kmeans(self) -> KMeans:
         return self._kmeans
 
-    def run(self):
+    def run(self) -> Self:
         self._pca.fit(self._image_flat(mask=True))
         self._labels = self._kmeans.fit_predict(self.get_transform())
         return self
 
     def transform(self, input: np.ndarray, mask: bool = True) -> np.ndarray:
         if mask:
-            input = input * mask
+            input = input * self._mask
         flat = input.reshape(input.shape[0], -1)
         return self._pca.transform(flat)
 
-    def predict(self, input) -> np.ndarray:
+    def predict(self, input: np.ndarray) -> np.ndarray:
         transformed = self.transform(input)
         labels = self._kmeans.predict(transformed)
         return labels

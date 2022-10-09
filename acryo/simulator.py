@@ -16,7 +16,7 @@ from .molecules import Molecules
 from . import _utils
 
 if TYPE_CHECKING:
-    from typing_extensions import Self
+    from typing_extensions import Self, Literal
     from scipy.spatial.transform import Rotation
 
 
@@ -28,7 +28,7 @@ class Component(NamedTuple):
 class TomogramSimulator:
     def __init__(
         self,
-        order: int = 3,
+        order: Literal[0, 1, 3] = 3,
         scale: nm = 1.0,
         corner_safe: bool = False,
     ) -> None:
@@ -37,7 +37,7 @@ class TomogramSimulator:
             raise ValueError(
                 f"The third argument 'order' must be 0, 1 or 3, got {order!r}."
             )
-        self._order = order
+        self._order: Literal[0, 1, 3] = order
 
         # check scale
         self._scale = float(scale)
@@ -57,7 +57,7 @@ class TomogramSimulator:
         return MappingProxyType(self._components)
 
     @property
-    def order(self) -> int:
+    def order(self) -> Literal[0, 1, 3]:
         """Return the interpolation order."""
         return self._order
 
@@ -72,7 +72,7 @@ class TomogramSimulator:
 
     def replace(
         self,
-        order: int | None = None,
+        order: Literal[0, 1, 3] | None = None,
         scale: float | None = None,
         corner_safe: bool | None = None,
     ) -> Self:
@@ -169,6 +169,9 @@ class TomogramSimulator:
         ----------
         shape : tuple of int
             Shape of the tomogram.
+        tilt_range : tuple of float, optional
+            Range of tilt series in degrees, such as (-60., 60.). This argument is
+            used to mask missing wedge in the tomogram.
 
         Returns
         -------
@@ -177,15 +180,18 @@ class TomogramSimulator:
         """
         tomogram = np.zeros(shape, dtype=np.float32)
         for mol, image in self._components.values():
+            # image slice must be integer so split it into two parts
             pos = mol.pos / self._scale
             intpos = pos.astype(np.int32)
             residue = pos - intpos.astype(np.float32)
+
+            # construct matrices
             template_shape = image.shape
             center = (np.array(template_shape) - 1.0) / 2.0
             starts = intpos - center.astype(np.int32)
             stops = starts + template_shape
             mtxs = _compose_affine_matrices(
-                center, mol.rotator, output_center=center + residue
+                center, mol.rotator.inv(), output_center=center + residue
             )
 
             # prefilter here to avoid repeated computation
@@ -194,18 +200,20 @@ class TomogramSimulator:
 
             for start, stop, mtx in zip(starts, stops, mtxs):
                 # To avoid out-of-boundary, we need to clip the start and stop
-                sl_src: list[slice] = []
-                sl_dst: list[slice] = []
+                sl_src_list: list[slice] = []
+                sl_dst_list: list[slice] = []
                 for s, e, size, tsize in zip(start, stop, shape, template_shape):
                     _sl, _pads, _out_of_bound = _utils.make_slice_and_pad(s, e, size)
-                    sl_dst.append(_sl)
+                    sl_dst_list.append(_sl)
                     if _out_of_bound:
                         s0, s1 = _pads
-                        sl_src.append(slice(s0, tsize - s1))
+                        sl_src_list.append(slice(s0, tsize - s1))
                     else:
-                        sl_src.append(slice(None))
+                        sl_src_list.append(slice(None))
+                sl_src = tuple(sl_src_list)
+                sl_dst = tuple(sl_dst_list)
 
-                tomogram[tuple(sl_dst)] += ndi.affine_transform(
+                tomogram[sl_dst] += ndi.affine_transform(
                     image,
                     mtx,
                     mode="constant",
@@ -213,10 +221,11 @@ class TomogramSimulator:
                     order=self.order,
                     prefilter=False,
                 )[
-                    tuple(sl_src)
+                    sl_src
                 ]  # type: ignore
 
         if tilt_range is not None:
+            # Remove the missing wedge from the Fourier space
             rot = Rotation.identity()
             mask = _utils.missing_wedge_mask(rot, tilt_range, tomogram.shape)
             ft = fftn(tomogram) * mask  # type: ignore

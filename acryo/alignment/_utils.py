@@ -108,7 +108,7 @@ def lowpass_filter_ft(img: np.ndarray, cutoff: float, order: int = 2) -> np.ndar
         high_pass=False,
         real=False,
     )
-    return weight * fftn(img)
+    return weight * fftn(img)  # type: ignore
 
 
 def lowpass_filter(img: np.ndarray, cutoff: float, order: int = 2) -> np.ndarray:
@@ -138,12 +138,12 @@ def _get_ND_butterworth_filter(
         axis = np.arange(-(d - 1) // 2, (d - 1) // 2 + 1, dtype=np.float32) / (
             d * cutoff
         )
-        ranges.append(np.fft.ifftshift(axis ** 2))
+        ranges.append(np.fft.ifftshift(axis**2))
     if real:
         limit = shape[-1] // 2 + 1
         ranges[-1] = ranges[-1][:limit]
     q2 = reduce(np.add, np.meshgrid(*ranges, indexing="ij", sparse=True))
-    wfilt = 1 / (1 + q2 ** order)
+    wfilt = 1 / (1 + q2**order)
     if high_pass:
         wfilt = 1 - wfilt
     return wfilt
@@ -218,7 +218,9 @@ def _upsampled_dft(
     dim_properties = list(zip(data.shape, upsampled_region_sizes, axis_offsets))
 
     for (n_items, ups_size, ax_offset) in dim_properties[::-1]:
-        kernel = (np.arange(ups_size) - ax_offset)[:, np.newaxis] * np.fft.fftfreq(
+        kernel = (np.arange(ups_size) - ax_offset)[
+            :, np.newaxis
+        ] * np.fft.fftfreq(  # type: ignore
             n_items, upsample_factor
         )
         kernel = np.exp(-2j * np.pi * kernel)
@@ -228,7 +230,7 @@ def _upsampled_dft(
 
 
 def abs2(a: np.ndarray) -> np.ndarray:
-    return a.real ** 2 + a.imag ** 2  # type: ignore
+    return a.real**2 + a.imag**2  # type: ignore
 
 
 def crop_by_max_shifts(power: np.ndarray, left, right):
@@ -253,7 +255,7 @@ def _draw_ncc_landscape_no_crop(
     if max_shifts is not None:
         max_shifts = tuple(max_shifts)
     pad_width, sl = _get_padding_params(img0.shape, img1.shape, max_shifts)
-    padimg = np.pad(img0[sl], pad_width=pad_width, mode="constant", constant_values=0)
+    padimg = np.pad(img0[sl], pad_width=pad_width, mode="constant", constant_values=0)  # type: ignore
 
     corr = fftconvolve(padimg, img1[(slice(None, None, -1),) * ndim], mode="valid")[
         (slice(1, -1, None),) * ndim
@@ -261,13 +263,13 @@ def _draw_ncc_landscape_no_crop(
 
     _win_sum = _window_sum_2d if ndim == 2 else _window_sum_3d
     win_sum1 = _win_sum(padimg, img1.shape)
-    win_sum2 = _win_sum(padimg ** 2, img1.shape)
+    win_sum2 = _win_sum(padimg**2, img1.shape)
 
     template_mean = np.mean(img1)
     template_volume = np.prod(img1.shape)
     template_ssd = np.sum((img1 - template_mean) ** 2)
 
-    var = (win_sum2 - win_sum1 ** 2 / template_volume) * template_ssd
+    var = (win_sum2 - win_sum1**2 / template_volume) * template_ssd
 
     # zero division happens when perfectly matched
     response = np.zeros_like(corr)
@@ -327,11 +329,11 @@ def subpixel_zncc(
 # Identical to skimage.feature.template, but compatible between numpy and cupy.
 def _window_sum_2d(image, window_shape):
     window_sum = np.cumsum(image, axis=0)
-    window_sum = window_sum[window_shape[0] : -1] - window_sum[: -window_shape[0] - 1]
+    window_sum = window_sum[window_shape[0] : -1] - window_sum[: -window_shape[0] - 1]  # type: ignore
     window_sum = np.cumsum(window_sum, axis=1)
     window_sum = (
         window_sum[:, window_shape[1] : -1] - window_sum[:, : -window_shape[1] - 1]
-    )
+    )  # type: ignore
 
     return window_sum
 
@@ -342,7 +344,7 @@ def _window_sum_3d(image, window_shape):
     window_sum = (
         window_sum[:, :, window_shape[2] : -1]
         - window_sum[:, :, : -window_shape[2] - 1]
-    )
+    )  # type: ignore
 
     return window_sum
 
@@ -391,9 +393,9 @@ def _create_mesh(
         shifts = np.array(maxima, dtype=np.float32) - np.array(
             midpoints, dtype=np.float32
         )  # type: ignore
-        max_shifts = np.array(max_shifts, dtype=np.float32)  # type: ignore
-        left = -shifts - max_shifts
-        right = -shifts + max_shifts
+        _max_shifts = np.array(max_shifts, dtype=np.float32)  # type: ignore
+        left = -shifts - _max_shifts
+        right = -shifts + _max_shifts
         local_shifts = tuple(
             [
                 int(np.round(max(shiftl, -1) * upsample_factor)),
