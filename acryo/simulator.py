@@ -212,40 +212,17 @@ class TomogramSimulator:
         return self._simulate(shape)
 
     def _simulate(self, shape: tuple[pixel, pixel, pixel]):
+        """Simulate a grayscale tomogram."""
         tomogram = np.zeros(shape, dtype=np.float32)
         for mol, image in self._components.values():
-            # image slice must be integer so split it into two parts
-            pos = mol.pos / self._scale
-            intpos = pos.astype(np.int32)
-            residue = pos - intpos.astype(np.float32)
-
-            # construct matrices
-            template_shape = image.shape
-            center = (np.array(template_shape) - 1.0) / 2.0
-            starts = intpos - center.astype(np.int32)
-            stops = starts + template_shape
-            mtxs = _compose_affine_matrices(
-                center, mol.rotator.inv(), output_center=center + residue
-            )
+            starts, stops, mtxs = _prep_iterators(mol, image, self._scale)
 
             # prefilter here to avoid repeated computation
             if self.order > 1:
                 image = ndi.spline_filter(image, order=self.order, mode="constant")
 
             for start, stop, mtx in zip(starts, stops, mtxs):
-                # To avoid out-of-boundary, we need to clip the start and stop
-                sl_src_list: list[slice] = []
-                sl_dst_list: list[slice] = []
-                for s, e, size, tsize in zip(start, stop, shape, template_shape):
-                    _sl, _pads, _out_of_bound = _utils.make_slice_and_pad(s, e, size)
-                    sl_dst_list.append(_sl)
-                    if _out_of_bound:
-                        s0, s1 = _pads
-                        sl_src_list.append(slice(s0, tsize - s1))
-                    else:
-                        sl_src_list.append(slice(None))
-                sl_src = tuple(sl_src_list)
-                sl_dst = tuple(sl_dst_list)
+                sl_src, sl_dst = _prep_slices(start, stop, shape, image.shape)
 
                 transformed = ndi.affine_transform(
                     image,
@@ -264,24 +241,13 @@ class TomogramSimulator:
         shape: tuple[pixel, pixel, pixel],
         colormap: Callable[[pd.Series], ColorType],
     ):
+        """Simulate a colored tomogram."""
         tomogram = np.zeros((3,) + shape, dtype=np.float32)
         for mol, image in self._components.values():
             # image slice must be integer so split it into two parts
             img_min = image.min()
             img_max = image.max()
-
-            pos = mol.pos / self._scale
-            intpos = pos.astype(np.int32)
-            residue = pos - intpos.astype(np.float32)
-
-            # construct matrices
-            template_shape = image.shape
-            center = (np.array(template_shape) - 1.0) / 2.0
-            starts = intpos - center.astype(np.int32)
-            stops = starts + template_shape
-            mtxs = _compose_affine_matrices(
-                center, mol.rotator.inv(), output_center=center + residue
-            )
+            starts, stops, mtxs = _prep_iterators(mol, image, self._scale)
 
             # prefilter here to avoid repeated computation
             if self.order > 1:
@@ -290,19 +256,8 @@ class TomogramSimulator:
             it = mol.features.iterrows()
             for start, stop, mtx, (_, feat) in zip(starts, stops, mtxs, it):
                 _cr, _cg, _cb = colormap(feat)
-                # To avoid out-of-boundary, we need to clip the start and stop
-                sl_src_list: list[slice] = []
-                sl_dst_list: list[slice] = [slice(None)]
-                for s, e, size, tsize in zip(start, stop, shape, template_shape):
-                    _sl, _pads, _out_of_bound = _utils.make_slice_and_pad(s, e, size)
-                    sl_dst_list.append(_sl)
-                    if _out_of_bound:
-                        s0, s1 = _pads
-                        sl_src_list.append(slice(s0, tsize - s1))
-                    else:
-                        sl_src_list.append(slice(None))
-                sl_src = tuple(sl_src_list)
-                sl_dst = tuple(sl_dst_list)
+                sl_src, sl_dst = _prep_slices(start, stop, shape, image.shape)
+                sl_dst = (slice(None),) + sl_dst
 
                 transformed = ndi.affine_transform(
                     image,
@@ -316,6 +271,36 @@ class TomogramSimulator:
                 color_array = np.stack([_cr * _a, _cg * _a, _cb * _a], axis=0)
 
                 tomogram[sl_dst] += color_array
+
+        return tomogram
+
+    def simulate_2d(self, shape: tuple[pixel, pixel]):
+        """Simulate a grayscale tomogram."""
+        tomogram = np.zeros(shape, dtype=np.float32)
+        for mol, image in self._components.values():
+            starts, stops, mtxs = _prep_iterators(mol, image, self._scale)
+            zsize = mol.pos[:, 0].max() / self.scale + np.sum(image.shape)
+            shape3d = (int(np.ceil(zsize)),) + shape
+
+            # reduce z axis
+            starts, stops, mtxs = starts[1:], stops[1:], mtxs[1:]
+
+            # prefilter here to avoid repeated computation
+            if self.order > 1:
+                image = ndi.spline_filter(image, order=self.order, mode="constant")
+
+            for start, stop, mtx in zip(starts, stops, mtxs):
+                sl_src, sl_dst = _prep_slices(start, stop, shape3d, image.shape)
+                transformed = ndi.affine_transform(
+                    image,
+                    mtx,
+                    mode="constant",
+                    cval=0.0,
+                    order=self.order,
+                    prefilter=False,
+                )
+                projected = transformed[sl_src].sum(axis=0)
+                tomogram[sl_dst[1:]] += projected  # type: ignore
 
         return tomogram
 
@@ -353,3 +338,38 @@ def _compose_affine_matrices(
 
 def _eyes(n: int) -> np.ndarray:
     return np.stack([np.eye(4, dtype=np.float32)] * n, axis=0)
+
+
+def _prep_iterators(mol: Molecules, image: np.ndarray, scale: float):
+
+    # image slice must be integer so split it into two parts
+    pos = mol.pos / scale
+    intpos = pos.astype(np.int32)
+    residue = pos - intpos.astype(np.float32)
+    template_shape = image.shape
+
+    # construct matrices
+    center = (np.array(template_shape) - 1.0) / 2.0
+    starts = intpos - center.astype(np.int32)
+    stops = starts + template_shape
+    mtxs = _compose_affine_matrices(
+        center, mol.rotator.inv(), output_center=center + residue
+    )
+
+    return starts, stops, mtxs
+
+
+def _prep_slices(start, stop, tomogram_shape, template_shape):
+    sl_src_list: list[slice] = []
+    sl_dst_list: list[slice] = []
+    for s, e, size, tsize in zip(start, stop, tomogram_shape, template_shape):
+        _sl, _pads, _out_of_bound = _utils.make_slice_and_pad(s, e, size)
+        sl_dst_list.append(_sl)
+        if _out_of_bound:
+            s0, s1 = _pads
+            sl_src_list.append(slice(s0, tsize - s1))
+        else:
+            sl_src_list.append(slice(None))
+    sl_src = tuple(sl_src_list)
+    sl_dst = tuple(sl_dst_list)
+    return sl_src, sl_dst

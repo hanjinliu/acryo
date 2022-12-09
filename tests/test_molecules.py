@@ -34,11 +34,11 @@ def test_matrix(zvec, yvec, mat):
     yvec = np.array(yvec)
     mat = np.array(mat)[np.newaxis]
     mol = Molecules.from_axes(pos, z=zvec, y=yvec)
-    assert_allclose(mol.z[0], zvec)
-    assert_allclose(mol.y[0], yvec)
+    assert_allclose(mol.z[0], zvec, rtol=1e-8, atol=1e-8)
+    assert_allclose(mol.y[0], yvec, rtol=1e-8, atol=1e-8)
     out = mol.matrix()
     assert_allclose(out, mat, rtol=1e-6, atol=1e-6)
-    assert_allclose(np.cross(mol.y, mol.x, axis=1), mol.z)
+    assert_allclose(np.cross(mol.y, mol.x, axis=1), mol.z, rtol=1e-8, atol=1e-8)
 
 
 def test_euler():
