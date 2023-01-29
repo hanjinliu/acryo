@@ -1,16 +1,13 @@
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import TYPE_CHECKING, NamedTuple, Sequence
+from typing import Callable, NamedTuple, Sequence, TYPE_CHECKING, Tuple
 import numpy as np
-from numpy.typing import ArrayLike, NDArray
+from numpy.typing import NDArray
 from scipy import ndimage as ndi
-from scipy.fft import fftn, ifftn
 from scipy.spatial.transform import Rotation
-from dask import array as da
-from dask.delayed import delayed
 
-from ._types import nm, pixel, degree
+from ._types import nm, pixel
 from .molecules import Molecules
 
 from . import _utils
@@ -18,6 +15,9 @@ from . import _utils
 if TYPE_CHECKING:
     from typing_extensions import Self, Literal
     from scipy.spatial.transform import Rotation
+    import pandas as pd
+
+ColorType = Tuple[float, float, float]
 
 
 class Component(NamedTuple):
@@ -187,8 +187,7 @@ class TomogramSimulator:
     def simulate(
         self,
         shape: tuple[pixel, pixel, pixel],
-        *,
-        tilt_range: tuple[degree, degree] | None = None,
+        colormap: Callable[[pd.Series], ColorType] | None = None,
     ) -> NDArray[np.float32]:
         """
         Simulate tomogram.
@@ -197,106 +196,115 @@ class TomogramSimulator:
         ----------
         shape : tuple of int
             Shape of the tomogram.
-        tilt_range : tuple of float, optional
-            Range of tilt series in degrees, such as (-60., 60.). This argument is
-            used to mask missing wedge in the tomogram.
-
+        colormap: callable, optional
+            Colormap used to generate the colored tomogram. The input is a pandas
+            Series of features of each molecule.
         Returns
         -------
         np.ndarray
             Simulated tomogram image.
         """
+        if len(self._components) == 0:
+            import warnings
+
+            warnings.warn("No molecules are added to the simulator.", UserWarning)
+
+        if colormap is not None:
+            return self._simulate_with_color(shape, colormap)
+        return self._simulate(shape)
+
+    def _simulate(self, shape: tuple[pixel, pixel, pixel]):
+        """Simulate a grayscale tomogram."""
         tomogram = np.zeros(shape, dtype=np.float32)
         for mol, image in self._components.values():
-            # image slice must be integer so split it into two parts
-            pos = mol.pos / self._scale
-            intpos = pos.astype(np.int32)
-            residue = pos - intpos.astype(np.float32)
-
-            # construct matrices
-            template_shape = image.shape
-            center = (np.array(template_shape) - 1.0) / 2.0
-            starts = intpos - center.astype(np.int32)
-            stops = starts + template_shape
-            mtxs = _compose_affine_matrices(
-                center, mol.rotator.inv(), output_center=center + residue
-            )
+            starts, stops, mtxs = _prep_iterators(mol, image, self._scale)
 
             # prefilter here to avoid repeated computation
             if self.order > 1:
                 image = ndi.spline_filter(image, order=self.order, mode="constant")
 
             for start, stop, mtx in zip(starts, stops, mtxs):
-                # To avoid out-of-boundary, we need to clip the start and stop
-                sl_src_list: list[slice] = []
-                sl_dst_list: list[slice] = []
-                for s, e, size, tsize in zip(start, stop, shape, template_shape):
-                    _sl, _pads, _out_of_bound = _utils.make_slice_and_pad(s, e, size)
-                    sl_dst_list.append(_sl)
-                    if _out_of_bound:
-                        s0, s1 = _pads
-                        sl_src_list.append(slice(s0, tsize - s1))
-                    else:
-                        sl_src_list.append(slice(None))
-                sl_src = tuple(sl_src_list)
-                sl_dst = tuple(sl_dst_list)
+                sl_src, sl_dst = _prep_slices(start, stop, shape, image.shape)
 
-                tomogram[sl_dst] += ndi.affine_transform(
+                transformed = ndi.affine_transform(
                     image,
                     mtx,
                     mode="constant",
                     cval=0.0,
                     order=self.order,
                     prefilter=False,
-                )[
-                    sl_src
-                ]  # type: ignore
-
-        if tilt_range is not None:
-            # Remove the missing wedge from the Fourier space
-            rot = Rotation.identity()
-            mask = _utils.missing_wedge_mask(rot, tilt_range, tomogram.shape)
-            ft = fftn(tomogram) * mask  # type: ignore
-            tomogram = ifftn(ft).real  # type: ignore
+                )
+                tomogram[sl_dst] += transformed[sl_src]  # type: ignore
 
         return tomogram
 
-    def simulate_tilt_series(
+    def _simulate_with_color(
         self,
         shape: tuple[pixel, pixel, pixel],
-        degrees: Sequence[float],
-        central_axis: ArrayLike = (0, 1, 0),
-        order: int = 3,
-    ) -> NDArray[np.float32]:
-        # normalize central axis
-        _central_axis = np.asarray(central_axis, dtype=np.float32)
-        _central_axis /= np.linalg.norm(_central_axis)
+        colormap: Callable[[pd.Series], ColorType],
+    ):
+        """Simulate a colored tomogram."""
+        tomogram = np.zeros((3,) + shape, dtype=np.float32)
+        for mol, image in self._components.values():
+            # image slice must be integer so split it into two parts
+            img_min = image.min()
+            img_max = image.max()
+            starts, stops, mtxs = _prep_iterators(mol, image, self._scale)
 
-        input = self.simulate(shape)
-        matrices = _get_rotation_matrices_for_radon_3d(degrees, _central_axis, shape)
-        if order > 1:
-            input = ndi.spline_filter(input, order=order, mode="constant")
-        tasks = [_radon_transform(input, mtx, order=order) for mtx in matrices]
-        out = np.stack(da.compute(tasks)[0], axis=0)  # type: ignore
-        return out
+            # prefilter here to avoid repeated computation
+            if self.order > 1:
+                image = ndi.spline_filter(image, order=self.order, mode="constant")
 
-    # def simulate_tilt_series_2(
-    #     self,
-    #     shape: tuple[pixel, pixel],
-    #     degrees: Sequence[float],
-    #     central_axis: ArrayLike = (0, 1, 0),
-    # ) -> NDArray[np.float32]:
-    #     # normalize central axis
-    #     _central_axis = np.asarray(central_axis, dtype=np.float32)
-    #     _central_axis /= np.linalg.norm(_central_axis)
-    #     tasks = [
-    #         da.from_delayed(
-    #             _simulate_single(shape, degree, _central_axis),
-    #             shape=shape,
-    #             dtype=np.float32
-    #         ) for degree in degrees
-    #     ]
-    #     return da.stack(tasks, axis=0).compute()
+            it = mol.features.iterrows()
+            for start, stop, mtx, (_, feat) in zip(starts, stops, mtxs, it):
+                _cr, _cg, _cb = colormap(feat)
+                sl_src, sl_dst = _prep_slices(start, stop, shape, image.shape)
+                sl_dst = (slice(None),) + sl_dst
+
+                transformed = ndi.affine_transform(
+                    image,
+                    mtx,
+                    mode="constant",
+                    cval=0.0,
+                    order=self.order,
+                    prefilter=False,
+                )
+                _a = (transformed[sl_src] - img_min) / (img_max - img_min)
+                color_array = np.stack([_cr * _a, _cg * _a, _cb * _a], axis=0)
+
+                tomogram[sl_dst] += color_array
+
+        return tomogram
+
+    def simulate_2d(self, shape: tuple[pixel, pixel]):
+        """Simulate a grayscale tomogram."""
+        tomogram = np.zeros(shape, dtype=np.float32)
+        for mol, image in self._components.values():
+            starts, stops, mtxs = _prep_iterators(mol, image, self._scale)
+            zsize = mol.pos[:, 0].max() / self.scale + np.sum(image.shape)
+            shape3d = (int(np.ceil(zsize)),) + shape
+
+            # reduce z axis
+            starts, stops, mtxs = starts[1:], stops[1:], mtxs[1:]
+
+            # prefilter here to avoid repeated computation
+            if self.order > 1:
+                image = ndi.spline_filter(image, order=self.order, mode="constant")
+
+            for start, stop, mtx in zip(starts, stops, mtxs):
+                sl_src, sl_dst = _prep_slices(start, stop, shape3d, image.shape)
+                transformed = ndi.affine_transform(
+                    image,
+                    mtx,
+                    mode="constant",
+                    cval=0.0,
+                    order=self.order,
+                    prefilter=False,
+                )
+                projected = transformed[sl_src].sum(axis=0)
+                tomogram[sl_dst[1:]] += projected  # type: ignore
+
+        return tomogram
 
 
 def _compose_affine_matrices(
@@ -334,41 +342,36 @@ def _eyes(n: int) -> np.ndarray:
     return np.stack([np.eye(4, dtype=np.float32)] * n, axis=0)
 
 
-# @delayed
-# def _simulate_single(
-#     comp: Component,
-#     output_shape: tuple[pixel, pixel],
-#     degree: float,
-#     central_axis: ArrayLike,
-#     order: int = 3,
-# ) -> NDArray[np.float32]:
-#     mol, image = comp
-#     out = np.zeros(output_shape, dtype=np.float32)
-#     center = (np.array(image.shape) - 1.0) / 2.0
-#     rot = Rotation.from_rotvec(central_axis * np.deg2rad(degree))
-#     rot_list = [rot[i] for i in range(len(rot))]
-#     matrices = _utils.compose_matrices(center, rot_list, center)
+def _prep_iterators(mol: Molecules, image: np.ndarray, scale: float):
 
-#     for mtx in matrices:
-#         ndi.affine_transform(image, mtx, order=order, mode="constant", cval=0.0, prefilter=False)
-#     return out
+    # image slice must be integer so split it into two parts
+    pos = mol.pos / scale
+    intpos = pos.astype(np.int32)
+    residue = pos - intpos.astype(np.float32)
+    template_shape = image.shape
 
+    # construct matrices
+    center = (np.array(template_shape) - 1.0) / 2.0
+    starts = intpos - center.astype(np.int32)
+    stops = starts + template_shape
+    mtxs = _compose_affine_matrices(
+        center, mol.rotator.inv(), output_center=center + residue
+    )
 
-@delayed
-def _radon_transform(img: np.ndarray, mtx: np.ndarray, order: int = 3):
-    """Radon transform of 3D image."""
-    img_rot = ndi.affine_transform(img, mtx, order=order, prefilter=False)
-    return np.sum(img_rot, axis=0)
+    return starts, stops, mtxs
 
 
-def _get_rotation_matrices_for_radon_3d(
-    degrees: Sequence[float],
-    central_axis: np.ndarray,
-    shape: tuple[int, int, int],
-) -> list[NDArray[np.float32]]:
-    from scipy.spatial.transform import Rotation
-
-    vec = np.stack([central_axis * np.deg2rad(deg) for deg in degrees], axis=0)
-    rot = Rotation.from_rotvec(vec)
-    center = (np.array(shape) - 1.0) / 2.0
-    return _utils.compose_matrices(center, [rot[i] for i in range(len(rot))], center)
+def _prep_slices(start, stop, tomogram_shape, template_shape):
+    sl_src_list: list[slice] = []
+    sl_dst_list: list[slice] = []
+    for s, e, size, tsize in zip(start, stop, tomogram_shape, template_shape):
+        _sl, _pads, _out_of_bound = _utils.make_slice_and_pad(s, e, size)
+        sl_dst_list.append(_sl)
+        if _out_of_bound:
+            s0, s1 = _pads
+            sl_src_list.append(slice(s0, tsize - s1))
+        else:
+            sl_src_list.append(slice(None))
+    sl_src = tuple(sl_src_list)
+    sl_dst = tuple(sl_dst_list)
+    return sl_src, sl_dst
