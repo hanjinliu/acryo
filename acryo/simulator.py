@@ -187,7 +187,7 @@ class TomogramSimulator:
     def simulate(
         self,
         shape: tuple[pixel, pixel, pixel],
-        colormap=None,
+        colormap: Callable[[pd.Series], ColorType] | None = None,
     ) -> NDArray[np.float32]:
         """
         Simulate tomogram.
@@ -196,7 +196,9 @@ class TomogramSimulator:
         ----------
         shape : tuple of int
             Shape of the tomogram.
-
+        colormap: callable, optional
+            Colormap used to generate the colored tomogram. The input is a pandas
+            Series of features of each molecule.
         Returns
         -------
         np.ndarray
