@@ -15,7 +15,7 @@ from . import _utils
 if TYPE_CHECKING:
     from typing_extensions import Self, Literal
     from scipy.spatial.transform import Rotation
-    import pandas as pd
+    import polars as pl
 
 ColorType = Tuple[float, float, float]
 
@@ -187,7 +187,7 @@ class TomogramSimulator:
     def simulate(
         self,
         shape: tuple[pixel, pixel, pixel],
-        colormap: Callable[[pd.Series], ColorType] | None = None,
+        colormap: Callable[[pl.DataFrame], ColorType] | None = None,
     ) -> NDArray[np.float32]:
         """
         Simulate tomogram.
@@ -197,8 +197,8 @@ class TomogramSimulator:
         shape : tuple of int
             Shape of the tomogram.
         colormap: callable, optional
-            Colormap used to generate the colored tomogram. The input is a pandas
-            Series of features of each molecule.
+            Colormap used to generate the colored tomogram. The input is a polars
+            row vector of features of each molecule.
         Returns
         -------
         np.ndarray
@@ -241,7 +241,7 @@ class TomogramSimulator:
     def _simulate_with_color(
         self,
         shape: tuple[pixel, pixel, pixel],
-        colormap: Callable[[pd.Series], ColorType],
+        colormap: Callable[[pl.DataFrame], ColorType],
     ):
         """Simulate a colored tomogram."""
         tomogram = np.zeros((3,) + shape, dtype=np.float32)
@@ -255,9 +255,9 @@ class TomogramSimulator:
             if self.order > 1:
                 image = ndi.spline_filter(image, order=self.order, mode="constant")
 
-            it = mol.features.iterrows()
-            for start, stop, mtx, (_, feat) in zip(starts, stops, mtxs, it):
-                _cr, _cg, _cb = colormap(feat)
+            feat = mol.features
+            for i, (start, stop, mtx) in enumerate(zip(starts, stops, mtxs)):
+                _cr, _cg, _cb = colormap(feat[i])
                 sl_src, sl_dst = _prep_slices(start, stop, shape, image.shape)
                 sl_dst = (slice(None),) + sl_dst
 
