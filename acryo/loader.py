@@ -13,6 +13,7 @@ import numpy as np
 from dask import array as da
 from dask.array.core import Array as daskArray
 from dask.delayed import delayed
+import polars as pl
 
 from .alignment import (
     BaseAlignmentModel,
@@ -26,7 +27,6 @@ from . import _utils
 
 if TYPE_CHECKING:
     from typing_extensions import Self
-    import pandas as pd
     from dask.delayed import Delayed
 
 _R = TypeVar("_R")
@@ -252,7 +252,7 @@ class SubtomogramLoader:
         image = self.image
         scale = self.scale
         if isinstance(image, np.ndarray):
-            image = da.from_array(image)
+            image = da.from_array(image)  # type: ignore
 
         output_shape = self._get_output_shape(output_shape)
 
@@ -302,10 +302,10 @@ class SubtomogramLoader:
         arrays = []
         for task in tasks:
             arrays.append(
-                da.from_delayed(task, shape=self.output_shape, dtype=np.float32)
+                da.from_delayed(task, shape=self.output_shape, dtype=np.float32)  # type: ignore
             )
 
-        out = da.stack(arrays, axis=0)
+        out = da.stack(arrays, axis=0)  # type: ignore
         return out
 
     def construct_mapping_tasks(
@@ -388,7 +388,7 @@ class SubtomogramLoader:
             mmap = np.memmap(path, **kwargs)
 
         mmap[:] = dask_array[:]
-        darr = da.from_array(
+        darr = da.from_array(  # type: ignore
             mmap,
             chunks=(1,) + self.output_shape,  # type: ignore
             meta=np.array([], dtype=np.float32),
@@ -416,7 +416,7 @@ class SubtomogramLoader:
             Averaged image
         """
         dask_array = self.construct_dask(output_shape=output_shape)
-        return da.compute(da.mean(dask_array, axis=0))[0]
+        return da.compute(da.mean(dask_array, axis=0))[0]  # type: ignore
 
     def average_split(
         self,
@@ -456,11 +456,11 @@ class SubtomogramLoader:
             indices1 = np.ones(nmole, dtype=bool)
             indices1[sl] = False
             dask_array = self.construct_dask()
-            dask_avg0 = da.mean(dask_array[indices0], axis=0)
-            dask_avg1 = da.mean(dask_array[indices1], axis=0)
+            dask_avg0 = da.mean(dask_array[indices0], axis=0)  # type: ignore
+            dask_avg1 = da.mean(dask_array[indices1], axis=0)  # type: ignore
             tasks.extend([dask_avg0, dask_avg1])
 
-        out = da.compute(tasks)[0]
+        out = da.compute(tasks)[0]  # type: ignore
         stack = np.stack(out, axis=0).reshape(n_set, 2, *output_shape)
         if squeeze and n_set == 1:
             stack = stack[0]
@@ -514,7 +514,7 @@ class SubtomogramLoader:
             output_shape=template.shape,
             var_kwarg=dict(quaternion=self.molecules.quaternion()),
         )
-        all_results = da.compute(tasks)[0]
+        all_results = da.compute(tasks)[0]  # type: ignore
 
         local_shifts, local_rot, scores = _allocate(len(self))
         for i, result in enumerate(all_results):
@@ -526,9 +526,8 @@ class SubtomogramLoader:
             rotator,
         )
 
-        mole_aligned.features = update_features(
-            self.molecules.features.copy(),
-            get_features(scores, local_shifts, rotator.as_rotvec()),
+        mole_aligned.features = self.molecules.features.with_columns(
+            get_feature_list(scores, local_shifts, rotator.as_rotvec()),
         )
 
         return self.replace(molecules=mole_aligned, output_shape=template.shape)
@@ -572,7 +571,7 @@ class SubtomogramLoader:
 
         all_subvols = self.create_cache(output_shape=output_shape)
 
-        template = da.compute(da.mean(all_subvols, axis=0))[0]
+        template: np.ndarray = da.compute(da.mean(all_subvols, axis=0))[0]  # type: ignore
 
         # get mask image
         if isinstance(mask, np.ndarray):
@@ -624,7 +623,6 @@ class SubtomogramLoader:
         SubtomogramLoader
             An loader instance with updated molecules.
         """
-        import pandas as pd
 
         n_templates = len(templates)
 
@@ -646,7 +644,7 @@ class SubtomogramLoader:
             output_shape=templates[0].shape,
             var_kwargs=dict(quaternion=self.molecules.quaternion()),
         )
-        all_results = da.compute(tasks)[0]
+        all_results = da.compute(tasks)[0]  # type: ignore
 
         local_shifts, local_rot, scores = _allocate(len(self))
         for i, result in enumerate(all_results):
@@ -662,13 +660,9 @@ class SubtomogramLoader:
             labels %= n_templates
         labels = labels.astype(np.uint8)
 
-        mole_aligned.features = pd.concat(
-            [
-                self.molecules.features,
-                get_features(corr_max, local_shifts, rotator.as_rotvec()),
-                pd.DataFrame({"labels": labels}),
-            ],
-            axis=1,
+        feature_list = get_feature_list(corr_max, local_shifts, rotator.as_rotvec())
+        mole_aligned.features = self.molecules.features.with_columns(
+            feature_list + pl.Series("labels", labels)
         )
 
         return self.replace(molecules=mole_aligned, output_shape=templates[0].shape)
@@ -688,7 +682,7 @@ class SubtomogramLoader:
         tasks = self.construct_mapping_tasks(
             func, template_masked, output_shape=template.shape
         )
-        all_results: list[_R] = da.compute(tasks)[0]
+        all_results: list[_R] = da.compute(tasks)[0]  # type: ignore
 
         return all_results
 
@@ -698,7 +692,7 @@ class SubtomogramLoader:
         seed: int | None = 0,
         n_set: int = 1,
         dfreq: float = 0.05,
-    ) -> pd.DataFrame:
+    ) -> pl.DataFrame:
         """
         Calculate Fourier shell correlation.
 
@@ -715,10 +709,9 @@ class SubtomogramLoader:
 
         Returns
         -------
-        pd.DataFrame
+        pl.DataFrame
             A data frame with FSC results.
         """
-        import pandas as pd
 
         if mask is None:
             _mask = 1.0
@@ -748,7 +741,7 @@ class SubtomogramLoader:
 
         out: dict[str, np.ndarray] = {"freq": freq}  # type: ignore
         out.update(fsc_all)
-        return pd.DataFrame(out)
+        return pl.DataFrame(out)
 
     def _get_output_shape(
         self, output_shape: pixel | tuple[pixel] | None
@@ -762,8 +755,7 @@ class SubtomogramLoader:
         return _output_shape
 
 
-def get_features(corr_max, local_shifts, rotvec) -> pd.DataFrame:
-    import pandas as pd
+def get_features(corr_max, local_shifts, rotvec) -> pl.DataFrame:
 
     features = {
         "score": corr_max,
@@ -774,17 +766,33 @@ def get_features(corr_max, local_shifts, rotvec) -> pd.DataFrame:
         "rotvec-y": np.round(rotvec[:, 1], 5),
         "rotvec-x": np.round(rotvec[:, 2], 5),
     }
-    return pd.DataFrame(features)
+    return pl.DataFrame(features)
+
+
+def get_feature_list(corr_max, local_shifts, rotvec) -> list[pl.Series]:
+
+    features = [
+        pl.Series("score", corr_max),
+        pl.Series("shift-z", np.round(local_shifts[:, 0], 2)),
+        pl.Series("shift-y", np.round(local_shifts[:, 1], 2)),
+        pl.Series("shift-x", np.round(local_shifts[:, 2], 2)),
+        pl.Series("rotvec-z", np.round(rotvec[:, 0], 5)),
+        pl.Series("rotvec-y", np.round(rotvec[:, 1], 5)),
+        pl.Series("rotvec-x", np.round(rotvec[:, 2], 5)),
+    ]
+    return features
 
 
 def update_features(
-    features: pd.DataFrame,
-    values: dict | pd.DataFrame,
+    features: pl.DataFrame,
+    values: dict[str, Any] | pl.DataFrame | list[Any],
 ):
     """Update features with new values."""
-    for name, value in values.items():
-        features[name] = value
-    return features
+    if isinstance(values, dict):
+        _values = [pl.Series(k, v) for k, v in values.items()]
+    else:
+        _values = list(values)
+    return features.with_columns(_values)
 
 
 def _allocate(size: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -811,7 +819,7 @@ def _normalize_shape(a: pixel | Sequence[pixel], ndim: int):
 
 def _dict_iterrows(d: dict[str, Iterable[Any]]):
     """
-    Generater similar to pd.DataFrame.iterrows().
+    Generater similar to pl.DataFrame.iterrows().
 
     >>> _dict_iterrows({'a': [1, 2, 3], 'b': [4, 5, 6]})
 

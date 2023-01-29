@@ -1,6 +1,7 @@
 import numpy as np
 from acryo import TomogramSimulator, Molecules
 from acryo.testing import spiral
+import polars as pl
 
 
 def test_simulator():
@@ -23,8 +24,8 @@ def test_simulator_with_color():
     mole = Molecules.from_rotvec(pos, vec)
     mole.features = {"value": [0, 0.5, 1]}
 
-    def cmap(ds):
-        v = ds["value"]
+    def cmap(df: pl.DataFrame):
+        v = df["value"][0]
         return v, 0, 1 - v
 
     sim.add_molecules(mole, img, name="test")
