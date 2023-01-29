@@ -1,16 +1,18 @@
 from __future__ import annotations
-from typing import Iterable, TYPE_CHECKING, Iterator
+from pathlib import Path
+from typing import Iterable, TYPE_CHECKING, Iterator, Union
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
+import polars as pl
 from scipy.spatial.transform import Rotation
 from ._types import nm
 
 if TYPE_CHECKING:
-    import pandas as pd
     from typing_extensions import Self
-    from pandas.core.groupby.generic import GroupBy
+    from polars.internals.dataframe.groupby import GroupBy
 
 _CSV_COLUMNS = ["z", "y", "x", "zvec", "yvec", "xvec"]
+PathLike = Union[str, Path, bytes]
 
 
 class Molecules:
@@ -36,7 +38,7 @@ class Molecules:
         self,
         pos: ArrayLike,
         rot: Rotation | None = None,
-        features: pd.DataFrame | ArrayLike | dict[str, ArrayLike] | None = None,
+        features: pl.DataFrame | ArrayLike | dict[str, ArrayLike] | None = None,
     ):
         pos = np.atleast_2d(pos)
 
@@ -54,7 +56,7 @@ class Molecules:
 
         self._pos = pos
         self._rotator = rot
-        self._features: pd.DataFrame | None = None
+        self._features: pl.DataFrame | None = None
         self.features = features
 
     def __repr__(self) -> str:
@@ -63,7 +65,7 @@ class Molecules:
     @classmethod
     def empty(cls, feature_labels: Iterable[str]):
         return cls(
-            np.zeros((0, 3)), None, pd.DataFrame(None, columns=list(feature_labels))
+            np.zeros((0, 3)), None, pl.DataFrame(None, columns=list(feature_labels))
         )
 
     @classmethod
@@ -107,7 +109,7 @@ class Molecules:
         seq: str = "ZXZ",
         degrees: bool = False,
         order: str = "xyz",
-        features: pd.DataFrame | None = None,
+        features: pl.DataFrame | None = None,
     ) -> Self:
         """Create molecules from Euler angles."""
         if order == "xyz":
@@ -123,7 +125,7 @@ class Molecules:
         cls,
         pos: np.ndarray,
         quat: ArrayLike,
-        features: pd.DataFrame | None = None,
+        features: pl.DataFrame | None = None,
     ) -> Self:
         """Create molecules from quaternions."""
         return cls(pos, Rotation.from_quat(quat), features)
@@ -133,7 +135,7 @@ class Molecules:
         cls,
         pos: np.ndarray,
         vec: ArrayLike,
-        features: pd.DataFrame | None = None,
+        features: pl.DataFrame | None = None,
     ) -> Self:
         """Create molecules from rotation vectors."""
         return cls(pos, Rotation.from_rotvec(vec), features)
@@ -143,7 +145,7 @@ class Molecules:
         cls,
         pos: np.ndarray,
         matrix: np.ndarray,
-        features: pd.DataFrame | None = None,
+        features: pl.DataFrame | None = None,
     ) -> Self:
         """Create molecules from rotation matrices."""
         return cls(pos, Rotation.from_matrix(matrix), features)
@@ -151,43 +153,41 @@ class Molecules:
     @classmethod
     def from_csv(
         cls,
-        path: str,
+        path: PathLike,
         pos_cols: list[str] = ["z", "y", "x"],
         rot_cols: list[str] = ["zvec", "yvec", "xvec"],
-        **pd_kwargs,
+        **pl_kwargs,
     ) -> Self:
         """Load csv as a Molecules object."""
-        import pandas as pd
-
-        df: pd.DataFrame = pd.read_csv(path, **pd_kwargs)  # type: ignore
+        df: pl.DataFrame = pl.read_csv(path, **pl_kwargs)  # type: ignore
         return cls.from_dataframe(df, pos_cols, rot_cols)
 
     @classmethod
     def from_dataframe(
         cls,
-        df: pd.DataFrame,
+        df: pl.DataFrame,
         pos_cols: list[str] = ["z", "y", "x"],
         rot_cols: list[str] = ["zvec", "yvec", "xvec"],
     ) -> Self:
         pos_cols = pos_cols.copy()
         rot_cols = rot_cols.copy()
-        pos = df[pos_cols]
-        rotvec = df[rot_cols]
-        cols = pos + rotvec
-        others = df.iloc[:, np.array([c not in cols for c in df.columns])]
+        pos = df.select(pos_cols)
+        rotvec = df.select(rot_cols)
+        cols = pos.columns + rotvec.columns
+        others = df.select([c for c in df.columns if c not in cols])
         return cls(
-            pos,
-            Rotation.from_rotvec(rotvec),
+            np.asarray(pos).T,
+            Rotation.from_rotvec(np.asarray(rotvec).T),
             features=others,
         )
 
     @property
-    def features(self) -> pd.DataFrame:
+    def features(self) -> pl.DataFrame:
         """Molecules features."""
         if self._features is None:
-            import pandas as pd
+            import polars as pl
 
-            return pd.DataFrame(None)
+            return pl.DataFrame(None)
         return self._features
 
     @features.setter
@@ -195,9 +195,10 @@ class Molecules:
         if value is None:
             self._features = None
         else:
-            import pandas as pd
-
-            df = pd.DataFrame(value)
+            if not isinstance(value, pl.DataFrame):
+                df = pl.DataFrame(value)
+            else:
+                df = value
             if len(df) != self.pos.shape[0]:
                 raise ValueError(
                     f"Length mismatch. There are {self.pos.shape[0]} molecules but "
@@ -206,27 +207,27 @@ class Molecules:
             self._features = df
         return None
 
-    def to_dataframe(self) -> pd.DataFrame:
+    def to_dataframe(self) -> pl.DataFrame:
         """Convert coordinates, rotation and features into a single data frame."""
-        import pandas as pd
+        import polars as pl
 
         rotvec = self.rotvec()
         data = np.concatenate([self.pos, rotvec], axis=1)
-        df = pd.DataFrame(data, columns=_CSV_COLUMNS)
+        df = pl.DataFrame(data, columns=_CSV_COLUMNS)
         if self._features is not None:
-            df = pd.concat([df, self._features], axis=1)
+            df = df.with_columns(list(self._features))
         return df
 
-    def to_csv(self, save_path: str) -> None:
+    def to_csv(self, save_path: PathLike) -> None:
         """
         Save molecules as a csv file.
 
         Parameters
         ----------
-        save_path : str
+        save_path : PathLike
             Save path.
         """
-        return self.to_dataframe().to_csv(save_path, index=False)
+        return self.to_dataframe().write_csv(str(save_path))
 
     def __len__(self) -> int:
         """Return the number of molecules."""
@@ -265,7 +266,7 @@ class Molecules:
         """Concatenate Molecules objects."""
         pos: list[np.ndarray] = []
         quat: list[np.ndarray] = []
-        features: list[pd.DataFrame] = []
+        features: list[pl.DataFrame] = []
         for mol in moles:
             pos.append(mol.pos)
             quat.append(mol.quaternion())
@@ -274,9 +275,7 @@ class Molecules:
         all_pos = np.concatenate(pos, axis=0)
         all_quat = np.concatenate(quat, axis=0)
         if concat_features:
-            import pandas as pd
-
-            all_features = pd.concat(features, axis=0)
+            all_features = pl.concat(features, how="horizontal")
         else:
             all_features = None
 
@@ -317,7 +316,7 @@ class Molecules:
         quat = self._rotator.as_quat()[spec]
         if self._features is None:
             return self.__class__(pos, Rotation(quat))
-        return self.__class__(pos, Rotation(quat), self._features.iloc[spec, :])
+        return self.__class__(pos, Rotation(quat), self._features[spec])
 
     def affine_matrix(
         self, src: np.ndarray, dst: np.ndarray | None = None, inverse: bool = False
@@ -492,7 +491,7 @@ class Molecules:
         if copy:
             features = self._features
             if features is not None:
-                features = features.copy()
+                features = pl.DataFrame(list(features))  # copy
             out = self.__class__(coords, self._rotator, features=features)
         else:
             self._pos = coords
@@ -719,7 +718,7 @@ class Molecules:
         if copy:
             features = self._features
             if features is not None:
-                features = features.copy()
+                features = pl.DataFrame(list(features))
             out = self.__class__(self._pos, rot, features=features)
         else:
             self._rotator = rot
@@ -749,7 +748,7 @@ class Molecules:
         """Concatenate the molecules with the other."""
         pos = np.concatenate([self.pos, mole.pos], axis=0)
         rot = self.rotator.concatenate([mole.rotator])
-        feat = pd.concat([self.features, mole.features], axis=0)
+        feat = pl.concat([self.features, mole.features], how="vertical")
         return self.__class__(pos, rot, features=feat)
 
     def groupby(self, by: str | list[str]):
@@ -759,8 +758,8 @@ class Molecules:
 
 
 class MoleculeGroup:
-    def __init__(self, group: GroupBy):
-        self._group: pd.c = group
+    def __init__(self, group: GroupBy[pl.DataFrame]):
+        self._group = group
 
     def __iter__(self) -> Iterator[tuple[str, Molecules]]:
         for key, df in self._group:

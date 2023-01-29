@@ -1,5 +1,8 @@
+from pathlib import Path
+import tempfile
 from acryo import Molecules
 import numpy as np
+import polars as pl
 from numpy.testing import assert_allclose
 import pytest
 from scipy.spatial.transform import Rotation
@@ -143,7 +146,7 @@ def test_features():
     mol3 = mol[3:17]
     assert_allclose(mol.features, mol2.features)
     assert mol.features is not mol2.features
-    assert_allclose(mol3.features, mol.features.iloc[3:17, :])
+    assert_allclose(mol3.features, mol.features[3:17])
 
 
 def test_random_shift():
@@ -152,3 +155,27 @@ def test_random_shift():
     dvec = mol.pos - mol_shifted.pos  # type: ignore
     dist = np.sqrt(np.sum((dvec) ** 2, axis=1))
     assert np.all(dist <= 2.5)
+
+
+@pytest.mark.parametrize(
+    "feat",
+    [
+        pl.Series("name", [0, 2, 4, 7]),
+        pl.DataFrame({"name0": [0, 1, 3, 4], "name1": [3, 2, 1, 0]}),
+        {"name0": [0, 1, 3, 4], "name1": [3, 2, 1, 0]},
+    ],
+)
+def test_setting_features(feat):
+    mol = Molecules(np.random.random((4, 3)), Rotation.random(4))
+    mol.features = feat
+
+
+def test_io():
+    mol = Molecules(np.random.random((4, 3)), Rotation.random(4))
+    mol.features = {"A": [0, 2, 4, 6]}
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        path = root / "test.csv"
+        mol.to_csv(path)
+        mol0 = Molecules.from_csv(path)
+        assert_allclose(mol.to_dataframe(), mol0.to_dataframe())
