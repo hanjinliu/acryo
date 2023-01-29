@@ -40,9 +40,6 @@ class Unset:
         return "Unset"
 
 
-_UNSET = Unset()
-
-
 class SubtomogramLoader:
     """
     A class for efficient loading of subtomograms.
@@ -85,7 +82,7 @@ class SubtomogramLoader:
         molecules: Molecules,
         order: int = 3,
         scale: nm = 1.0,
-        output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = _UNSET,
+        output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
         corner_safe: bool = False,
     ) -> None:
         # check type of input image
@@ -105,25 +102,9 @@ class SubtomogramLoader:
             )
         self._molecules = molecules
 
-        # check interpolation order
-        if order not in (0, 1, 3):
-            raise ValueError(
-                f"The third argument 'order' must be 0, 1 or 3, got {order!r}."
-            )
-        self._order = order
-
-        # check output_shape
-        if isinstance(output_shape, Unset):
-            self._output_shape = output_shape
-        else:
-            self._output_shape = _normalize_shape(output_shape, ndim=image.ndim)
-
-        # check scale
-        self._scale = float(scale)
-        if self._scale <= 0:
-            raise ValueError("Negative scale is not allowed.")
-
-        self._corner_safe = corner_safe
+        self._order, self._output_shape, self._scale, self._corner_safe = check_input(
+            order, output_shape, scale, corner_safe, image.ndim
+        )
         self._cached_dask_array: daskArray | None = None
 
     def __repr__(self) -> str:
@@ -142,7 +123,7 @@ class SubtomogramLoader:
         molecules: Molecules,
         order: int = 3,
         scale: nm | None = None,
-        output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = _UNSET,
+        output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
         corner_safe: bool = False,
         chunks: Any = "auto",
     ):
@@ -177,6 +158,11 @@ class SubtomogramLoader:
     def molecules(self) -> Molecules:
         """Return the molecules of the subtomogram loader."""
         return self._molecules
+
+    @property
+    def features(self) -> pd.DataFrame:
+        """The features of molecules."""
+        return self._molecules.features
 
     @property
     def order(self) -> int:
@@ -785,6 +771,34 @@ def update_features(
     for name, value in values.items():
         features[name] = value
     return features
+
+
+def check_input(
+    order: int,
+    output_shape: pixel | tuple[pixel, pixel, pixel] | Unset,
+    scale: float,
+    corner_safe: bool,
+    ndim: int,
+):
+    # check interpolation order
+    if order not in (0, 1, 3):
+        raise ValueError(
+            f"The third argument 'order' must be 0, 1 or 3, got {order!r}."
+        )
+
+    # check output_shape
+    if isinstance(output_shape, Unset):
+        _output_shape = output_shape
+    else:
+        _output_shape = _normalize_shape(output_shape, ndim=ndim)
+
+    # check scale
+    _scale = float(scale)
+    if _scale <= 0:
+        raise ValueError("Negative scale is not allowed.")
+
+    _corner_safe = bool(corner_safe)
+    return order, _output_shape, _scale, _corner_safe
 
 
 def _allocate(size: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:

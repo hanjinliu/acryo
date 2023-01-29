@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Iterable, TYPE_CHECKING
+from typing import Iterable, TYPE_CHECKING, Iterator
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.spatial.transform import Rotation
@@ -8,6 +8,7 @@ from ._types import nm
 if TYPE_CHECKING:
     import pandas as pd
     from typing_extensions import Self
+    from pandas.core.groupby.generic import GroupBy
 
 _CSV_COLUMNS = ["z", "y", "x", "zvec", "yvec", "xvec"]
 
@@ -58,6 +59,12 @@ class Molecules:
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(n={len(self)})"
+
+    @classmethod
+    def empty(cls, feature_labels: Iterable[str]):
+        return cls(
+            np.zeros((0, 3)), None, pd.DataFrame(None, columns=list(feature_labels))
+        )
 
     @classmethod
     def from_axes(
@@ -152,9 +159,18 @@ class Molecules:
         """Load csv as a Molecules object."""
         import pandas as pd
 
+        df: pd.DataFrame = pd.read_csv(path, **pd_kwargs)  # type: ignore
+        return cls.from_dataframe(df, pos_cols, rot_cols)
+
+    @classmethod
+    def from_dataframe(
+        cls,
+        df: pd.DataFrame,
+        pos_cols: list[str] = ["z", "y", "x"],
+        rot_cols: list[str] = ["zvec", "yvec", "xvec"],
+    ) -> Self:
         pos_cols = pos_cols.copy()
         rot_cols = rot_cols.copy()
-        df: pd.DataFrame = pd.read_csv(path, **pd_kwargs)  # type: ignore
         pos = df[pos_cols]
         rotvec = df[rot_cols]
         cols = pos + rotvec
@@ -265,6 +281,14 @@ class Molecules:
             all_features = None
 
         return cls(all_pos, Rotation(all_quat), features=all_features)
+
+    def copy(self) -> Self:
+        """Make a copy of the object."""
+        pos = self.pos.copy()
+        quat = self._rotator.as_quat().copy()
+        if self._features is None:
+            return self.__class__(pos, Rotation(quat))
+        return self.__class__(pos, Rotation(quat), self._features)
 
     def subset(self, spec: int | slice | list[int] | np.ndarray) -> Self:
         """
@@ -720,6 +744,28 @@ class Molecules:
             return self.translate_internal(shift_corrected).rotate_by_rotvec_internal(
                 rotvec
             )
+
+    def concat_with(self, mole: Molecules) -> Self:
+        """Concatenate the molecules with the other."""
+        pos = np.concatenate([self.pos, mole.pos], axis=0)
+        rot = self.rotator.concatenate([mole.rotator])
+        feat = pd.concat([self.features, mole.features], axis=0)
+        return self.__class__(pos, rot, features=feat)
+
+    def groupby(self, by: str | list[str]):
+        """Group molecules into sub-groups."""
+        df = self.to_dataframe()
+        return MoleculeGroup(df.groupby(by))
+
+
+class MoleculeGroup:
+    def __init__(self, group: GroupBy):
+        self._group: pd.c = group
+
+    def __iter__(self) -> Iterator[tuple[str, Molecules]]:
+        for key, df in self._group:
+            mole = Molecules.from_dataframe(df)
+            yield key, mole
 
 
 def _translate_euler(seq: str) -> str:
