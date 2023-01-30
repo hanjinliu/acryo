@@ -148,6 +148,13 @@ def test_features():
     assert mol.features is not mol2.features
     assert_allclose(mol3.features, mol.features[3:17])
 
+@pytest.mark.parametrize(
+    "sl",
+    [2, slice(2, 5), [2, 4, 6], np.array([2, 4, 6])]
+)
+def test_subset(sl):
+    mol = Molecules(np.zeros((24, 3)), Rotation.random(24))
+    mol.subset(sl)
 
 def test_random_shift():
     mol = Molecules(np.random.random((24, 3)) * 10, Rotation.random(24))

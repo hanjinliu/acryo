@@ -324,6 +324,9 @@ class Molecules:
         quat = self._rotator.as_quat()[spec]
         if self._features is None:
             return self.__class__(pos, Rotation(quat))
+        if getattr(spec, "dtype", None) == np.bool_:
+            # NOTE: polars does not support boolean indexing
+            return self.__class__(pos, Rotation(quat), self._features.filter(spec))
         return self.__class__(pos, Rotation(quat), self._features[spec])
 
     def affine_matrix(
