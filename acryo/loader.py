@@ -15,19 +15,20 @@ from dask.array.core import Array as daskArray
 from dask.delayed import delayed
 import polars as pl
 
-from .alignment import (
+from acryo.alignment import (
     BaseAlignmentModel,
     ZNCCAlignment,
     RotationImplemented,
 )
-from ._types import nm, pixel
-from ._reader import imread
-from .molecules import Molecules
-from . import _utils
+from acryo._types import nm, pixel
+from acryo._reader import imread
+from acryo.molecules import Molecules
+from acryo import _utils
 
 if TYPE_CHECKING:
     from typing_extensions import Self
     from dask.delayed import Delayed
+    from numpy.typing import NDArray
 
 _R = TypeVar("_R")
 
@@ -140,7 +141,7 @@ class SubtomogramLoader:
         )
 
     @property
-    def image(self) -> np.ndarray | daskArray:
+    def image(self) -> NDArray[np.float32] | daskArray:
         """Return tomogram image."""
         return self._image
 
@@ -284,11 +285,13 @@ class SubtomogramLoader:
         if self._cached_dask_array is not None:
             return self._cached_dask_array
 
+        output_shape = self._get_output_shape(output_shape)
+
         tasks = self.construct_loading_tasks(output_shape=output_shape)
         arrays = []
         for task in tasks:
             arrays.append(
-                da.from_delayed(task, shape=self.output_shape, dtype=np.float32)  # type: ignore
+                da.from_delayed(task, shape=output_shape, dtype=np.float32)  # type: ignore
             )
 
         out = da.stack(arrays, axis=0)  # type: ignore
@@ -381,7 +384,7 @@ class SubtomogramLoader:
         )
         return darr
 
-    def asnumpy(self) -> np.ndarray:
+    def asnumpy(self) -> NDArray[np.float32]:
         """Create a 4D image stack of all the subtomograms."""
         arr = self.construct_dask()
         return arr.compute()
@@ -389,7 +392,7 @@ class SubtomogramLoader:
     def average(
         self,
         output_shape: pixel | tuple[pixel] | None = None,
-    ) -> np.ndarray:
+    ) -> NDArray[np.float32]:
         """
         Calculate the average of subtomograms.
 
@@ -410,7 +413,7 @@ class SubtomogramLoader:
         seed: int | None = 0,
         squeeze: bool = True,
         output_shape: pixel | tuple[pixel] | None = None,
-    ) -> np.ndarray:
+    ) -> NDArray[np.float32]:
         """
         Split subtomograms into two set and average separately.
 
@@ -454,9 +457,9 @@ class SubtomogramLoader:
 
     def align(
         self,
-        template: np.ndarray,
+        template: NDArray[np.float32],
         *,
-        mask: np.ndarray | None = None,
+        mask: NDArray[np.float32] | None = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
         **align_kwargs,
@@ -521,7 +524,9 @@ class SubtomogramLoader:
     def align_no_template(
         self,
         *,
-        mask: np.ndarray | Callable[[np.ndarray], np.ndarray] | None = None,
+        mask: NDArray[np.float32]
+        | Callable[[NDArray[np.float32]], NDArray[np.float32]]
+        | None = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
         output_shape: pixel | tuple[pixel] | None = None,
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
@@ -557,7 +562,7 @@ class SubtomogramLoader:
 
         all_subvols = self.create_cache(output_shape=output_shape)
 
-        template: np.ndarray = da.compute(da.mean(all_subvols, axis=0))[0]  # type: ignore
+        template: NDArray[np.float32] = da.compute(da.mean(all_subvols, axis=0))[0]  # type: ignore
 
         # get mask image
         if isinstance(mask, np.ndarray):
@@ -576,9 +581,9 @@ class SubtomogramLoader:
 
     def align_multi_templates(
         self,
-        templates: list[np.ndarray],
+        templates: list[NDArray[np.float32]],
         *,
-        mask: np.ndarray | None = None,
+        mask: NDArray[np.float32] | None = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
         **align_kwargs,
@@ -655,9 +660,9 @@ class SubtomogramLoader:
 
     def subtomoprops(
         self,
-        template: np.ndarray,
-        func: Callable[[np.ndarray, np.ndarray], _R],
-        mask: np.ndarray | None = None,
+        template: NDArray[np.float32],
+        func: Callable[[NDArray[np.float32], NDArray[np.float32]], _R],
+        mask: NDArray[np.float32] | None = None,
     ) -> list[_R]:
         if mask is None:
             _mask = 1.0
@@ -674,7 +679,7 @@ class SubtomogramLoader:
 
     def fsc(
         self,
-        mask: np.ndarray | None = None,
+        mask: NDArray[np.float32] | None = None,
         seed: int | None = 0,
         n_set: int = 1,
         dfreq: float = 0.05,
@@ -725,7 +730,7 @@ class SubtomogramLoader:
             )
             fsc_all[f"FSC-{i}"] = fsc
 
-        out: dict[str, np.ndarray] = {"freq": freq}  # type: ignore
+        out: dict[str, NDArray[np.float32]] = {"freq": freq}  # type: ignore
         out.update(fsc_all)
         return pl.DataFrame(out)
 
@@ -741,22 +746,7 @@ class SubtomogramLoader:
         return _output_shape
 
 
-def get_features(corr_max, local_shifts, rotvec) -> pl.DataFrame:
-
-    features = {
-        "score": corr_max,
-        "shift-z": np.round(local_shifts[:, 0], 2),
-        "shift-y": np.round(local_shifts[:, 1], 2),
-        "shift-x": np.round(local_shifts[:, 2], 2),
-        "rotvec-z": np.round(rotvec[:, 0], 5),
-        "rotvec-y": np.round(rotvec[:, 1], 5),
-        "rotvec-x": np.round(rotvec[:, 2], 5),
-    }
-    return pl.DataFrame(features)
-
-
 def get_feature_list(corr_max, local_shifts, rotvec) -> list[pl.Series]:
-
     features = [
         pl.Series("score", corr_max),
         pl.Series("shift-z", np.round(local_shifts[:, 0], 2)),
@@ -767,18 +757,6 @@ def get_feature_list(corr_max, local_shifts, rotvec) -> list[pl.Series]:
         pl.Series("rotvec-x", np.round(rotvec[:, 2], 5)),
     ]
     return features
-
-
-def update_features(
-    features: pl.DataFrame,
-    values: dict[str, Any] | pl.DataFrame | list[Any],
-):
-    """Update features with new values."""
-    if isinstance(values, dict):
-        _values = [pl.Series(k, v) for k, v in values.items()]
-    else:
-        _values = list(values)
-    return features.with_columns(_values)
 
 
 def check_input(

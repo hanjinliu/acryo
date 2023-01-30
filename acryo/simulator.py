@@ -7,10 +7,9 @@ from numpy.typing import NDArray
 from scipy import ndimage as ndi
 from scipy.spatial.transform import Rotation
 
-from ._types import nm, pixel
-from .molecules import Molecules
-
-from . import _utils
+from acryo._types import nm, pixel
+from acryo.molecules import Molecules
+from acryo import _utils
 
 if TYPE_CHECKING:
     from typing_extensions import Self, Literal
