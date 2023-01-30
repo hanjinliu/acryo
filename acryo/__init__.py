@@ -1,11 +1,13 @@
-__version__ = "0.0.6.dev0"
+__version__ = "0.1.0.dev0"
 
-from .loader import SubtomogramLoader
-from .molecules import Molecules
-from .simulator import TomogramSimulator
+from acryo.loader import SubtomogramLoader
+from acryo.molecules import Molecules
+from acryo.simulator import TomogramSimulator
+from acryo.collection import TomogramCollection
 
 __all__ = [
     "Molecules",
     "SubtomogramLoader",
+    "TomogramCollection",
     "TomogramSimulator",
 ]

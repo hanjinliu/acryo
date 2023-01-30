@@ -12,7 +12,7 @@ from scipy.fft import fftn
 from scipy.spatial.transform import Rotation
 
 if TYPE_CHECKING:
-    from ._types import degree
+    from acryo._types import degree
 
 
 def make_slice_and_pad(

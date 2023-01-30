@@ -1,14 +1,15 @@
 from __future__ import annotations
 from pathlib import Path
-from typing import Iterable, TYPE_CHECKING, Union
+from typing import Any, Iterable, TYPE_CHECKING, Iterator, Union
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 import polars as pl
 from scipy.spatial.transform import Rotation
-from ._types import nm
+from acryo._types import nm
 
 if TYPE_CHECKING:
     from typing_extensions import Self
+    from polars.internals.dataframe.groupby import GroupBy
 
 _CSV_COLUMNS = ["z", "y", "x", "zvec", "yvec", "xvec"]
 PathLike = Union[str, Path, bytes]
@@ -45,8 +46,14 @@ class Molecules:
             raise ValueError("Shape of pos must be (N, 3).")
 
         if rot is None:
-            quat = np.stack([np.array([0, 0, 0, 1])] * pos.shape[0], axis=0)
+            nmol = pos.shape[0]
+            if nmol > 0:
+                quat = np.stack([np.array([0, 0, 0, 1])] * pos.shape[0], axis=0)
+            else:
+                quat = np.zeros((0, 4))
             rot = Rotation.from_quat(quat)
+        elif not isinstance(rot, Rotation):
+            raise TypeError(f"`rot` must be a Rotation object, got {type(rot)}.")
         elif pos.shape[0] != len(rot):
             raise ValueError(
                 f"Length mismatch. There are {pos.shape[0]} molecules but {len(rot)} "
@@ -60,6 +67,14 @@ class Molecules:
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(n={len(self)})"
+
+    @classmethod
+    def empty(cls, feature_labels: Iterable[str] = ()):
+        return cls(
+            pos=np.zeros((0, 3)),
+            rot=None,
+            features=pl.DataFrame(None, schema=list(feature_labels)),
+        )
 
     @classmethod
     def from_axes(
@@ -152,11 +167,18 @@ class Molecules:
         **pl_kwargs,
     ) -> Self:
         """Load csv as a Molecules object."""
-        import polars as pl
+        df: pl.DataFrame = pl.read_csv(path, **pl_kwargs)  # type: ignore
+        return cls.from_dataframe(df, pos_cols, rot_cols)
 
+    @classmethod
+    def from_dataframe(
+        cls,
+        df: pl.DataFrame,
+        pos_cols: list[str] = ["z", "y", "x"],
+        rot_cols: list[str] = ["zvec", "yvec", "xvec"],
+    ) -> Self:
         pos_cols = pos_cols.copy()
         rot_cols = rot_cols.copy()
-        df = pl.read_csv(path, **pl_kwargs)
         pos = df.select(pos_cols)
         rotvec = df.select(rot_cols)
         cols = pos.columns + rotvec.columns
@@ -199,7 +221,7 @@ class Molecules:
 
         rotvec = self.rotvec()
         data = np.concatenate([self.pos, rotvec], axis=1)
-        df = pl.DataFrame(data, columns=_CSV_COLUMNS)
+        df = pl.DataFrame(data, schema=_CSV_COLUMNS)
         if self._features is not None:
             df = df.with_columns(list(self._features))
         return df
@@ -266,6 +288,14 @@ class Molecules:
             all_features = None
 
         return cls(all_pos, Rotation(all_quat), features=all_features)
+
+    def copy(self) -> Self:
+        """Make a copy of the object."""
+        pos = self.pos.copy()
+        quat = self._rotator.as_quat().copy()
+        if self._features is None:
+            return self.__class__(pos, Rotation(quat))
+        return self.__class__(pos, Rotation(quat), self._features)
 
     def subset(self, spec: int | slice | list[int] | np.ndarray) -> Self:
         """
@@ -721,6 +751,43 @@ class Molecules:
             return self.translate_internal(shift_corrected).rotate_by_rotvec_internal(
                 rotvec
             )
+
+    def concat_with(self, mole: Molecules) -> Self:
+        """Concatenate the molecules with the other."""
+        pos = np.concatenate([self.pos, mole.pos], axis=0)
+        rot = np.concatenate([self.rotator.as_quat(), mole.rotator.as_quat()], axis=0)
+        if len(self.features) == 0:
+            feat = mole.features
+        elif len(mole.features) == 0:
+            feat = self.features
+        else:
+            feat = pl.concat([self.features, mole.features], how="vertical")
+        return self.__class__(pos, Rotation.from_quat(rot), features=feat)
+
+    def groupby(self, by: str | list[str]):
+        """Group molecules into sub-groups."""
+        # NOTE: the groupby function of polars is not stable yet (0.15.18)
+        df = self.to_dataframe()
+        return MoleculeGroup(df.groupby(by))
+
+    def filter(
+        self,
+        predicate: pl.Expr | str | pl.Series | list[bool] | np.ndarray,
+    ) -> Self:
+        """Filter molecules by its features."""
+        df = self.to_dataframe()
+        df_filt = df.filter(predicate)
+        return self.__class__.from_dataframe(df_filt)
+
+
+class MoleculeGroup:
+    def __init__(self, group: GroupBy[pl.DataFrame]):
+        self._group = group
+
+    def __iter__(self) -> Iterator[tuple[Any, Molecules]]:
+        for key, df in self._group:
+            mole = Molecules.from_dataframe(df)
+            yield key, mole
 
 
 def _translate_euler(seq: str) -> str:
