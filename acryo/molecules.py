@@ -184,8 +184,8 @@ class Molecules:
         cols = pos.columns + rotvec.columns
         others = df.select([c for c in df.columns if c not in cols])
         return cls(
-            np.asarray(pos).T,
-            Rotation.from_rotvec(np.asarray(rotvec).T),
+            pos.to_numpy(),
+            Rotation.from_rotvec(rotvec.to_numpy()),
             features=others,
         )
 
