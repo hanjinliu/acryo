@@ -774,6 +774,7 @@ class Molecules:
         self,
         predicate: pl.Expr | str | pl.Series | list[bool] | np.ndarray,
     ) -> Self:
+        """Filter molecules by its features."""
         df = self.to_dataframe()
         df_filt = df.filter(predicate)
         return self.__class__.from_dataframe(df_filt)
