@@ -8,7 +8,7 @@ from scipy.spatial.transform import Rotation
 from acryo._types import nm
 
 if TYPE_CHECKING:
-    from typing_extensions import Self
+    from typing_extensions import Self, TypeGuard
     from polars.internals.dataframe.groupby import GroupBy
 
 _CSV_COLUMNS = ["z", "y", "x", "zvec", "yvec", "xvec"]
@@ -270,7 +270,12 @@ class Molecules:
         return self._rotator
 
     @classmethod
-    def concat(cls, moles: Iterable[Molecules], concat_features: bool = True) -> Self:
+    def concat(
+        cls,
+        moles: Iterable[Molecules],
+        concat_features: bool = True,
+        nullable: bool = True,
+    ) -> Self:
         """Concatenate Molecules objects."""
         pos: list[np.ndarray] = []
         quat: list[np.ndarray] = []
@@ -283,7 +288,8 @@ class Molecules:
         all_pos = np.concatenate(pos, axis=0)
         all_quat = np.concatenate(quat, axis=0)
         if concat_features:
-            all_features = pl.concat(features, how="horizontal")
+            how = "diagonal" if nullable else "vertical"
+            all_features = pl.concat(features, how=how)
         else:
             all_features = None
 
@@ -297,7 +303,10 @@ class Molecules:
             return self.__class__(pos, Rotation(quat))
         return self.__class__(pos, Rotation(quat), self._features)
 
-    def subset(self, spec: int | slice | list[int] | np.ndarray) -> Self:
+    def subset(
+        self,
+        spec: int | slice | list[int] | NDArray[np.bool_] | NDArray[np.integer],
+    ) -> Self:
         """
         Create a subset of molecules by slicing.
 
@@ -324,7 +333,7 @@ class Molecules:
         quat = self._rotator.as_quat()[spec]
         if self._features is None:
             return self.__class__(pos, Rotation(quat))
-        if getattr(spec, "dtype", None) == np.bool_:
+        if _is_boolean_array(spec):
             # NOTE: polars does not support boolean indexing
             return self.__class__(pos, Rotation(quat), self._features.filter(spec))
         return self.__class__(pos, Rotation(quat), self._features[spec])
@@ -755,16 +764,32 @@ class Molecules:
                 rotvec
             )
 
-    def concat_with(self, mole: Molecules) -> Self:
-        """Concatenate the molecules with the other."""
-        pos = np.concatenate([self.pos, mole.pos], axis=0)
-        rot = np.concatenate([self.rotator.as_quat(), mole.rotator.as_quat()], axis=0)
+    def concat_with(
+        self,
+        other: Molecules,
+        /,
+        nullable: bool = True,
+    ) -> Self:
+        """
+        Concatenate the molecules with the others.
+
+        Parameters
+        ----------
+        other : Molecules
+            Molecules to be concatenated.
+        nullable : bool, default is True
+            If true, missing features in either of the molecules will be filled with
+            ``null``. Raise error otherwise.
+        """
+        pos = np.concatenate([self.pos, other.pos], axis=0)
+        rot = np.concatenate([self.rotator.as_quat(), other.rotator.as_quat()], axis=0)
         if len(self.features) == 0:
-            feat = mole.features
-        elif len(mole.features) == 0:
+            feat = other.features
+        elif len(other.features) == 0:
             feat = self.features
         else:
-            feat = pl.concat([self.features, mole.features], how="vertical")
+            how = "diagonal" if nullable else "vertical"
+            feat = pl.concat([self.features, other.features], how=how)
         return self.__class__(pos, Rotation.from_quat(rot), features=feat)
 
     def groupby(self, by: str | list[str]):
@@ -791,6 +816,13 @@ class MoleculeGroup:
         for key, df in self._group:
             mole = Molecules.from_dataframe(df)
             yield key, mole
+
+
+def _is_boolean_array(a: Any) -> TypeGuard[NDArray[np.bool_]]:
+    if isinstance(a, pl.Series):
+        return a.dtype is pl.Boolean
+    else:
+        return getattr(a, "dtype", None) == "bool"
 
 
 def _translate_euler(seq: str) -> str:
