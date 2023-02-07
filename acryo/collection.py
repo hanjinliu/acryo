@@ -37,10 +37,10 @@ class TomogramCollection:
         )
         self._images: dict[Hashable, NDArray[np.float32] | daskArray] = {}
         self._molecules: Molecules = Molecules.empty([IMAGE_ID_LABEL])
-        self._loaders = LoaderInterface(self)
+        self._loaders = LoaderAccessor(self)
 
     @property
-    def loaders(self) -> LoaderInterface:
+    def loaders(self) -> LoaderAccessor:
         """Interface to access the subtomogram loaders."""
         return self._loaders
 
@@ -53,18 +53,20 @@ class TomogramCollection:
         self,
         image: np.ndarray | daskArray,
         molecules: Molecules,
+        image_id: Hashable = None,
     ) -> Self:
         """Add a tomogram and its molecules to the collection."""
-        idx = len(self._images)
-        while idx in self._images:
-            idx += 1
+        if image_id is None:
+            image_id = len(self._images)
+            while image_id in self._images:
+                image_id += 1
         molecules = molecules.copy()
         molecules.features = molecules.features.with_columns(
-            pl.Series(IMAGE_ID_LABEL, np.full((len(molecules)), idx))
+            pl.Series(IMAGE_ID_LABEL, np.full((len(molecules)), image_id))
         )
         _molecules_new = self._molecules.concat_with(molecules)
 
-        self._images[idx] = image
+        self._images[image_id] = image
         self._molecules = _molecules_new
         return self
 
@@ -204,7 +206,7 @@ class TomogramCollection:
         return new
 
 
-class LoaderInterface:
+class LoaderAccessor:
     def __init__(self, collection: TomogramCollection):
         self._collection = collection
 

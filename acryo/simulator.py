@@ -364,13 +364,18 @@ def _prep_slices(start, stop, tomogram_shape, template_shape):
     sl_src_list: list[slice] = []
     sl_dst_list: list[slice] = []
     for s, e, size, tsize in zip(start, stop, tomogram_shape, template_shape):
-        _sl, _pads, _out_of_bound = _utils.make_slice_and_pad(s, e, size)
-        sl_dst_list.append(_sl)
-        if _out_of_bound:
-            s0, s1 = _pads
-            sl_src_list.append(slice(s0, tsize - s1))
+        try:
+            _sl, _pads, _out_of_bound = _utils.make_slice_and_pad(s, e, size)
+        except ValueError:
+            # out-of-bound is not a problem while simulation
+            continue
         else:
-            sl_src_list.append(slice(None))
+            sl_dst_list.append(_sl)
+            if _out_of_bound:
+                s0, s1 = _pads
+                sl_src_list.append(slice(s0, tsize - s1))
+            else:
+                sl_src_list.append(slice(None))
     sl_src = tuple(sl_src_list)
     sl_dst = tuple(sl_dst_list)
     return sl_src, sl_dst

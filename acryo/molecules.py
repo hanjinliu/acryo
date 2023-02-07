@@ -522,11 +522,8 @@ class Molecules:
         """
         Translate molecule positions internally by ``shifts``.
 
-        Shifts are applied in world coordinates, not internal coordinates of
-        every molecules. If molecules should be translated in their own
-        coordinates, such as translating toward y-direction of each molecules
-        by 1.0 nm, use ``translate_internal`` instead. Translation operation
-        does not convert molecule orientations.
+        Shifts are applied in the coordinates of each molecule. If molecules
+        should be translated in world coordinates use ``translate`` instead.
 
         Parameters
         ----------
@@ -718,9 +715,7 @@ class Molecules:
 
         Note that ``Rotation`` object satisfies following equation.
 
-        .. code-block::python
-
-            rot1.apply(rot2.apply(v)) == (rot1*rot2).apply(v)
+        >>> rot1.apply(rot2.apply(v)) == (rot1*rot2).apply(v)
 
         Parameters
         ----------
@@ -794,9 +789,8 @@ class Molecules:
 
     def groupby(self, by: str | list[str]):
         """Group molecules into sub-groups."""
-        # NOTE: the groupby function of polars is not stable yet (0.15.18)
         df = self.to_dataframe()
-        return MoleculeGroup(df.groupby(by))
+        return MoleculeGroup(df.groupby(by, maintain_order=True))
 
     def filter(
         self,
