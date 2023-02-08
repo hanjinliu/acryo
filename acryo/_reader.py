@@ -1,13 +1,14 @@
+# pyright: reportPrivateImportUsage=false
+
 from __future__ import annotations
 import os
 from typing import Any, NamedTuple, Callable, TypeVar
 import numpy as np
 from dask import array as da
-from dask.array.core import Array as daskArray
 
 
 class ImageData(NamedTuple):
-    image: daskArray
+    image: da.Array
     scale: float
 
 
@@ -26,7 +27,7 @@ class ImageReader:
                 _ext = "." + _ext
             ext_list.append(_ext)
 
-        def _register(f: _L):
+        def _register(f: _L) -> _L:
             nonlocal ext_list
             for ext in ext_list:
                 self._reader[ext] = f
@@ -93,8 +94,8 @@ def open_mrc(path: str):
     return img, scale
 
 
-def as_dask(mmap: np.memmap, chunks: Any = "auto") -> daskArray:
-    img = da.from_array(  # type: ignore
-        mmap, chunks=chunks, meta=np.array([])
-    ).map_blocks(np.asarray, dtype=mmap.dtype)
+def as_dask(mmap: np.memmap, chunks: Any = "auto") -> da.Array:
+    img = da.from_array(mmap, chunks=chunks, meta=np.array([])).map_blocks(
+        np.asarray, dtype=mmap.dtype
+    )
     return img

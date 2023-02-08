@@ -1,3 +1,4 @@
+# pyright: reportPrivateImportUsage=false
 from __future__ import annotations
 from types import MappingProxyType
 
@@ -6,7 +7,6 @@ import numpy as np
 import polars as pl
 
 from dask import array as da
-from dask.array.core import Array as daskArray
 
 from acryo.loader import SubtomogramLoader, Unset, check_input
 from acryo.molecules import Molecules
@@ -35,7 +35,7 @@ class TomogramCollection:
         self._order, self._output_shape, self._scale, self._corner_safe = check_input(
             order, output_shape, scale, corner_safe, 3
         )
-        self._images: dict[Hashable, NDArray[np.float32] | daskArray] = {}
+        self._images: dict[Hashable, NDArray[np.float32] | da.Array] = {}
         self._molecules: Molecules = Molecules.empty([IMAGE_ID_LABEL])
         self._loaders = LoaderAccessor(self)
 
@@ -51,7 +51,7 @@ class TomogramCollection:
 
     def add_tomogram(
         self,
-        image: np.ndarray | daskArray,
+        image: np.ndarray | da.Array,
         molecules: Molecules,
         image_id: Hashable = None,
     ) -> Self:
@@ -105,7 +105,7 @@ class TomogramCollection:
         order: int | None = None,
         scale: float | None = None,
         corner_safe: bool | None = None,
-        images: dict[Hashable, NDArray[np.float32] | daskArray] | None = None,
+        images: dict[Hashable, NDArray[np.float32] | da.Array] | None = None,
     ) -> Self:
         """Return a new instance with different parameter(s)."""
         if output_shape is None:
@@ -117,9 +117,9 @@ class TomogramCollection:
         if corner_safe is None:
             corner_safe = self.corner_safe
         out = self.__class__(
-            output_shape=output_shape,
             order=order,
             scale=scale,
+            output_shape=output_shape,
             corner_safe=corner_safe,
         )
         if images is None:
@@ -143,11 +143,11 @@ class TomogramCollection:
         np.ndarray
             Averaged image
         """
-        dask_arrays: list[daskArray] = []
+        dask_arrays: list[da.Array] = []
         for loader in self.loaders:
             dask_arrays.append(loader.construct_dask(output_shape=output_shape))
-        dask_array = da.concatenate(dask_arrays, axis=0)  # type: ignore
-        return da.compute(da.mean(dask_array, axis=0))[0]  # type: ignore
+        dask_array = da.concatenate(dask_arrays, axis=0)
+        return da.compute(da.mean(dask_array, axis=0))[0]
 
     def align(
         self,

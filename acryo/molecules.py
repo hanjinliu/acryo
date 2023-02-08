@@ -40,7 +40,7 @@ class Molecules:
         rot: Rotation | None = None,
         features: pl.DataFrame | ArrayLike | dict[str, ArrayLike] | None = None,
     ):
-        pos = np.atleast_2d(pos)
+        pos = np.atleast_2d(pos).astype(np.float32)
 
         if pos.shape[1] != 3:
             raise ValueError("Shape of pos must be (N, 3).")
@@ -167,7 +167,7 @@ class Molecules:
         **pl_kwargs,
     ) -> Self:
         """Load csv as a Molecules object."""
-        df: pl.DataFrame = pl.read_csv(path, **pl_kwargs)  # type: ignore
+        df: pl.DataFrame = pl.read_csv(path, **pl_kwargs)
         return cls.from_dataframe(df, pos_cols, rot_cols)
 
     @classmethod
@@ -247,7 +247,7 @@ class Molecules:
     @property
     def pos(self) -> NDArray[np.float32]:
         """Positions of molecules."""
-        return self._pos  # type: ignore
+        return self._pos
 
     @property
     def x(self) -> NDArray[np.float32]:
@@ -389,7 +389,7 @@ class Molecules:
             vec_x = self._rotator[index].apply([0.0, 0.0, 1.0])
             vec_y = self._rotator[index].apply([0.0, 1.0, 0.0])
             vec_z = cross(vec_x, vec_y)
-            ind_z, ind_y, ind_x = [np.arange(s) - c for s, c in zip(shape, center)]
+            ind_z, ind_y, ind_x = [np.arange(s) - c for s, c in zip(shape, center)]  # type: ignore
             x_ax: np.ndarray = vec_x[:, np.newaxis] * ind_x
             y_ax: np.ndarray = vec_y[:, np.newaxis] * ind_y
             z_ax: np.ndarray = vec_z[:, np.newaxis] * ind_z

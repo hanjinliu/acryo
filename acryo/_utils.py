@@ -1,11 +1,12 @@
+# pyright: reportPrivateImportUsage=false
 from __future__ import annotations
+
 from typing import Sequence, TYPE_CHECKING
 from functools import lru_cache
 
 import numpy as np
 from numpy.typing import NDArray
 from dask import array as da
-from dask.array.core import Array as daskArray
 from dask.delayed import delayed
 from scipy import ndimage as ndi
 from scipy.fft import fftn
@@ -134,7 +135,7 @@ def fourier_shell_correlation(
     return freq, out
 
 
-def bin_image(img: np.ndarray | daskArray, binsize: int) -> np.ndarray:
+def bin_image(img: np.ndarray | da.Array, binsize: int) -> np.ndarray:
     """Bin an image."""
     _slices: list[slice] = []
     _shapes: list[int] = []
@@ -150,7 +151,7 @@ def bin_image(img: np.ndarray | daskArray, binsize: int) -> np.ndarray:
 
 
 def prepare_affine(
-    img: daskArray,
+    img: da.Array,
     center: Sequence[float],
     output_shape: Sequence[int],
     rot: Rotation,
@@ -180,7 +181,7 @@ def prepare_affine(
 
 
 def prepare_affine_cornersafe(
-    img: daskArray,
+    img: da.Array,
     center: Sequence[float],
     output_shape: Sequence[int],
     rot: Rotation,
@@ -238,7 +239,7 @@ def delayed_affine(
     mode: str = "constant",
     cval: float = 0.0,
     prefilter: bool = True,
-) -> daskArray:
+) -> da.Array:
     out = _delayed_affine_transform(
         input, matrix, order=order, mode=mode, cval=cval, prefilter=prefilter
     )

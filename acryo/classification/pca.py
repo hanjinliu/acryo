@@ -1,12 +1,15 @@
+# pyright: reportPrivateImportUsage=false
 from __future__ import annotations
 from typing import TYPE_CHECKING, Iterable
 import numpy as np
+from dask import array as da
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
-    from sklearn.decomposition import PCA
+    from ._dask_pca import DaskPCA as PCA
     from sklearn.cluster import KMeans
     from typing_extensions import Self
+    from numpy.typing import NDArray
 
 
 class PcaClassifier:
@@ -14,19 +17,24 @@ class PcaClassifier:
 
     def __init__(
         self,
-        image_stack: np.ndarray,
-        mask_image: np.ndarray | None = None,
+        image_stack: NDArray[np.float32] | da.Array,
+        mask_image: NDArray[np.float32] | None = None,
         n_components: int = 2,
         n_clusters: int = 2,
         seed: int | None = 0,
     ):
-        from sklearn.decomposition import PCA
+        from ._dask_pca import DaskPCA as PCA
         from sklearn.cluster import KMeans
 
         if mask_image is None:
             self._mask = 1
         else:
             self._mask = mask_image
+
+        if isinstance(image_stack, np.ndarray):
+            image_stack = da.from_array(image_stack)
+        if not isinstance(image_stack, da.Array):
+            raise TypeError("image_stack must be a numpy array or a dask array.")
         self._image = image_stack
         self._n_image = image_stack.shape[0]
         self._shape = image_stack.shape[1:]  # shape of a single image
@@ -52,33 +60,33 @@ class PcaClassifier:
         self._labels = self._kmeans.fit_predict(self.get_transform())
         return self
 
-    def transform(self, input: np.ndarray, mask: bool = True) -> np.ndarray:
+    def transform(self, input: da.Array, mask: bool = True) -> NDArray[np.float32]:
         """Transform the input image into the principal component space."""
         if mask:
             input = input * self._mask
         flat = input.reshape(input.shape[0], -1)
-        return self._pca.transform(flat)
+        return self._pca.transform(flat).compute()
 
-    def predict(self, input: np.ndarray) -> np.ndarray:
+    def predict(self, input: da.Array) -> NDArray[np.int32]:
         """Predict which labels the input images belong to."""
         transformed = self.transform(input)
         labels = self._kmeans.predict(transformed)
         return labels
 
-    def _image_flat(self, mask: bool = False) -> np.ndarray:
+    def _image_flat(self, mask: bool = False) -> da.Array:
         if mask:
             _input = self._image * self._mask
         else:
             _input = self._image
         return _input.reshape(self._n_image, -1)
 
-    def get_transform(self, labels: Iterable[int] | None = None) -> np.ndarray:
+    def get_transform(self, labels: Iterable[int] | None = None) -> NDArray[np.float32]:
         """
         Get the transformed vectors from the input images.
 
         Returns
         -------
-        np.ndarray
+        da.Array
             Transormed vectors. If input image stack P images, then
             (P, n_components) array will be returned.
         """
@@ -88,8 +96,7 @@ class PcaClassifier:
             if not isinstance(labels, list):
                 labels = list(labels)
             flat = self._image_flat(mask=True)[labels]
-        transformed = self._pca.transform(flat)
-        return transformed
+        return self._pca.transform(flat).compute()
 
     def plot_transform(
         self,
@@ -118,7 +125,7 @@ class PcaClassifier:
         """
         return self.pca.components_.reshape(self.n_components, *self._shape)  # type: ignore
 
-    def split_clusters(self) -> list[np.ndarray]:
+    def split_clusters(self) -> list[da.Array]:
         """
         Split input image stack into list of image stacks according to the labels.
 
@@ -126,7 +133,7 @@ class PcaClassifier:
         only one cluster will be returned. If input image stack has ``"pzyx"`` axes,
         list of ``"pzyx"`` images will be returned.
         """
-        output: list[np.ndarray] = []
+        output: list[da.Array] = []
         for i in range(self.n_clusters):
             img0 = self._image[self._labels == i]
             output.append(img0)

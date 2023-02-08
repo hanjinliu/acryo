@@ -3,6 +3,7 @@ import itertools
 from functools import reduce, lru_cache
 from typing import Callable, Sequence
 import numpy as np
+from numpy.typing import NDArray
 from scipy.fft import rfftn, irfftn, fftn
 from scipy.signal import fftconvolve
 from scipy.spatial.transform import Rotation
@@ -154,11 +155,11 @@ def _get_ND_butterworth_filter(
 
 
 def subpixel_pcc(
-    f0: np.ndarray,
-    f1: np.ndarray,
+    f0: NDArray[np.number],
+    f1: NDArray[np.number],
     upsample_factor: int,
-    max_shifts: tuple[float, ...] | np.ndarray | None = None,
-) -> tuple[np.ndarray, float]:
+    max_shifts: tuple[float, ...] | NDArray[np.number] | None = None,
+) -> tuple[NDArray[np.float32], float]:
     if isinstance(max_shifts, (int, float)):
         max_shifts = (max_shifts,) * f0.ndim
     product = f0 * f1.conj()
@@ -207,30 +208,30 @@ def subpixel_pcc(
 
 
 def _upsampled_dft(
-    data: np.ndarray,
-    upsampled_region_size: np.ndarray,
+    data: NDArray[np.number],
+    upsampled_region_size: NDArray[np.integer],
     upsample_factor: int,
-    axis_offsets: np.ndarray,
-) -> np.ndarray:
+    axis_offsets: NDArray[np.float32],
+) -> NDArray[np.number]:
     # if people pass in an integer, expand it to a list of equal-sized sections
     upsampled_region_sizes = [upsampled_region_size] * data.ndim
 
     dim_properties = list(zip(data.shape, upsampled_region_sizes, axis_offsets))
 
     for (n_items, ups_size, ax_offset) in dim_properties[::-1]:
-        kernel = (np.arange(ups_size) - ax_offset)[
+        kernel = (np.arange(ups_size) - ax_offset)[  # type: ignore
             :, np.newaxis
         ] * np.fft.fftfreq(  # type: ignore
             n_items, upsample_factor
         )
         kernel = np.exp(-2j * np.pi * kernel)
 
-        data = np.tensordot(kernel, data, axes=(1, -1))
+        data = np.tensordot(kernel, data, axes=(1, -1))  # type: ignore
     return data
 
 
-def abs2(a: np.ndarray) -> np.ndarray:
-    return a.real**2 + a.imag**2  # type: ignore
+def abs2(a: NDArray[np.number]) -> NDArray[np.number]:
+    return a.real**2 + a.imag**2
 
 
 def crop_by_max_shifts(power: np.ndarray, left, right):

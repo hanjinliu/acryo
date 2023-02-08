@@ -1,3 +1,5 @@
+# pyright: reportPrivateImportUsage=false
+
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Iterable, NamedTuple, Sequence
@@ -7,9 +9,9 @@ from scipy.spatial.transform import Rotation
 from dask import array as da
 from dask.delayed import delayed
 
-from ._utils import lowpass_filter_ft, normalize_rotations
-from .._types import Ranges, subpixel, degree
-from .._utils import compose_matrices, missing_wedge_mask
+from acryo.alignment._utils import lowpass_filter_ft, normalize_rotations
+from acryo._types import Ranges, subpixel, degree
+from acryo._utils import compose_matrices, missing_wedge_mask
 
 
 class AlignmentResult(NamedTuple):
@@ -359,7 +361,7 @@ class RotationImplemented(BaseAlignmentModel):
             tmp = delayed_transform(template_masked, mat, cval=_temp_cval)
             task = delayed_optimize(img_input, tmp, max_shifts, quat)
             tasks.append(task)
-        results: list[tuple] = da.compute(tasks)[0]  # type: ignore
+        results: list[tuple] = da.compute(tasks)[0]
         scores = [x[2] for x in results]
         iopt = np.argmax(scores)
         opt_result = results[iopt]
