@@ -1,4 +1,5 @@
 # pyright: reportPrivateImportUsage=false
+
 from __future__ import annotations
 from types import MappingProxyType
 
@@ -15,6 +16,7 @@ from acryo.alignment import (
     ZNCCAlignment,
 )
 from acryo._types import nm, pixel
+from acryo import _utils
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -26,12 +28,13 @@ IMAGE_ID_LABEL = "image"
 class TomogramCollection:
     """
     Collection of tomograms and their molecules.
-    
+
     A `TomogramCollection` is similar to a list of `SubtomogramLoader` objects, but with
     better consistency in loader parameters and more convenient access to the molecules.
     This class is useful for processing many tomograms at once, especially when you want
     to get the average of all the molecules available.
     """
+
     def __init__(
         self,
         order: int = 3,
@@ -139,6 +142,15 @@ class TomogramCollection:
     def copy(self) -> Self:
         return self.replace()
 
+    def construct_dask(
+        self,
+        output_shape: pixel | tuple[pixel, ...] | None = None,
+    ) -> da.Array:
+        dask_arrays: list[da.Array] = []
+        for loader in self.loaders:
+            dask_arrays.append(loader.construct_dask(output_shape=output_shape))
+        return da.concatenate(dask_arrays, axis=0)
+
     def average(
         self,
         output_shape: pixel | tuple[pixel] | None = None,
@@ -151,11 +163,54 @@ class TomogramCollection:
         np.ndarray
             Averaged image
         """
-        dask_arrays: list[da.Array] = []
-        for loader in self.loaders:
-            dask_arrays.append(loader.construct_dask(output_shape=output_shape))
-        dask_array = da.concatenate(dask_arrays, axis=0)
-        return da.compute(da.mean(dask_array, axis=0))[0]
+        dsk = self.construct_dask(output_shape=output_shape)
+        return da.compute(da.mean(dsk, axis=0))[0]
+
+    def average_split(
+        self,
+        n_set: int = 1,
+        seed: int | None = 0,
+        squeeze: bool = True,
+        output_shape: pixel | tuple[pixel] | None = None,
+    ):
+        """
+        Split subtomograms into two set and average separately.
+
+        This method executes pairwise subtomogram averaging using randomly
+        selected molecules, which is useful for calculation of such as Fourier
+        shell correlation.
+
+        Parameters
+        ----------
+        n_set : int, default is 1
+            Number of split set of averaged image.
+        seed : random seed, default is 0
+            Random seed to determine how subtomograms will be split.
+
+        Returns
+        -------
+        np.ndarray
+            Averaged image. The shape of the array is (M, 2, Nz, Ny, NX), where
+            M is the number of split set, 2 is the number of averaged image, and
+            Nz, Ny, Nx are the shape of the averaged image.
+        """
+        output_shape = self._get_output_shape(output_shape)
+        rng = np.random.default_rng(seed=seed)
+
+        tasks: list[da.Array] = []
+        dask_array = self.construct_dask(output_shape=output_shape)
+        nmole = dask_array.shape[0]
+        for _ in range(n_set):
+            ind0, ind1 = _utils.random_splitter(rng, nmole)
+            dask_avg0 = da.mean(dask_array[ind0], axis=0)
+            dask_avg1 = da.mean(dask_array[ind1], axis=0)
+            tasks.extend([dask_avg0, dask_avg1])
+
+        out = da.compute(tasks)[0]
+        stack = np.stack(out, axis=0).reshape(n_set, 2, *output_shape)
+        if squeeze and n_set == 1:
+            stack = stack[0]
+        return stack
 
     def align(
         self,
@@ -212,6 +267,17 @@ class TomogramCollection:
             if k not in _id_exists:
                 new._images.pop(k)
         return new
+
+    def _get_output_shape(
+        self, output_shape: pixel | tuple[pixel] | None
+    ) -> tuple[pixel, ...]:
+        if output_shape is None:
+            if isinstance(self.output_shape, Unset):
+                raise ValueError("Output shape is unknown.")
+            _output_shape = self.output_shape
+        else:
+            _output_shape = _utils.normalize_shape(output_shape, ndim=3)
+        return _output_shape
 
 
 class LoaderAccessor:

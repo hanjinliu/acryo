@@ -1,11 +1,12 @@
 # pyright: reportPrivateImportUsage=false
 
 from __future__ import annotations
+import psutil
 from typing import (
     Callable,
     TYPE_CHECKING,
     Iterable,
-    Sequence,
+    NamedTuple,
     TypeVar,
     Any,
 )
@@ -30,8 +31,11 @@ if TYPE_CHECKING:
     from typing_extensions import Self
     from dask.delayed import Delayed
     from numpy.typing import NDArray
+    from acryo.classification import PcaClassifier
+
 
 _R = TypeVar("_R")
+MEMORY_LIMIT = psutil.virtual_memory().total
 
 
 class Unset:
@@ -378,14 +382,16 @@ class SubtomogramLoader:
         mmap[:] = dask_array[:]
         darr = da.from_array(
             mmap,
-            chunks=(1,) + self.output_shape,
+            chunks=(1,) + self.output_shape,  # type: ignore
             meta=np.array([], dtype=np.float32),
         )
         return darr
 
-    def asnumpy(self) -> NDArray[np.float32]:
+    def asnumpy(self, *, lim: int = MEMORY_LIMIT) -> NDArray[np.float32]:
         """Create a 4D image stack of all the subtomograms."""
         arr = self.construct_dask()
+        if arr.nbytes > lim:
+            raise MemoryError("The array is too large to be loaded into memory.")
         return arr.compute()
 
     def average(
@@ -429,23 +435,19 @@ class SubtomogramLoader:
 
         Returns
         -------
-        ImgArray
+        np.ndarray
             Averaged image
         """
-        nmole = len(self)
         output_shape = self._get_output_shape(output_shape)
         rng = np.random.default_rng(seed=seed)
 
-        tasks = []
+        tasks: list[da.Array] = []
+        dask_array = self.construct_dask(output_shape=output_shape)
+        nmole = dask_array.shape[0]
         for _ in range(n_set):
-            sl = rng.choice(np.arange(nmole), nmole // 2).tolist()
-            indices0 = np.zeros(nmole, dtype=bool)
-            indices0[sl] = True
-            indices1 = np.ones(nmole, dtype=bool)
-            indices1[sl] = False
-            dask_array = self.construct_dask()
-            dask_avg0 = da.mean(dask_array[indices0], axis=0)
-            dask_avg1 = da.mean(dask_array[indices1], axis=0)
+            ind0, ind1 = _utils.random_splitter(rng, nmole)
+            dask_avg0 = da.mean(dask_array[ind0], axis=0)
+            dask_avg1 = da.mean(dask_array[ind1], axis=0)
             tasks.extend([dask_avg0, dask_avg1])
 
         out = da.compute(tasks)[0]
@@ -722,6 +724,7 @@ class SubtomogramLoader:
             output_shape=output_shape,
         )
         fsc_all: dict[str, np.ndarray] = {}
+        freq = np.zeros(0, dtype=np.float32)
         for i in range(n_set):
             img0, img1 = img[i]
             freq, fsc = _utils.fourier_shell_correlation(
@@ -741,7 +744,7 @@ class SubtomogramLoader:
         n_clusters: int = 2,
         seed: int = 0,
         label_name: str = "labels",
-    ) -> Self:
+    ) -> ClassificationResult:
         from acryo.classification import PcaClassifier
 
         clf = PcaClassifier(
@@ -755,7 +758,7 @@ class SubtomogramLoader:
         mole = self.molecules.copy()
         mole.features = mole.features.with_columns(pl.Series(label_name, clf._labels))
         new = self.replace(molecules=mole)
-        return new
+        return ClassificationResult(new, clf)
 
     def filter(
         self,
@@ -772,8 +775,15 @@ class SubtomogramLoader:
                 raise ValueError("Output shape is unknown.")
             _output_shape = self.output_shape
         else:
-            _output_shape = _normalize_shape(output_shape, ndim=self.image.ndim)
+            _output_shape = _utils.normalize_shape(output_shape, ndim=self.image.ndim)
         return _output_shape
+
+
+class ClassificationResult(NamedTuple):
+    """Tuple of classification results."""
+
+    loader: SubtomogramLoader
+    classifier: PcaClassifier
 
 
 def get_feature_list(corr_max, local_shifts, rotvec) -> list[pl.Series]:
@@ -806,7 +816,7 @@ def check_input(
     if isinstance(output_shape, Unset):
         _output_shape = output_shape
     else:
-        _output_shape = _normalize_shape(output_shape, ndim=ndim)
+        _output_shape = _utils.normalize_shape(output_shape, ndim=ndim)
 
     # check scale
     _scale = float(scale)
@@ -829,14 +839,6 @@ def _allocate(size: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     local_rot[:, 3] = 1  # identity map in quaternion
 
     return local_shifts, local_rot, corr_max
-
-
-def _normalize_shape(a: pixel | Sequence[pixel], ndim: int):
-    if isinstance(a, int):
-        _output_shape = (a,) * ndim
-    else:
-        _output_shape = tuple(a)
-    return _output_shape
 
 
 def _dict_iterrows(d: dict[str, Iterable[Any]]):

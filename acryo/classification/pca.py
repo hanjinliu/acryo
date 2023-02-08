@@ -1,6 +1,6 @@
 # pyright: reportPrivateImportUsage=false
 from __future__ import annotations
-from typing import TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING, Iterable, SupportsIndex
 import numpy as np
 from dask import array as da
 
@@ -54,6 +54,10 @@ class PcaClassifier:
         """The k-means object."""
         return self._kmeans
 
+    @property
+    def labels(self) -> NDArray[np.int32]:
+        return self._labels
+
     def run(self) -> Self:
         """Run PCA and k-means clustering."""
         self._pca.fit(self._image_flat(mask=True))
@@ -95,6 +99,8 @@ class PcaClassifier:
         else:
             if not isinstance(labels, list):
                 labels = list(labels)
+                if not isinstance(labels[0], SupportsIndex):
+                    raise TypeError("labels must be a list of integers.")
             flat = self._image_flat(mask=True)[labels]
         return self._pca.transform(flat).compute()
 
@@ -105,10 +111,11 @@ class PcaClassifier:
         ax: Axes | None = None,  # type: ignore
     ) -> Axes:
         ax0, ax1 = bases
-        import matplotlib.pyplot as plt
 
         transformed = self.get_transform(labels)
         if ax is None:
+            import matplotlib.pyplot as plt
+
             ax: Axes = plt.gca()
         ax.scatter(transformed[:, ax0], transformed[:, ax1])
         return ax

@@ -6,8 +6,7 @@ from __future__ import annotations
 import numbers
 
 import dask
-from dask import array as da
-from dask.delayed import delayed
+from dask import array as da, delayed
 import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.utils.extmath import fast_logdet
