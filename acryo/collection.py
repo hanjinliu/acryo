@@ -24,6 +24,14 @@ IMAGE_ID_LABEL = "image"
 
 
 class TomogramCollection:
+    """
+    Collection of tomograms and their molecules.
+    
+    A `TomogramCollection` is similar to a list of `SubtomogramLoader` objects, but with
+    better consistency in loader parameters and more convenient access to the molecules.
+    This class is useful for processing many tomograms at once, especially when you want
+    to get the average of all the molecules available.
+    """
     def __init__(
         self,
         order: int = 3,
