@@ -728,7 +728,7 @@ class SubtomogramLoader:
         Parameters
         ----------
         mask : np.ndarray, optional
-            Mask image, by default None
+            Mask image
         seed : random seed, default is 0
             Random seed used to split subtomograms.
         n_set : int, default is 1
@@ -784,6 +784,37 @@ class SubtomogramLoader:
         seed: int = 0,
         label_name: str = "labels",
     ) -> ClassificationResult:
+        """
+        Classify 3D densities by PCA of wedge-masked differences.
+
+        Parameters
+        ----------
+        template : 3D array, optional
+            Template image. If not given, average image will be used.
+        mask : 3D array, optional
+            Soft mask of the same shape as the template or the output_shape parameter.
+        n_components : int, default is 2
+            Number of PCA components.
+        n_clusters : int, default is 2
+            Number of classes.
+        tilt_range : (float, float), optional
+            Tilt range in degree.
+        seed : int, default is 0
+            Random seed used for K-means clustering.
+        label_name : str, default is "labels"
+            Column name used for the output classes.
+
+        Returns
+        -------
+        ClassificationResult
+            Tuple of SubtomogramLoader and PCA classifier object.
+
+        References
+        ----------
+        - Heumann, J. M., Hoenger, A., & Mastronarde, D. N. (2011). Clustering and variance
+          maps for cryo-electron tomography using wedge-masked differences. Journal of
+          structural biology, 175(3), 288-299.
+        """
         from acryo.classification import PcaClassifier
 
         if isinstance(self.output_shape, Unset):

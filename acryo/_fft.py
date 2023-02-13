@@ -20,4 +20,6 @@ if TYPE_CHECKING:
         ...
 
 else:
-    pass
+    from scipy.fft import rfftn, irfftn, fftn, ifftn
+
+__all__ = ["fftn", "ifftn", "rfftn", "irfftn"]
