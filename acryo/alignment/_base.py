@@ -11,6 +11,7 @@ from dask import array as da, delayed
 from acryo.alignment._utils import lowpass_filter_ft, normalize_rotations
 from acryo._types import Ranges, subpixel, degree
 from acryo._utils import compose_matrices, missing_wedge_mask
+from acryo._fft import ifftn
 
 if TYPE_CHECKING:
     from dask.delayed import Delayed
@@ -94,7 +95,7 @@ class BaseAlignmentModel(ABC):
         return f"{self.__class__.__name__}(shape={self._template.shape})"
 
     @property
-    def template_input(self) -> NDArray[np.float32]:
+    def template_input(self) -> NDArray[np.complex64]:
         """Create (a stack of) template images (and will be cached)."""
         if self._template_input is None:
             self._template_input = self._get_template_input()
@@ -144,10 +145,10 @@ class BaseAlignmentModel(ABC):
         """
 
     @abstractmethod
-    def pre_transform(self, image: np.ndarray) -> np.ndarray:
+    def pre_transform(self, image: NDArray[np.float32]) -> NDArray[np.complex64]:
         """Pre-transformation applied to input images (including template)."""
 
-    def _get_template_input(self) -> np.ndarray:
+    def _get_template_input(self) -> NDArray[np.complex64]:
         """
         Returns proper template image for alignment.
 
@@ -396,13 +397,13 @@ class RotationImplemented(BaseAlignmentModel):
         cval: float | None = None,
         order: int = 3,
         prefilter: bool = True,
-    ) -> NDArray[np.float32]:
+    ) -> NDArray[np.complex64]:
         _cval = _normalize_cval(cval, temp)
 
         return self.pre_transform(
             ndi.affine_transform(
                 temp, matrix=matrix, cval=_cval, order=order, prefilter=prefilter
-            )
+            )  # type: ignore
         )
 
     def _get_template_input(self) -> np.ndarray:
@@ -432,7 +433,7 @@ class RotationImplemented(BaseAlignmentModel):
             )
             cval = float(np.percentile(self._template, 1))
             if self.is_multi_templates:
-                all_templates: list[NDArray[np.float32]] = []
+                all_templates: list[NDArray[np.complex64]] = []
                 inputs_templates: list[NDArray[np.float32]] = [
                     ndi.spline_filter(
                         tmp * self.mask,
@@ -515,11 +516,27 @@ class TomographyInput(RotationImplemented):
         """Apply low-pass filter without IFFT."""
         return lowpass_filter_ft(image, cutoff=self._cutoff)
 
-    def mask_missing_wedge(
+    def masked_difference(
         self,
         image: NDArray[np.float32],
         quaternion: NDArray[np.float32],
     ) -> NDArray[np.float32]:
+        if self.is_multi_templates:
+            raise NotImplementedError(
+                "Masked difference is not implemented for multi-template."
+            )
+        if self._tilt_range is None:
+            return image - self._template
+        ft = self.template_input  # NOTE: ft.ndim == 3
+        ft[:] = self.mask_missing_wedge(ft, quaternion)
+        template_masked = np.real(ifftn(ft))
+        return image - template_masked
+
+    def mask_missing_wedge(
+        self,
+        image: NDArray[np.complex64],
+        quaternion: NDArray[np.float32],
+    ) -> NDArray[np.complex64]:
         """Apply missing wedge mask in the frequency domain."""
         return image * self._get_missing_wedge_mask(quaternion)
 

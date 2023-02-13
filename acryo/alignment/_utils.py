@@ -4,11 +4,12 @@ from functools import reduce, lru_cache
 from typing import Callable, Sequence
 import numpy as np
 from numpy.typing import NDArray
-from scipy.fft import rfftn, irfftn, fftn
+
 from scipy.signal import fftconvolve
 from scipy.spatial.transform import Rotation
 from scipy import ndimage as ndi
 
+from acryo._fft import rfftn, irfftn, fftn, ifftn
 from acryo._types import Ranges, RangeLike, pixel
 from acryo.molecules import from_euler_xyz_coords
 
@@ -103,7 +104,7 @@ def lowpass_filter_ft(
     img: NDArray[np.float32], cutoff: float, order: int = 2
 ) -> NDArray[np.complex64]:
     if cutoff >= 0.5 * np.sqrt(img.ndim) or cutoff <= 0:
-        return fftn(img)  # type: ignore
+        return fftn(img)
     weight = _get_ND_butterworth_filter(
         img.shape,
         cutoff,
@@ -111,7 +112,7 @@ def lowpass_filter_ft(
         high_pass=False,
         real=False,
     )
-    return weight * fftn(img)  # type: ignore
+    return weight * fftn(img)
 
 
 def lowpass_filter(
@@ -126,7 +127,7 @@ def lowpass_filter(
         high_pass=False,
         real=True,
     )
-    out: np.ndarray = irfftn(weight * rfftn(img))  # type: ignore
+    out: np.ndarray = irfftn(weight * rfftn(img))
     return out.real
 
 
@@ -159,15 +160,15 @@ def _get_ND_butterworth_filter(
 
 
 def subpixel_pcc(
-    f0: NDArray[np.number],
-    f1: NDArray[np.number],
+    f0: NDArray[np.complex64],
+    f1: NDArray[np.complex64],
     upsample_factor: int,
     max_shifts: tuple[float, ...] | NDArray[np.number] | None = None,
 ) -> tuple[NDArray[np.float32], float]:
     if isinstance(max_shifts, (int, float)):
         max_shifts = (max_shifts,) * f0.ndim
     product = f0 * f1.conj()
-    power = abs2(np.fft.ifftn(product))
+    power = abs2(ifftn(product))
     if max_shifts is not None:
         max_shifts = np.asarray(max_shifts)
         power = crop_by_max_shifts(power, max_shifts, max_shifts)
@@ -286,8 +287,8 @@ def _draw_ncc_landscape_no_crop(
 
 
 def subpixel_zncc(
-    img0: np.ndarray,
-    img1: np.ndarray,
+    img0: NDArray[np.float32],
+    img1: NDArray[np.float32],
     upsample_factor: int,
     max_shifts: tuple[float, ...] | None = None,
 ) -> tuple[np.ndarray, float]:

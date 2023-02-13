@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import numpy as np
-from scipy.fft import ifftn
 
 from ._base import TomographyInput
 from ._utils import subpixel_pcc, subpixel_zncc
+from acryo._fft import ifftn
 
 
 class PCCAlignment(TomographyInput):
@@ -39,8 +39,8 @@ class ZNCCAlignment(TomographyInput):
     ) -> tuple[np.ndarray, np.ndarray, float]:
         """Optimize."""
         shift, zncc = subpixel_zncc(
-            np.real(ifftn(subvolume)),  # type: ignore
-            np.real(ifftn(self.mask_missing_wedge(template, quaternion))),  # type: ignore
+            np.real(ifftn(subvolume)),
+            np.real(ifftn(self.mask_missing_wedge(template, quaternion))),
             upsample_factor=20,
             max_shifts=max_shifts,
         )

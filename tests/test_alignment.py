@@ -48,7 +48,8 @@ def test_fsc():
         tomo, mole, order=0, scale=scale, output_shape=temp.shape
     )
     loader.fsc()
-    loader.fsc(mask=temp > np.mean(temp))
+    loader.fsc(mask=(temp > np.mean(temp)).astype(np.float32))
+
 
 @pytest.mark.parametrize("shift", [[1, 2, 2], [-4, 3, 2]])
 @pytest.mark.parametrize("rot", [[15, 0, 15], [-15, 15, 15], [0, 0, -15]])
@@ -62,3 +63,11 @@ def test_fit(shift, rot):
     assert_allclose(result.shift, shift)
     coef = np.corrcoef(imgout.ravel(), temp.ravel())
     assert coef[0, 1] > 0.95  # check results are well aligned
+
+
+def test_pca_classify():
+    loader = SubtomogramLoader(
+        tomo, mole, order=0, scale=scale, output_shape=temp.shape
+    )
+    mask = temp > np.mean(temp)
+    loader.classify(mask.astype(np.float32), tilt_range=(-60, 60))

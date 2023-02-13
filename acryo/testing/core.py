@@ -1,22 +1,13 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 import numpy as np
 from scipy import ndimage as ndi
 
-if TYPE_CHECKING:
-    # To avoid mypy error caused by scipy.
-    # fmt: off
-    def fftn(arr: np.ndarray) -> np.ndarray: ...
-    def ifftn(arr: np.ndarray) -> np.ndarray: ...
-    # fmt: on
-else:
-    from scipy.fft import fftn, ifftn
-
-from ..molecules import Molecules
-from .._utils import compose_matrices
-from ..alignment._utils import normalize_rotations
-from .._types import nm, degree
+from acryo._fft import fftn, ifftn
+from acryo.molecules import Molecules
+from acryo._utils import compose_matrices
+from acryo.alignment._utils import normalize_rotations
+from acryo._types import nm, degree
 
 
 class TomogramGenerator:

@@ -9,8 +9,8 @@ from numpy.typing import NDArray
 from dask import array as da
 from dask.delayed import delayed
 from scipy import ndimage as ndi
-from scipy.fft import fftn
 from scipy.spatial.transform import Rotation
+from acryo._fft import fftn
 
 if TYPE_CHECKING:
     from acryo._types import degree
@@ -119,16 +119,16 @@ def fourier_shell_correlation(
 
     out = np.empty(nlabels, dtype=np.float32)
 
-    def radial_sum(arr):
+    def radial_sum(arr: NDArray[np.float32]) -> NDArray[np.float32]:
         arr = np.asarray(arr)
         return ndi.sum_labels(arr, labels=labels, index=np.arange(0, nlabels))
 
-    f0: np.ndarray = np.fft.fftshift(fftn(img0))  # type: ignore
-    f1: np.ndarray = np.fft.fftshift(fftn(img1))  # type: ignore
+    f0 = np.fft.fftshift(fftn(img0))
+    f1 = np.fft.fftshift(fftn(img1))
 
-    cov = f0.real * f1.real + f0.imag * f1.imag  # type: ignore
-    pw0 = f0.real**2 + f0.imag**2  # type: ignore
-    pw1 = f1.real**2 + f1.imag**2  # type: ignore
+    cov = f0.real * f1.real + f0.imag * f1.imag
+    pw0 = f0.real**2 + f0.imag**2
+    pw1 = f1.real**2 + f1.imag**2
 
     out = radial_sum(cov) / np.sqrt(radial_sum(pw0) * radial_sum(pw1))
     freq = (np.arange(len(out)) + 0.5) * dfreq
