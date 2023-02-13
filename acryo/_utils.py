@@ -246,9 +246,6 @@ def delayed_affine(
     return da.from_delayed(out, shape=input.shape, dtype=input.dtype)  # type: ignore
 
 
-_R90 = Rotation.from_rotvec([0, -np.pi / 2, 0])
-
-
 def missing_wedge_mask(
     rotator: Rotation,
     tilt_range: tuple[degree, degree],
@@ -276,11 +273,10 @@ def missing_wedge_mask(
     """
     normal0, normal1 = _get_unrotated_normals(tilt_range)
     shape_vector = np.array(shape, dtype=np.float32)
-    normal0 = _R90.apply(rotator.apply(normal0 * shape_vector))
-    normal1 = _R90.apply(rotator.apply(normal1 * shape_vector))
-    zz, yy, xx = _get_indices(shape)
-
-    vectors = np.stack([zz, yy, xx], axis=-1)
+    rotator_inv = rotator.inv()
+    normal0 = rotator_inv.apply(normal0 * shape_vector)
+    normal1 = rotator_inv.apply(normal1 * shape_vector)
+    vectors = _get_indices(shape)
     dot0 = vectors.dot(normal0)
     dot1 = vectors.dot(normal1)
     missing = dot0 * dot1 < 0
@@ -292,8 +288,8 @@ def _get_unrotated_normals(
     tilt_range: tuple[degree, degree]
 ) -> tuple[np.ndarray, np.ndarray]:
     radmin, radmax = np.deg2rad(tilt_range)
-    ang0 = np.pi / 2 - radmin
-    ang1 = np.pi / 2 - radmax
+    ang0 = np.pi - radmin
+    ang1 = np.pi - radmax
     return (
         np.array([np.cos(ang0), 0, np.sin(ang0)]),
         np.array([np.cos(ang1), 0, np.sin(ang1)]),
@@ -305,7 +301,7 @@ def _get_indices(shape: tuple[int, ...]):
     inds = np.indices(shape, dtype=np.float32)
     for ind, s in zip(inds, shape):
         ind -= s / 2 - 0.5
-    return inds
+    return np.fft.fftshift(np.stack(list(inds), axis=-1), axes=(0, 1, 2))
 
 
 def random_splitter(

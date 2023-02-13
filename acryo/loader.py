@@ -824,6 +824,11 @@ class SubtomogramLoader:
         else:
             shape = self.output_shape
 
+        if mask is not None and mask.shape != shape:
+            raise ValueError(
+                f"Mask shape {mask.shape} must be the same as the output shape {shape}."
+            )
+
         if template is None:
             template = self.average(shape)
 
