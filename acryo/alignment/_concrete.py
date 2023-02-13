@@ -18,10 +18,9 @@ class PCCAlignment(TomographyInput):
         quaternion: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray, float]:
         """Optimize."""
-        missing_wedge = self._get_missing_wedge_mask(quaternion)
         shift, pcc = subpixel_pcc(
             subvolume,
-            template * missing_wedge,
+            self.mask_missing_wedge(template, quaternion),
             upsample_factor=20,
             max_shifts=max_shifts,
         )
@@ -39,10 +38,9 @@ class ZNCCAlignment(TomographyInput):
         quaternion: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray, float]:
         """Optimize."""
-        missing_wedge = self._get_missing_wedge_mask(quaternion)
         shift, zncc = subpixel_zncc(
             np.real(ifftn(subvolume)),  # type: ignore
-            np.real(ifftn(template * missing_wedge)),  # type: ignore
+            np.real(ifftn(self.mask_missing_wedge(template, quaternion))),  # type: ignore
             upsample_factor=20,
             max_shifts=max_shifts,
         )

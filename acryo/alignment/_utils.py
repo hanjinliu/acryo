@@ -9,8 +9,8 @@ from scipy.signal import fftconvolve
 from scipy.spatial.transform import Rotation
 from scipy import ndimage as ndi
 
-from .._types import Ranges, RangeLike, pixel
-from ..molecules import from_euler_xyz_coords
+from acryo._types import Ranges, RangeLike, pixel
+from acryo.molecules import from_euler_xyz_coords
 
 
 def _normalize_a_range(rng: RangeLike) -> RangeLike:
@@ -99,7 +99,9 @@ def euler_to_quat(degrees):
 
 # lowpass filter
 # Modified from skimage.filters._fft_based
-def lowpass_filter_ft(img: np.ndarray, cutoff: float, order: int = 2) -> np.ndarray:
+def lowpass_filter_ft(
+    img: NDArray[np.float32], cutoff: float, order: int = 2
+) -> NDArray[np.complex64]:
     if cutoff >= 0.5 * np.sqrt(img.ndim) or cutoff <= 0:
         return fftn(img)  # type: ignore
     weight = _get_ND_butterworth_filter(
@@ -112,7 +114,9 @@ def lowpass_filter_ft(img: np.ndarray, cutoff: float, order: int = 2) -> np.ndar
     return weight * fftn(img)  # type: ignore
 
 
-def lowpass_filter(img: np.ndarray, cutoff: float, order: int = 2) -> np.ndarray:
+def lowpass_filter(
+    img: NDArray[np.float32], cutoff: float, order: int = 2
+) -> NDArray[np.float32]:
     if cutoff >= 0.5 * np.sqrt(img.ndim) or cutoff <= 0:
         return img
     weight = _get_ND_butterworth_filter(
