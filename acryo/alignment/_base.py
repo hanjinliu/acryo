@@ -541,12 +541,11 @@ class TomographyInput(RotationImplemented):
             raise NotImplementedError(
                 "Masked difference is not implemented for multi-template."
             )
-        if self._tilt_range is None:
-            return image - self._template
         ft = self.template_input  # NOTE: ft.ndim == 3
         ft[:] = self.mask_missing_wedge(ft, quaternion)
         template_masked = np.real(ifftn(ft))
-        return image - template_masked
+        img_input = np.real(ifftn(self.pre_transform(image * self.mask)))
+        return img_input - template_masked
 
     def mask_missing_wedge(
         self,

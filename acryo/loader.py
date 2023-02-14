@@ -778,6 +778,7 @@ class SubtomogramLoader:
         template: NDArray[np.float32] | None = None,
         mask: NDArray[np.float32] | None = None,
         *,
+        cutoff: float = 0.5,
         n_components: int = 2,
         n_clusters: int = 2,
         tilt_range: tuple[float, float] | None = None,
@@ -832,7 +833,7 @@ class SubtomogramLoader:
         if template is None:
             template = self.average(shape)
 
-        model = ZNCCAlignment(template, mask, tilt_range=tilt_range)
+        model = ZNCCAlignment(template, mask, cutoff=cutoff, tilt_range=tilt_range)
         tasks: list[da.Array] = []
         for task in self.iter_mapping_tasks(
             model.masked_difference,

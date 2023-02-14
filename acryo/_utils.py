@@ -250,7 +250,7 @@ def missing_wedge_mask(
     rotator: Rotation,
     tilt_range: tuple[degree, degree],
     shape: tuple[int, int, int],
-) -> np.ndarray:
+) -> NDArray[np.float32]:
     """
     Create a binary mask that covers tomographical missing wedge.
 
@@ -279,28 +279,29 @@ def missing_wedge_mask(
     vectors = _get_indices(shape)
     dot0 = vectors.dot(normal0)
     dot1 = vectors.dot(normal1)
-    missing = dot0 * dot1 < 0
+    missing = dot0 * dot1 <= 0
     return missing
 
 
 @lru_cache(maxsize=8)
 def _get_unrotated_normals(
     tilt_range: tuple[degree, degree]
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
     radmin, radmax = np.deg2rad(tilt_range)
     ang0 = np.pi - radmin
     ang1 = np.pi - radmax
     return (
-        np.array([np.cos(ang0), 0, np.sin(ang0)]),
-        np.array([np.cos(ang1), 0, np.sin(ang1)]),
+        np.array([np.cos(ang0), 0, np.sin(ang0)], dtype=np.float32),
+        np.array([np.cos(ang1), 0, np.sin(ang1)], dtype=np.float32),
     )
 
 
 @lru_cache(maxsize=32)
-def _get_indices(shape: tuple[int, ...]):
+def _get_indices(shape: tuple[int, ...]) -> NDArray[np.float32]:
     inds = np.indices(shape, dtype=np.float32)
     for ind, s in zip(inds, shape):
-        ind -= s / 2 - 0.5
+        # Note that the shifts in indices must resemble the shifts in fftshift.
+        ind -= np.ceil(s / 2)
     return np.fft.fftshift(np.stack(list(inds), axis=-1), axes=(0, 1, 2))
 
 
