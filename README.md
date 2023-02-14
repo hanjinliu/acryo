@@ -15,7 +15,10 @@ The purpose of this library is to make data analysis on cryo-EM/ET more availabl
 3. Concise representation of subtomograms, using `numpy.ndarray` for positions and
    `scipy.spatial.transform.Rotation` for orientation.
 4. Tomogram simulation using `TomogramSimulator`.
+5. Masked PCA clustering.
 
-### Contribution
+### Install
 
-Contribution is very welcome!
+```bash
+pip install acryo -U
+```
