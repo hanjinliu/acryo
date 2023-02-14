@@ -58,7 +58,7 @@ def test_fit(shift, rot):
     model = ZNCCAlignment(temp, rotations=rotations)
     temp_transformed = temp * 4 + np.mean(temp)  # linear transformation to input image
     img = ndi.shift(rotate(temp_transformed, rot, cval=np.min), shift=shift)
-    imgout, result = model.fit(img, (5, 5, 5))
+    imgout, result = model.fit(img, (5, 5, 5))  # type: ignore
     assert_allclose(result.quat, euler_to_quat(rot))
     assert_allclose(result.shift, shift)
     coef = np.corrcoef(imgout.ravel(), temp.ravel())

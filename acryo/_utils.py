@@ -280,7 +280,7 @@ def missing_wedge_mask(
     dot0 = vectors.dot(normal0)
     dot1 = vectors.dot(normal1)
     missing = dot0 * dot1 < 0
-    return np.fft.ifftshift(missing)
+    return missing
 
 
 @lru_cache(maxsize=8)

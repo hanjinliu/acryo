@@ -158,7 +158,7 @@ class BaseAlignmentModel(ABC):
 
         Returns
         -------
-        ip.ImgArray
+        array
             Template image(s). Its axes varies depending on the input.
 
             - single template image ... 3D
@@ -521,6 +521,22 @@ class TomographyInput(RotationImplemented):
         image: NDArray[np.float32],
         quaternion: NDArray[np.float32],
     ) -> NDArray[np.float32]:
+        """
+        Difference between an image and the template, considering the missing wedge.
+
+        Parameters
+        ----------
+        image : 3D array
+            Input image, usually a subvolume from a tomogram.
+        quaternion : (4,) array
+            Rotation of the image, usually the quaternion array of a Molecules
+            object.
+
+        Returns
+        -------
+        3D array
+            Difference map.
+        """
         if self.is_multi_templates:
             raise NotImplementedError(
                 "Masked difference is not implemented for multi-template."
