@@ -113,13 +113,19 @@ def test_internal_transformation():
     # internal translation
     mol0 = mol.translate_internal([2, 0, 0])
     assert_allclose(
-        mol0.pos, mol.pos + np.array([[2.0, 0.0, 0.0]]), rtol=1e-8, atol=1e-8
+        mol0.pos,
+        mol.pos + np.array([[2.0, 0.0, 0.0]], dtype=np.float32),
+        rtol=1e-8,
+        atol=1e-8,
     )
     assert_allclose(mol0.x, mol.x, rtol=1e-8, atol=1e-8)
     assert_allclose(mol0.y, mol.y, rtol=1e-8, atol=1e-8)
     mol1 = mol.translate_internal([1, 1, 1])
     assert_allclose(
-        mol1.pos, mol.pos + np.array([[1.0, Sq2, 0.0]]), rtol=1e-8, atol=1e-8
+        mol1.pos,
+        mol.pos + np.array([[1.0, Sq2, 0.0]], dtype=np.float32),
+        rtol=1e-8,
+        atol=1e-8,
     )
     assert_allclose(mol1.x, mol.x, rtol=1e-8, atol=1e-8)
     assert_allclose(mol1.y, mol.y, rtol=1e-8, atol=1e-8)
@@ -148,13 +154,12 @@ def test_features():
     assert mol.features is not mol2.features
     assert_allclose(mol3.features, mol.features[3:17])
 
-@pytest.mark.parametrize(
-    "sl",
-    [2, slice(2, 5), [2, 4, 6], np.array([2, 4, 6])]
-)
+
+@pytest.mark.parametrize("sl", [2, slice(2, 5), [2, 4, 6], np.array([2, 4, 6])])
 def test_subset(sl):
     mol = Molecules(np.zeros((24, 3)), Rotation.random(24))
     mol.subset(sl)
+
 
 def test_random_shift():
     mol = Molecules(np.random.random((24, 3)) * 10, Rotation.random(24))

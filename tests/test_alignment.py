@@ -48,7 +48,8 @@ def test_fsc():
         tomo, mole, order=0, scale=scale, output_shape=temp.shape
     )
     loader.fsc()
-    loader.fsc(mask=temp > np.mean(temp))
+    loader.fsc(mask=(temp > np.mean(temp)).astype(np.float32))
+
 
 @pytest.mark.parametrize("shift", [[1, 2, 2], [-4, 3, 2]])
 @pytest.mark.parametrize("rot", [[15, 0, 15], [-15, 15, 15], [0, 0, -15]])
@@ -57,8 +58,16 @@ def test_fit(shift, rot):
     model = ZNCCAlignment(temp, rotations=rotations)
     temp_transformed = temp * 4 + np.mean(temp)  # linear transformation to input image
     img = ndi.shift(rotate(temp_transformed, rot, cval=np.min), shift=shift)
-    imgout, result = model.fit(img, (5, 5, 5))
+    imgout, result = model.fit(img, (5, 5, 5))  # type: ignore
     assert_allclose(result.quat, euler_to_quat(rot))
     assert_allclose(result.shift, shift)
     coef = np.corrcoef(imgout.ravel(), temp.ravel())
     assert coef[0, 1] > 0.95  # check results are well aligned
+
+
+def test_pca_classify():
+    loader = SubtomogramLoader(
+        tomo, mole, order=0, scale=scale, output_shape=temp.shape
+    )
+    mask = temp > np.mean(temp)
+    loader.classify(mask.astype(np.float32), tilt_range=(-60, 60))

@@ -55,7 +55,7 @@ class PcaClassifier:
         return self._kmeans
 
     @property
-    def labels(self) -> NDArray[np.int32]:
+    def labels(self) -> NDArray[np.int32] | None:
         return self._labels
 
     def run(self) -> Self:

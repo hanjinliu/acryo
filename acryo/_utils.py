@@ -9,8 +9,8 @@ from numpy.typing import NDArray
 from dask import array as da
 from dask.delayed import delayed
 from scipy import ndimage as ndi
-from scipy.fft import fftn
 from scipy.spatial.transform import Rotation
+from acryo._fft import fftn
 
 if TYPE_CHECKING:
     from acryo._types import degree
@@ -119,16 +119,16 @@ def fourier_shell_correlation(
 
     out = np.empty(nlabels, dtype=np.float32)
 
-    def radial_sum(arr):
+    def radial_sum(arr: NDArray[np.float32]) -> NDArray[np.float32]:
         arr = np.asarray(arr)
         return ndi.sum_labels(arr, labels=labels, index=np.arange(0, nlabels))
 
-    f0: np.ndarray = np.fft.fftshift(fftn(img0))  # type: ignore
-    f1: np.ndarray = np.fft.fftshift(fftn(img1))  # type: ignore
+    f0 = np.fft.fftshift(fftn(img0))
+    f1 = np.fft.fftshift(fftn(img1))
 
-    cov = f0.real * f1.real + f0.imag * f1.imag  # type: ignore
-    pw0 = f0.real**2 + f0.imag**2  # type: ignore
-    pw1 = f1.real**2 + f1.imag**2  # type: ignore
+    cov = f0.real * f1.real + f0.imag * f1.imag
+    pw0 = f0.real**2 + f0.imag**2
+    pw1 = f1.real**2 + f1.imag**2
 
     out = radial_sum(cov) / np.sqrt(radial_sum(pw0) * radial_sum(pw1))
     freq = (np.arange(len(out)) + 0.5) * dfreq
@@ -246,14 +246,11 @@ def delayed_affine(
     return da.from_delayed(out, shape=input.shape, dtype=input.dtype)  # type: ignore
 
 
-_R90 = Rotation.from_rotvec([0, -np.pi / 2, 0])
-
-
 def missing_wedge_mask(
     rotator: Rotation,
     tilt_range: tuple[degree, degree],
     shape: tuple[int, int, int],
-) -> np.ndarray:
+) -> NDArray[np.float32]:
     """
     Create a binary mask that covers tomographical missing wedge.
 
@@ -276,36 +273,36 @@ def missing_wedge_mask(
     """
     normal0, normal1 = _get_unrotated_normals(tilt_range)
     shape_vector = np.array(shape, dtype=np.float32)
-    normal0 = _R90.apply(rotator.apply(normal0 * shape_vector))
-    normal1 = _R90.apply(rotator.apply(normal1 * shape_vector))
-    zz, yy, xx = _get_indices(shape)
-
-    vectors = np.stack([zz, yy, xx], axis=-1)
+    rotator_inv = rotator.inv()
+    normal0 = rotator_inv.apply(normal0 * shape_vector)
+    normal1 = rotator_inv.apply(normal1 * shape_vector)
+    vectors = _get_indices(shape)
     dot0 = vectors.dot(normal0)
     dot1 = vectors.dot(normal1)
-    missing = dot0 * dot1 < 0
-    return np.fft.ifftshift(missing)
+    missing = dot0 * dot1 <= 0
+    return missing
 
 
 @lru_cache(maxsize=8)
 def _get_unrotated_normals(
     tilt_range: tuple[degree, degree]
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
     radmin, radmax = np.deg2rad(tilt_range)
-    ang0 = np.pi / 2 - radmin
-    ang1 = np.pi / 2 - radmax
+    ang0 = np.pi - radmin
+    ang1 = np.pi - radmax
     return (
-        np.array([np.cos(ang0), 0, np.sin(ang0)]),
-        np.array([np.cos(ang1), 0, np.sin(ang1)]),
+        np.array([np.cos(ang0), 0, np.sin(ang0)], dtype=np.float32),
+        np.array([np.cos(ang1), 0, np.sin(ang1)], dtype=np.float32),
     )
 
 
 @lru_cache(maxsize=32)
-def _get_indices(shape: tuple[int, ...]):
+def _get_indices(shape: tuple[int, ...]) -> NDArray[np.float32]:
     inds = np.indices(shape, dtype=np.float32)
     for ind, s in zip(inds, shape):
-        ind -= s / 2 - 0.5
-    return inds
+        # Note that the shifts in indices must resemble the shifts in fftshift.
+        ind -= np.ceil(s / 2)
+    return np.fft.fftshift(np.stack(list(inds), axis=-1), axes=(0, 1, 2))
 
 
 def random_splitter(

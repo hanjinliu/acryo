@@ -6,6 +6,7 @@ from typing import (
     Callable,
     TYPE_CHECKING,
     Iterable,
+    Iterator,
     NamedTuple,
     TypeVar,
     Any,
@@ -300,6 +301,43 @@ class SubtomogramLoader:
         out = da.stack(arrays, axis=0)
         return out
 
+    def iter_mapping_tasks(
+        self,
+        func: Callable,
+        *const_args,
+        output_shape: pixel | tuple[pixel, ...] | None = None,
+        var_kwarg: dict[str, Iterable[Any]] | None = None,
+        **const_kwargs,
+    ) -> Iterator[Delayed]:
+        """
+        Iterate over delayed mapping tasks using subtomograms.
+
+        Parameters
+        ----------
+        func : Callable
+            Mapping function. The first argument of the function is the subtomogram.
+        output_shape : int or tuple of int, optional
+            Shape of subtomograms.
+        var_kwarg : dict, optional
+            Variable keyword arguments. The length of each argument must be the same
+            as the number of subtomograms.
+
+        Yields
+        ------
+        da.delayed.Delayed object
+            Delayed tasks that are ready for ``da.compute``.
+        """
+        dask_array = self.construct_loading_tasks(output_shape=output_shape)
+        delayed_f = delayed(func)
+        if var_kwarg is None:
+            it = (delayed_f(ar, *const_args, **const_kwargs) for ar in dask_array)
+        else:
+            it = (
+                delayed_f(ar, *const_args, **const_kwargs, **kw)
+                for ar, kw in zip(dask_array, _dict_iterrows(var_kwarg))
+            )
+        return it
+
     def construct_mapping_tasks(
         self,
         func: Callable,
@@ -309,7 +347,7 @@ class SubtomogramLoader:
         **const_kwargs,
     ) -> list[Delayed]:
         """
-        Construct a delayed mapping tasks using subtomograms.
+        Construct delayed mapping tasks using subtomograms.
 
         Parameters
         ----------
@@ -326,16 +364,15 @@ class SubtomogramLoader:
         list of da.delayed.Delayed object
             List of delayed tasks that are ready for ``da.compute``.
         """
-        dask_array = self.construct_loading_tasks(output_shape=output_shape)
-        delayed_f = delayed(func)
-        if var_kwarg is None:
-            tasks = [delayed_f(ar, *const_args, **const_kwargs) for ar in dask_array]
-        else:
-            tasks = [
-                delayed_f(ar, *const_args, **const_kwargs, **kw)
-                for ar, kw in zip(dask_array, _dict_iterrows(var_kwarg))
-            ]
-        return tasks
+        return list(
+            self.iter_mapping_tasks(
+                func,
+                *const_args,
+                output_shape=output_shape,
+                var_kwarg=var_kwarg,
+                **const_kwargs,
+            )
+        )
 
     def create_cache(
         self,
@@ -634,7 +671,7 @@ class SubtomogramLoader:
             model.align,
             max_shifts=_max_shifts_px,
             output_shape=templates[0].shape,
-            var_kwargs=dict(quaternion=self.molecules.quaternion()),
+            var_kwarg=dict(quaternion=self.molecules.quaternion()),
         )
         all_results = da.compute(tasks)[0]
 
@@ -691,7 +728,7 @@ class SubtomogramLoader:
         Parameters
         ----------
         mask : np.ndarray, optional
-            Mask image, by default None
+            Mask image
         seed : random seed, default is 0
             Random seed used to split subtomograms.
         n_set : int, default is 1
@@ -738,17 +775,77 @@ class SubtomogramLoader:
 
     def classify(
         self,
-        mask: NDArray[np.float32],
+        template: NDArray[np.float32] | None = None,
+        mask: NDArray[np.float32] | None = None,
         *,
+        cutoff: float = 0.5,
         n_components: int = 2,
         n_clusters: int = 2,
+        tilt_range: tuple[float, float] | None = None,
         seed: int = 0,
         label_name: str = "labels",
     ) -> ClassificationResult:
+        """
+        Classify 3D densities by PCA of wedge-masked differences.
+
+        Parameters
+        ----------
+        template : 3D array, optional
+            Template image. If not given, average image will be used.
+        mask : 3D array, optional
+            Soft mask of the same shape as the template or the output_shape parameter.
+        n_components : int, default is 2
+            Number of PCA components.
+        n_clusters : int, default is 2
+            Number of classes.
+        tilt_range : (float, float), optional
+            Tilt range in degree.
+        seed : int, default is 0
+            Random seed used for K-means clustering.
+        label_name : str, default is "labels"
+            Column name used for the output classes.
+
+        Returns
+        -------
+        ClassificationResult
+            Tuple of SubtomogramLoader and PCA classifier object.
+
+        References
+        ----------
+        - Heumann, J. M., Hoenger, A., & Mastronarde, D. N. (2011). Clustering and variance
+          maps for cryo-electron tomography using wedge-masked differences. Journal of
+          structural biology, 175(3), 288-299.
+        """
         from acryo.classification import PcaClassifier
 
+        if isinstance(self.output_shape, Unset):
+            if mask is None:
+                raise ValueError("Cannot determine output shape.")
+            shape = mask.shape
+        else:
+            shape = self.output_shape
+
+        if mask is not None and mask.shape != shape:
+            raise ValueError(
+                f"Mask shape {mask.shape} must be the same as the output shape {shape}."
+            )
+
+        if template is None:
+            template = self.average(shape)
+
+        model = ZNCCAlignment(template, mask, cutoff=cutoff, tilt_range=tilt_range)
+        tasks: list[da.Array] = []
+        for task in self.iter_mapping_tasks(
+            model.masked_difference,
+            output_shape=shape,
+            var_kwarg=dict(quaternion=self.molecules.quaternion()),
+        ):
+            tasks.append(da.from_delayed(task, shape=shape, dtype=np.float32))
+
+        stack = da.stack(tasks, axis=0)
+
         clf = PcaClassifier(
-            self.construct_dask(),
+            stack,
             mask,
             n_components=n_components,
             n_clusters=n_clusters,
