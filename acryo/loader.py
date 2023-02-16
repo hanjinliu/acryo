@@ -22,6 +22,7 @@ from acryo.alignment import (
     BaseAlignmentModel,
     ZNCCAlignment,
     RotationImplemented,
+    AlignmentFactory,
 )
 from acryo._types import nm, pixel
 from acryo._reader import imread
@@ -499,7 +500,7 @@ class SubtomogramLoader:
         *,
         mask: NDArray[np.float32] | None = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
-        alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
+        alignment_model: type[BaseAlignmentModel] | AlignmentFactory = ZNCCAlignment,
         **align_kwargs,
     ) -> Self:
         """

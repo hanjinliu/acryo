@@ -34,6 +34,7 @@ Contents
 
    ./main/molecules
    ./main/loader
+   ./main/alignment
 
 
 Indices and tables

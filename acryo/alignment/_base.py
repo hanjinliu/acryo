@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Iterable, NamedTuple, Sequence, TYPE_CHECKING
+from typing import Callable, Iterable, NamedTuple, Sequence, TYPE_CHECKING, Union
+from typing_extensions import Self
+import inspect
+
 import numpy as np
+from numpy.typing import NDArray
 from scipy import ndimage as ndi
 from scipy.spatial.transform import Rotation
 from dask import array as da, delayed
@@ -15,7 +19,12 @@ from acryo._fft import ifftn
 
 if TYPE_CHECKING:
     from dask.delayed import Delayed
-    from numpy.typing import NDArray
+
+
+Templates = Union[NDArray[np.float32], Sequence[NDArray[np.float32]]]
+AlignmentFactory = Callable[
+    [Templates, Union[NDArray[np.float32], None]], "BaseAlignmentModel"
+]
 
 
 class AlignmentResult(NamedTuple):
@@ -58,7 +67,7 @@ class BaseAlignmentModel(ABC):
 
     def __init__(
         self,
-        template: NDArray[np.float32] | Sequence[np.ndarray],
+        template: Templates,
         mask: NDArray[np.float32] | None = None,
     ):
         if isinstance(template, np.ndarray):
@@ -105,6 +114,15 @@ class BaseAlignmentModel(ABC):
     def input_shape(self) -> tuple[int, ...]:
         """Return the array shape of input images and template."""
         return self._template.shape[-self._ndim :]
+
+    @classmethod
+    def with_params(
+        cls,
+        **params,
+    ) -> Callable[[Templates, NDArray[np.float32] | None], Self]:
+        """Create a BaseAlignmentModel instance with parameters."""
+        bound = inspect.signature(cls).bind_partial(**params)
+        return lambda template, mask: cls(template, mask, *bound.args, **bound.kwargs)
 
     @abstractmethod
     def optimize(
@@ -299,19 +317,28 @@ class RotationImplemented(BaseAlignmentModel):
 
     def __init__(
         self,
-        template: np.ndarray | Sequence[np.ndarray],
-        mask: np.ndarray | None = None,
+        template: Templates,
+        mask: NDArray[np.float32] | None = None,
         rotations: Ranges | None = None,
     ):
         self.quaternions = normalize_rotations(rotations)
         self._n_rotations = self.quaternions.shape[0]
         super().__init__(template=template, mask=mask)
 
+    @classmethod
+    def with_params(
+        cls,
+        *,
+        rotations: Ranges | None = None,
+    ) -> Callable[[Templates, NDArray[np.float32] | None], Self]:
+        """Create an alignment model instance with parameters."""
+        return BaseAlignmentModel.with_params(rotations=rotations)
+
     def align(
         self,
         img: NDArray[np.float32],
         max_shifts: tuple[subpixel, subpixel, subpixel],
-        quaternion: np.ndarray | None,
+        quaternion: NDArray[np.float32] | None,
     ) -> AlignmentResult:
         """
         Align an image using current alignment parameters.
@@ -498,8 +525,8 @@ class TomographyInput(RotationImplemented):
 
     def __init__(
         self,
-        template: np.ndarray | Sequence[np.ndarray],
-        mask: np.ndarray | None = None,
+        template: Templates,
+        mask: NDArray[np.float32] | None = None,
         rotations: Ranges | None = None,
         cutoff: float | None = None,
         tilt_range: tuple[degree, degree] | None = None,
@@ -511,6 +538,21 @@ class TomographyInput(RotationImplemented):
                 raise ValueError("Tilt range must be in form of (min, max).")
         self._tilt_range = tilt_range
         super().__init__(template, mask, rotations)
+
+    @classmethod
+    def with_params(
+        cls,
+        *,
+        rotations: Ranges | None = None,
+        cutoff: float | None = None,
+        tilt_range: tuple[degree, degree] | None = None,
+    ) -> Callable[[Templates, NDArray[np.float32] | None], Self]:
+        """Create an alignment model instance with parameters."""
+        return BaseAlignmentModel.with_params(
+            rotations=rotations,
+            cutoff=cutoff,
+            tilt_range=tilt_range,
+        )
 
     def pre_transform(self, image: NDArray[np.float32]) -> NDArray[np.complex64]:
         """Apply low-pass filter without IFFT."""

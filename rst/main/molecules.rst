@@ -4,9 +4,13 @@ Molecules
 
 A :class:`Molecules` is an array of 3D molecules with three components.
 
-1. Positions of the molecules (:class:`numpy.ndarray`)
-2. Rotation angles of the molecules (:class:`scipy.spatial.transform.Rotation`)
-3. Scalar features of the molecules (:class:`polars.DataFrame`)
+.. code-block:: python
+
+    def __init__(self, pos, rot=None, features=None): ...
+
+1. ``pos`` (`numpy.ndarray`) ... positions of the molecules.
+2. ``rot`` (`scipy.spatial.transform.Rotation`) ... rotation angles of the molecules.
+3. ``features`` (`polars.DataFrame`) ... scalar features of the molecules.
 
 .. figure:: ../images/molecule.png
     :alt: coordinate system
@@ -222,3 +226,27 @@ object into sub-groups.
     #  [2. 2. 2.]]
     # label = B
     # [[1. 1. 1.]]
+
+Save Molecules
+==============
+
+A :class:`Molecules` object can be saved to a file using :meth:`Molecules.to_csv` method.
+This method merges the molecule positions, rotation and the features into a single table
+data like below. In :mod:`acryo`, rotation vector is used to save the rotations because
+it is the most compact form and is not as coordinate sensitive as Euler angle.
+
+.. code-block:: python
+
+    mole = Molecules.from_rotvec(
+        [[1, 2, 0], [3, 4, 1], [5, 6, 2]],
+        [[0.5, 0.1, 0.7], [0.6, 0.2, 0.4], [0.7, 0.3, 0.1]]
+    )
+    mole.to_csv("path/to/molecules.csv")
+
+===  ===  ===  ====  ====  ====
+  z    y    x  zvec  yvec  xvec
+===  ===  ===  ====  ====  ====
+1.0  2.0  0.0   0.5   0.1   0.7
+3.0  4.0  1.0   0.6   0.2   0.4
+5.0  6.0  2.0   0.7   0.3   0.1
+===  ===  ===  ====  ====  ====

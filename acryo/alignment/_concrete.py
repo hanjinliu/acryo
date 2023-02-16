@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+from numpy.typing import NDArray
 
 from ._base import TomographyInput
 from ._utils import subpixel_pcc, subpixel_zncc
@@ -12,11 +13,11 @@ class PCCAlignment(TomographyInput):
 
     def optimize(
         self,
-        subvolume: np.ndarray,
-        template: np.ndarray,
+        subvolume: NDArray[np.complex64],
+        template: NDArray[np.complex64],
         max_shifts: tuple[float, float, float],
-        quaternion: np.ndarray,
-    ) -> tuple[np.ndarray, np.ndarray, float]:
+        quaternion: NDArray[np.float32],
+    ) -> tuple[NDArray[np.float32], NDArray[np.float32], float]:
         """Optimize."""
         shift, pcc = subpixel_pcc(
             subvolume,
@@ -32,11 +33,11 @@ class ZNCCAlignment(TomographyInput):
 
     def optimize(
         self,
-        subvolume: np.ndarray,
-        template: np.ndarray,
+        subvolume: NDArray[np.complex64],
+        template: NDArray[np.complex64],
         max_shifts: tuple[float, float, float],
-        quaternion: np.ndarray,
-    ) -> tuple[np.ndarray, np.ndarray, float]:
+        quaternion: NDArray[np.float32],
+    ) -> tuple[NDArray[np.float32], NDArray[np.float32], float]:
         """Optimize."""
         shift, zncc = subpixel_zncc(
             np.real(ifftn(subvolume)),
