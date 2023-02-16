@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from dask.delayed import Delayed
     from numpy.typing import NDArray
     from acryo.classification import PcaClassifier
+    from acryo.alignment._base import MaskType
 
 
 _R = TypeVar("_R")
@@ -498,7 +499,7 @@ class SubtomogramLoader:
         self,
         template: NDArray[np.float32],
         *,
-        mask: NDArray[np.float32] | None = None,
+        mask: MaskType = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
         alignment_model: type[BaseAlignmentModel] | AlignmentFactory = ZNCCAlignment,
         **align_kwargs,
@@ -514,7 +515,7 @@ class SubtomogramLoader:
         ----------
         template : np.ndarray, optional
             Template image.
-        mask : np.ndarray, optional
+        mask : np.ndarray or callable of np.ndarray to np.ndarray optional
             Mask image. Must in the same shae as the template.
         max_shifts : int or tuple of int, default is (1., 1., 1.)
             Maximum shift between subtomograms and template.
@@ -563,9 +564,7 @@ class SubtomogramLoader:
     def align_no_template(
         self,
         *,
-        mask: NDArray[np.float32]
-        | Callable[[NDArray[np.float32]], NDArray[np.float32]]
-        | None = None,
+        mask: MaskType = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
         output_shape: pixel | tuple[pixel] | None = None,
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
@@ -603,16 +602,9 @@ class SubtomogramLoader:
 
         template: NDArray[np.float32] = da.compute(da.mean(all_subvols, axis=0))[0]
 
-        # get mask image
-        if isinstance(mask, np.ndarray):
-            _mask = mask
-        elif callable(mask):
-            _mask = mask(template)
-        else:
-            _mask = mask
         return self.align(
             template,
-            mask=_mask,
+            mask=mask,
             max_shifts=max_shifts,
             alignment_model=alignment_model,
             **align_kwargs,

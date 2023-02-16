@@ -74,9 +74,11 @@ An alignment model defines the protocols for pre-transformation and alignment sc
             tmp0[[template image A]]
             tmp1[[template image B]]
             tmp2[[template image C]]
-            tmp--rotation-->tmp0
-            tmp--rotation-->tmp1
-            tmp--rotation-->tmp2
+            rot{image rotation}
+            tmp-->rot
+            rot-->tmp0
+            rot-->tmp1
+            rot-->tmp2
             tmp0_t[[transformed\ntemplate A]]
             tmp1_t[[transformed\ntemplate B]]
             tmp2_t[[transformed\ntemplate C]]
