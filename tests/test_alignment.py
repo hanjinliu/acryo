@@ -95,10 +95,12 @@ def test_multi_align():
     sim.add_molecules(Molecules([[10, 15, 35]]), img1)
 
     tomo = sim.simulate((20, 50, 50))
-    mole = Molecules([[10, 15, 15], [10, 15, 35], [10, 35, 15]]).translate_random(1)
+    mole = Molecules([[10, 15, 15], [10, 15, 35], [10, 35, 15]]).translate(
+        [[0, 1, 0], [1, 1, 0], [0, 1, -1]]
+    )
     loader = SubtomogramLoader(tomo, mole, order=3, scale=1)
     label_name = "labels"
     out = loader.align_multi_templates(
-        [img0, img1], max_shifts=1.8, label_name=label_name
+        [img0, img1], max_shifts=2, label_name=label_name
     )
     assert list(out.features[label_name]) == [0, 1, 0]

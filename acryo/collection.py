@@ -9,14 +9,10 @@ import polars as pl
 
 from dask import array as da
 
-from acryo.loader import SubtomogramLoader, Unset, check_input
+from acryo.loader import SubtomogramLoader, Unset
 from acryo.molecules import Molecules
-from acryo.alignment import (
-    BaseAlignmentModel,
-    ZNCCAlignment,
-)
 from acryo._types import nm, pixel
-from acryo import _utils
+from acryo._loader_base import LoaderBase
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -25,7 +21,7 @@ if TYPE_CHECKING:
 IMAGE_ID_LABEL = "image"
 
 
-class TomogramCollection:
+class TomogramCollection(LoaderBase):
     """
     Collection of tomograms and their molecules.
 
@@ -43,9 +39,7 @@ class TomogramCollection:
         corner_safe: bool = False,
     ) -> None:
 
-        self._order, self._output_shape, self._scale, self._corner_safe = check_input(
-            order, output_shape, scale, corner_safe, 3
-        )
+        super().__init__(order, scale, output_shape, corner_safe)
         self._images: dict[Hashable, NDArray[np.float32] | da.Array] = {}
         self._molecules: Molecules = Molecules.empty([IMAGE_ID_LABEL])
         self._loaders = LoaderAccessor(self)
@@ -86,37 +80,13 @@ class TomogramCollection:
         """Collect all the molecules from all the loaders"""
         return self._molecules
 
-    @property
-    def features(self) -> pl.DataFrame:
-        """Collect all the features from all the molecules"""
-        return self.molecules.features
-
-    @property
-    def scale(self) -> nm:
-        """Get the physical scale of tomogram."""
-        return self._scale
-
-    @property
-    def output_shape(self) -> tuple[pixel, ...] | Unset:
-        """Return the output subtomogram shape."""
-        return self._output_shape
-
-    @property
-    def order(self) -> int:
-        """Return the interpolation order."""
-        return self._order
-
-    @property
-    def corner_safe(self) -> bool:
-        return self._corner_safe
-
     def replace(
         self,
+        molecules: Molecules | None = None,
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset | None = None,
         order: int | None = None,
         scale: float | None = None,
         corner_safe: bool | None = None,
-        images: dict[Hashable, NDArray[np.float32] | da.Array] | None = None,
     ) -> Self:
         """Return a new instance with different parameter(s)."""
         if output_shape is None:
@@ -133,14 +103,27 @@ class TomogramCollection:
             output_shape=output_shape,
             corner_safe=corner_safe,
         )
-        if images is None:
-            out._images = self._images.copy()
+        out._images = self._images.copy()
+        if molecules is None:
+            out._molecules = self._molecules.copy()
         else:
-            out._images = dict(images)
+            out._molecules = molecules
+            _id_exists = set(molecules.features[IMAGE_ID_LABEL].unique())
+            for k in list(out._images.keys()):
+                if k not in _id_exists:
+                    out._images.pop(k)
         return out
 
-    def copy(self) -> Self:
-        return self.replace()
+    def construct_loading_tasks(
+        self, output_shape: pixel | tuple[pixel, ...] | None = None
+    ) -> list[da.Array]:
+        return sum(
+            (
+                loader.construct_loading_tasks(output_shape=output_shape)
+                for loader in self.loaders
+            ),
+            start=[],
+        )
 
     def construct_dask(
         self,
@@ -150,134 +133,6 @@ class TomogramCollection:
         for loader in self.loaders:
             dask_arrays.append(loader.construct_dask(output_shape=output_shape))
         return da.concatenate(dask_arrays, axis=0)
-
-    def average(
-        self,
-        output_shape: pixel | tuple[pixel] | None = None,
-    ) -> np.ndarray:
-        """
-        Calculate the average of subtomograms from all the loaders.
-
-        Returns
-        -------
-        np.ndarray
-            Averaged image
-        """
-        dsk = self.construct_dask(output_shape=output_shape)
-        return da.compute(da.mean(dsk, axis=0))[0]
-
-    def average_split(
-        self,
-        n_set: int = 1,
-        seed: int | None = 0,
-        squeeze: bool = True,
-        output_shape: pixel | tuple[pixel] | None = None,
-    ):
-        """
-        Split subtomograms into two set and average separately.
-
-        This method executes pairwise subtomogram averaging using randomly
-        selected molecules, which is useful for calculation of such as Fourier
-        shell correlation.
-
-        Parameters
-        ----------
-        n_set : int, default is 1
-            Number of split set of averaged image.
-        seed : random seed, default is 0
-            Random seed to determine how subtomograms will be split.
-
-        Returns
-        -------
-        np.ndarray
-            Averaged image. The shape of the array is (M, 2, Nz, Ny, NX), where
-            M is the number of split set, 2 is the number of averaged image, and
-            Nz, Ny, Nx are the shape of the averaged image.
-        """
-        output_shape = self._get_output_shape(output_shape)
-        rng = np.random.default_rng(seed=seed)
-
-        tasks: list[da.Array] = []
-        dask_array = self.construct_dask(output_shape=output_shape)
-        nmole = dask_array.shape[0]
-        for _ in range(n_set):
-            ind0, ind1 = _utils.random_splitter(rng, nmole)
-            dask_avg0 = da.mean(dask_array[ind0], axis=0)
-            dask_avg1 = da.mean(dask_array[ind1], axis=0)
-            tasks.extend([dask_avg0, dask_avg1])
-
-        out = da.compute(tasks)[0]
-        stack = np.stack(out, axis=0).reshape(n_set, 2, *output_shape)
-        if squeeze and n_set == 1:
-            stack = stack[0]
-        return stack
-
-    def align(
-        self,
-        template: NDArray[np.float32],
-        *,
-        mask: NDArray[np.float32] | None = None,
-        max_shifts: nm | tuple[nm, nm, nm] = 1,
-        alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
-        **align_kwargs,
-    ):
-        new = self.replace(images={})
-        for loader in self.loaders:
-            result = loader.align(
-                template=template,
-                mask=mask,
-                max_shifts=max_shifts,
-                alignment_model=alignment_model,
-                **align_kwargs,
-            )
-            new.add_tomogram(result.image, result.molecules)
-        return new
-
-    def filter(
-        self,
-        predicate: pl.Expr | str | pl.Series | list[bool] | np.ndarray,
-    ) -> Self:
-        """
-        Filter the molecules and tomograms based on the predicate.
-
-        This method comes from `polars.DataFrame.filter`.
-
-        Examples
-        --------
-        >>> collection.filter(pl.col("score") > 0.5)
-
-        Parameters
-        ----------
-        predicate : pl.Expr | str | pl.Series | list[bool] | np.ndarray
-            Predicate to filter on.
-
-        Returns
-        -------
-        TomogramCollection
-            A collection with filtered molecules and tomograms.
-        """
-        features = self.molecules.to_dataframe().filter(predicate)
-        mole = Molecules.from_dataframe(features)
-        new = self.copy()
-        new._molecules = mole
-        _id_exists = set(
-            mole.features.select(IMAGE_ID_LABEL).unique().to_numpy().ravel()
-        )
-        for k in list(new._images.keys()):
-            if k not in _id_exists:
-                new._images.pop(k)
-        return new
-
-    def _get_output_shape(
-        self, output_shape: pixel | tuple[pixel] | None
-    ) -> tuple[pixel, ...]:
-        if output_shape is None:
-            if isinstance(self.output_shape, Unset):
-                raise ValueError("Output shape is unknown.")
-            _output_shape = self.output_shape
-        else:
-            _output_shape = _utils.normalize_shape(output_shape, ndim=3)
-        return _output_shape
 
 
 class LoaderAccessor:

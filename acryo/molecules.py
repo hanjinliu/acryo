@@ -1,6 +1,17 @@
 from __future__ import annotations
 from pathlib import Path
-from typing import Any, Hashable, Iterable, TYPE_CHECKING, Iterator, Sequence, TypeVar, Union, Generic, overload
+from typing import (
+    Any,
+    Hashable,
+    Iterable,
+    TYPE_CHECKING,
+    Iterator,
+    Sequence,
+    TypeVar,
+    Union,
+    Generic,
+    overload,
+)
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 import polars as pl
@@ -788,9 +799,12 @@ class Molecules:
         return self.__class__(pos, Rotation.from_quat(rot), features=feat)
 
     @overload
-    def groupby(self, by: str | pl.Expr) -> MoleculeGroup[str]: ...
+    def groupby(self, by: str | pl.Expr) -> MoleculeGroup[str]:
+        ...
+
     @overload
-    def groupby(self, by: Sequence[str | pl.Expr]) -> MoleculeGroup[tuple[str, ...]]: ...
+    def groupby(self, by: Sequence[str | pl.Expr]) -> MoleculeGroup[tuple[str, ...]]:
+        ...
 
     def groupby(self, by):
         """Group molecules into sub-groups."""
@@ -806,9 +820,13 @@ class Molecules:
         df_filt = df.filter(predicate)
         return self.__class__.from_dataframe(df_filt)
 
+
 _K = TypeVar("_K", bound=Hashable)
 
+
 class MoleculeGroup(Generic[_K]):
+    """A groupby-like object for molecules."""
+
     def __init__(self, group: GroupBy[pl.DataFrame]):
         self._group = group
 
