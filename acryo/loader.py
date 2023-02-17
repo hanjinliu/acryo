@@ -386,7 +386,6 @@ class SubtomogramLoader:
     def create_cache(
         self,
         output_shape: pixel | tuple[pixel] | None = None,
-        path: str | None = None,
     ) -> da.Array:
         """
         Create cached stack of subtomograms.
@@ -401,35 +400,21 @@ class SubtomogramLoader:
         -------
         da.Array
             A lazy-loading array that uses the memory-mapped array.
-
-        Examples
-        --------
-        1. Get i-th subtomogram.
-
-        >>> arr = loader.create_cache()
-        >>> arr[i]
-
-        2. Subtomogram averaging.
-
-        >>> arr = loader.create_cache()
-        >>> avg = np.mean(arr, axis=0).mean()
-
         """
         output_shape = self._get_output_shape(output_shape)
+        if self._cache_available(output_shape):
+            # cache is already available
+            return self._cached_dask_array
         dask_array = self.construct_dask(output_shape=output_shape)
         shape = (len(self.molecules),) + output_shape
-        kwargs = dict(dtype=np.float32, mode="w+", shape=shape)
-        if path is None:
-            with tempfile.NamedTemporaryFile() as ntf:
-                mmap = np.memmap(ntf, **kwargs)
-        else:
-            mmap = np.memmap(path, **kwargs)
+        with tempfile.NamedTemporaryFile() as ntf:
+            mmap = np.memmap(ntf, dtype=np.float32, mode="w+", shape=shape)
 
         da.store(dask_array, mmap, compute=True)
 
         darr = da.from_array(
             mmap,
-            chunks=(1,) + self.output_shape,  # type: ignore
+            chunks=("auto",) + self.output_shape,  # type: ignore
             meta=np.array([], dtype=np.float32),
         )
         self._cached_dask_array = darr
@@ -444,11 +429,15 @@ class SubtomogramLoader:
     def cached(
         self,
         output_shape: pixel | tuple[pixel] | None = None,
-        path: str | None = None,
     ) -> ContextManager[da.Array]:
-        """Context manager for caching subtomograms."""
+        """
+        Context manager for caching subtomograms of give shape.
+
+        Subtomograms are cached in a temporary memory-map file. Within this context
+        loading subtomograms of given output shape will be faster.
+        """
         old_cache = self._cached_dask_array
-        arr = self.create_cache(output_shape=output_shape, path=path)
+        arr = self.create_cache(output_shape=output_shape)
         try:
             yield arr
         finally:
@@ -648,6 +637,7 @@ class SubtomogramLoader:
         mask: MaskType = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
+        label_name: str = "labels",
         **align_kwargs,
     ) -> Self:
         """
@@ -687,7 +677,7 @@ class SubtomogramLoader:
         _max_shifts_px = np.asarray(max_shifts) / self.scale
 
         model = alignment_model(
-            template=np.stack(list(templates), axis=0),
+            template=list(templates),
             mask=mask,
             **align_kwargs,
         )
@@ -718,29 +708,24 @@ class SubtomogramLoader:
 
         feature_list = get_feature_list(corr_max, local_shifts, rotator.as_rotvec())
         mole_aligned.features = self.molecules.features.with_columns(
-            feature_list + pl.Series("labels", labels)
+            feature_list + [pl.Series(label_name, labels)]
         )
 
         return self.replace(molecules=mole_aligned, output_shape=templates[0].shape)
 
-    def subtomoprops(
+    def agg(
         self,
-        template: NDArray[np.float32],
-        func: Callable[[NDArray[np.float32], NDArray[np.float32]], _R],
-        mask: NDArray[np.float32] | None = None,
-    ) -> list[_R]:
-        if mask is None:
-            _mask = 1.0
-        else:
-            _mask = mask
-        template_masked = template * _mask
-
-        tasks = self.construct_mapping_tasks(
-            func, template_masked, output_shape=template.shape
-        )
-        all_results: list[_R] = da.compute(tasks)[0]
-
-        return all_results
+        funcs: list[Callable[[NDArray[np.float32]], Any]],
+        schema=None,
+    ) -> pl.DataFrame:
+        all_tasks: list[list[Delayed]] = []
+        for fn in funcs:
+            tasks = self.construct_mapping_tasks(fn, output_shape=self.output_shape)
+            all_tasks.append(tasks)
+        all_results = np.array(da.compute(all_tasks)[0])
+        if schema is None:
+            schema = [fn.__name__ for fn in funcs]
+        return pl.DataFrame(all_results, schema=schema)
 
     def fsc(
         self,

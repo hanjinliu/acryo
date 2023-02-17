@@ -76,9 +76,9 @@ method of alignment model classes. It returns a factory function for the paramet
     loader = SubtomogramLoader(image, molecules)
     out = loader.align(
         template,
-         max_shifts=(5, 5, 5),
-         alignment_model=ZNCCAlignment.with_params(cutoff=0.5),
-        )
+        max_shifts=(5, 5, 5),
+        alignment_model=ZNCCAlignment.with_params(cutoff=0.5),
+    )
 
 Template-free alignment
 -----------------------
@@ -94,3 +94,23 @@ faster.
 
     loader = SubtomogramLoader(image, molecules)
     out = loader.align_no_template(max_shifts=(5, 5, 5), output_shape=(20, 20, 20))
+
+Multi-template alignment
+------------------------
+
+If a tomogram is composed of heterogeneous molecules, you can use multiple templates to
+align the molecules and determine the best template for each molecule.
+
+.. code-block:: python
+
+    loader = SubtomogramLoader(image, molecules)
+    out = loader.align_multi_templates(
+        [template0, template1, template2],
+        max_shifts=(5, 5, 5),
+        alignment_model=ZNCCAlignment.with_params(cutoff=0.5),
+        label_name="template_id",
+    )
+    out.molecules.features["template_id"]  # get the best template id for each molecule
+
+Here, input templates must be given as a list of :class:`numpy.ndarray` objects of the
+same shape. ``label_name`` is the name used for the feature colummn of the best template.

@@ -157,6 +157,9 @@ class TomogramSimulator:
         self._components[name] = Component(molecules, image.astype(np.float32))
         return self
 
+    def collect_molecules(self) -> Molecules:
+        return Molecules.concat(comp.molecules for comp in self._components.values())
+
     def subset(self, names: str | Sequence[str]) -> Self:
         """
         Construct a simulator composed of a subset of the components.
