@@ -17,6 +17,7 @@ class PCCAlignment(TomographyInput):
         template: NDArray[np.complex64],
         max_shifts: tuple[float, float, float],
         quaternion: NDArray[np.float32],
+        pos: NDArray[np.float32],
     ) -> tuple[NDArray[np.float32], NDArray[np.float32], float]:
         """Optimize."""
         shift, pcc = subpixel_pcc(
@@ -37,6 +38,7 @@ class ZNCCAlignment(TomographyInput):
         template: NDArray[np.complex64],
         max_shifts: tuple[float, float, float],
         quaternion: NDArray[np.float32],
+        pos: NDArray[np.float32],
     ) -> tuple[NDArray[np.float32], NDArray[np.float32], float]:
         """Optimize."""
         shift, zncc = subpixel_zncc(

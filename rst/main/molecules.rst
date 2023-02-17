@@ -26,14 +26,20 @@ coordinate" means :math:`\vec{X}, \vec{Y}, \vec{Z}`.
 
 .. note::
 
-    :mod:`acryo` uses the right-handed coordinate system, which means that any axes
-    satisfy the rule :math:`\vec{x} \times \vec{y} = \vec{z}`.
-
-.. note::
-
     Any arrays representing 3D coordinates are arranged in z, y, x order in :mod:`acryo`.
     This is because the (x, y, z) element of a 3D array ``arr`` is accessed by
     ``arr[z, y, x]``.
+
+.. note::
+
+    :mod:`acryo` uses the right-handed coordinate system, which means that any axes
+    satisfy the rule :math:`\vec{x} \times \vec{y} = \vec{z}`. However, all the arrays
+    are in z, y, x order so that programatically, you have to calculate in the
+    left-handed manner.
+
+    For instance, if you have x, y vectors ``x`` and ``y``, you have to run
+    ``z = -np.cross(x, y)`` to get the z vector. The rotation vector ``[np.pi, 0, 0]``
+    corresponds to 90-degree **anti-clockwise** rotation around the z-axis.
 
 .. contents:: Contents
     :local:

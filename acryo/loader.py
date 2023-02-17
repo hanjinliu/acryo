@@ -541,7 +541,10 @@ class SubtomogramLoader:
             model.align,
             max_shifts=_max_shifts_px,
             output_shape=template.shape,
-            var_kwarg=dict(quaternion=self.molecules.quaternion()),
+            var_kwarg=dict(
+                quaternion=self.molecules.quaternion(),
+                pos=self.molecules.pos / self.scale,
+            ),
         )
         all_results = da.compute(tasks)[0]
 
@@ -664,7 +667,10 @@ class SubtomogramLoader:
             model.align,
             max_shifts=_max_shifts_px,
             output_shape=templates[0].shape,
-            var_kwarg=dict(quaternion=self.molecules.quaternion()),
+            var_kwarg=dict(
+                quaternion=self.molecules.quaternion(),
+                pos=self.molecules.pos / self.scale,
+            ),
         )
         all_results = da.compute(tasks)[0]
 

@@ -63,14 +63,15 @@ class BaseAlignmentModel(ABC):
 
     Abstract Methods
     ----------------
-    >>> def optimize(self, subvolume, reference, max_shifts, quaternion):
+    >>> def optimize(self, template, reference, max_shifts, quaternion):
     >>>     ...
     >>> def pre_transform(self, image):
     >>>     ...
 
     """
 
-    _DUMMY_QUAT = np.array([0.0, 0.0, 0.0, 1.0])
+    _DUMMY_POS = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+    _DUMMY_QUAT = np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32)
 
     def __init__(
         self,
@@ -145,6 +146,7 @@ class BaseAlignmentModel(ABC):
         template: NDArray[np.float32],
         max_shifts: tuple[float, ...],
         quaternion: NDArray[np.float32],
+        pos: NDArray[np.float32],
     ) -> tuple[NDArray[np.float32], NDArray[np.float32], float]:
         """
         Optimization of shift and rotation of subvolume.
@@ -210,6 +212,7 @@ class BaseAlignmentModel(ABC):
         img: NDArray[np.float32],
         max_shifts: tuple[float, float, float],
         quaternion: NDArray[np.float32] | None = None,
+        pos: NDArray[np.float32] | None = None,
     ) -> AlignmentResult:
         """
         Align an image using current alignment parameters.
@@ -230,11 +233,16 @@ class BaseAlignmentModel(ABC):
             _quat = self._DUMMY_QUAT
         else:
             _quat = quaternion
+        if pos is None:
+            _pos = self._DUMMY_POS
+        else:
+            _pos = pos
         return self._align_func(
             self.pre_transform(img * self._mask),
             self.template_input,
             max_shifts,
             _quat,
+            _pos,
         )
 
     def fit(
@@ -260,7 +268,7 @@ class BaseAlignmentModel(ABC):
         np.ndarray, AlignmentResult
             Transformed input image and the alignment result.
         """
-        result = self.align(img, max_shifts=max_shifts, quaternion=None)
+        result = self.align(img, max_shifts=max_shifts, quaternion=None, pos=None)
         rotator = Rotation.from_quat(result.quat)
         matrix = compose_matrices(np.array(img.shape) / 2 - 0.5, [rotator])[0]
         _cval = _normalize_cval(cval, img)
@@ -270,20 +278,28 @@ class BaseAlignmentModel(ABC):
 
     def _optimize_single(
         self,
-        subvolume: np.ndarray,
-        template: np.ndarray,
+        subvolume: NDArray[np.float32],
+        template: NDArray[np.float32],
         max_shifts: tuple[float, float, float],
-        quaternion: np.ndarray,
+        quaternion: NDArray[np.float32],
+        pos: NDArray[np.float32],
     ) -> AlignmentResult:
-        out = self.optimize(subvolume, template, max_shifts, quaternion)
+        out = self.optimize(
+            subvolume,
+            template,
+            max_shifts=max_shifts,
+            quaternion=quaternion,
+            pos=pos,
+        )
         return AlignmentResult(0, *out)
 
     def _optimize_multiple(
         self,
-        subvolume: np.ndarray,
-        template_list: Iterable[np.ndarray],
+        subvolume: NDArray[np.float32],
+        template_list: Iterable[NDArray[np.float32]],
         max_shifts: tuple[float, float, float],
-        quaternion: np.ndarray,
+        quaternion: NDArray[np.float32],
+        pos: NDArray[np.float32],
     ) -> AlignmentResult:
         all_shifts: list[np.ndarray] = []
         all_quat: list[np.ndarray] = []
@@ -292,8 +308,9 @@ class BaseAlignmentModel(ABC):
             shift, quat, score = self.optimize(
                 subvolume,
                 template,
-                max_shifts,
-                quaternion,
+                max_shifts=max_shifts,
+                quaternion=quaternion,
+                pos=pos,
             )
             all_shifts.append(shift)
             all_quat.append(quat)
@@ -408,7 +425,7 @@ class RotationImplemented(BaseAlignmentModel):
         tasks: list[Delayed] = []
         for mat, quat in zip(matrices, self.quaternions):
             tmp = delayed_transform(template_masked, mat, cval=_temp_cval)
-            task = delayed_optimize(img_input, tmp, max_shifts, quat)
+            task = delayed_optimize(img_input, tmp, max_shifts, quat, pos=None)
             tasks.append(task)
         results: list[tuple] = da.compute(tasks)[0]
         scores = [x[2] for x in results]
