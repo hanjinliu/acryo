@@ -1,6 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
-from typing import Any, Iterable, TYPE_CHECKING, Iterator, Union
+from typing import Any, Hashable, Iterable, TYPE_CHECKING, Iterator, Sequence, TypeVar, Union, Generic, overload
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 import polars as pl
@@ -787,7 +787,12 @@ class Molecules:
             feat = pl.concat([self.features, other.features], how=how)
         return self.__class__(pos, Rotation.from_quat(rot), features=feat)
 
-    def groupby(self, by: str | list[str]):
+    @overload
+    def groupby(self, by: str | pl.Expr) -> MoleculeGroup[str]: ...
+    @overload
+    def groupby(self, by: Sequence[str | pl.Expr]) -> MoleculeGroup[tuple[str, ...]]: ...
+
+    def groupby(self, by):
         """Group molecules into sub-groups."""
         df = self.to_dataframe()
         return MoleculeGroup(df.groupby(by, maintain_order=True))
@@ -801,12 +806,13 @@ class Molecules:
         df_filt = df.filter(predicate)
         return self.__class__.from_dataframe(df_filt)
 
+_K = TypeVar("_K", bound=Hashable)
 
-class MoleculeGroup:
+class MoleculeGroup(Generic[_K]):
     def __init__(self, group: GroupBy[pl.DataFrame]):
         self._group = group
 
-    def __iter__(self) -> Iterator[tuple[Any, Molecules]]:
+    def __iter__(self) -> Iterator[tuple[_K, Molecules]]:
         for key, df in self._group:
             mole = Molecules.from_dataframe(df)
             yield key, mole
