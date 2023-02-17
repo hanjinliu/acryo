@@ -6,6 +6,7 @@ import psutil
 from typing import (
     Callable,
     TYPE_CHECKING,
+    ContextManager,
     Generic,
     Hashable,
     Iterable,
@@ -236,6 +237,11 @@ class SubtomogramLoader:
         out._image = binned_image
         return out
 
+    def _cache_available(self, shape: tuple[pixel, ...]) -> bool:
+        if self._cached_dask_array is None:
+            return False
+        return self._cached_dask_array.shape[1:] == shape
+
     def construct_loading_tasks(
         self,
         output_shape: pixel | tuple[pixel, ...] | None = None,
@@ -248,7 +254,7 @@ class SubtomogramLoader:
         list of Delayed object
             Each object returns a subtomogram on execution by ``da.compute``.
         """
-        if self._cached_dask_array is not None:
+        if self._cache_available(output_shape):
             return [self._cached_dask_array[i] for i in range(len(self))]
         image = self.image
         scale = self.scale
@@ -296,7 +302,7 @@ class SubtomogramLoader:
         da.Array
             An 4-D array which ``arr[i]`` corresponds to the ``i``-th subtomogram.
         """
-        if self._cached_dask_array is not None:
+        if self._cache_available(output_shape):
             return self._cached_dask_array
 
         output_shape = self._get_output_shape(output_shape)
@@ -428,24 +434,26 @@ class SubtomogramLoader:
         )
         self._cached_dask_array = darr
         return darr
-    
+
     def clear_cache(self):
         del self._cached_dask_array
         self._cached_dask_array = None
         return None
-    
+
     @contextmanager
     def cached(
         self,
         output_shape: pixel | tuple[pixel] | None = None,
         path: str | None = None,
-    ) -> Iterator[da.Array]:
+    ) -> ContextManager[da.Array]:
         """Context manager for caching subtomograms."""
+        old_cache = self._cached_dask_array
         arr = self.create_cache(output_shape=output_shape, path=path)
         try:
             yield arr
         finally:
-            self.clear_cache()
+            del self._cached_dask_array
+            self._cached_dask_array = old_cache
 
     def asnumpy(self, *, lim: int = MEMORY_LIMIT) -> NDArray[np.float32]:
         """Create a 4D image stack of all the subtomograms."""
@@ -810,7 +818,7 @@ class SubtomogramLoader:
         Parameters
         ----------
         template : 3D array, optional
-            Template image to calculate the difference. If not given, average image will 
+            Template image to calculate the difference. If not given, average image will
             be used.
         mask : 3D array, optional
             Soft mask of the same shape as the template or the output_shape parameter.
@@ -846,7 +854,7 @@ class SubtomogramLoader:
             raise ValueError("Cannot determine output shape.")
         else:
             shape = self.output_shape
-        
+
         with self.cached(shape):
             if template is None:
                 template = self.average(shape)
@@ -870,7 +878,7 @@ class SubtomogramLoader:
                 seed=seed,
             )
             clf.run()
-        
+
         mole = self.molecules.copy()
         mole.features = mole.features.with_columns(pl.Series(label_name, clf._labels))
         new = self.replace(molecules=mole)
@@ -882,17 +890,25 @@ class SubtomogramLoader:
     ) -> Self:
         """Return a new loader with filtered molecules."""
         return self.replace(molecules=self.molecules.filter(predicate))
-    
+
     @overload
     def groupby(self, by: str | pl.Expr) -> LoaderGroup[str]:
         ...
+
     @overload
     def groupby(self, by: list[str | pl.Expr]) -> LoaderGroup[tuple[str, ...]]:
         ...
-        
+
     def groupby(self, by):
         mole_group = self.molecules.groupby(by)
-        return LoaderGroup(mole_group, self.image, self.order, self.scale, self.output_shape, self.corner_safe)
+        return LoaderGroup(
+            mole_group,
+            self.image,
+            self.order,
+            self.scale,
+            self.output_shape,
+            self.corner_safe,
+        )
 
     def _get_output_shape(
         self, output_shape: pixel | tuple[pixel] | None
@@ -912,10 +928,20 @@ class ClassificationResult(NamedTuple):
     loader: SubtomogramLoader
     classifier: PcaClassifier
 
+
 _K = TypeVar("_K", bound=Hashable)
 
+
 class LoaderGroup(Generic[_K]):
-    def __init__(self, group: MoleculeGroup, image, order: int, scale: float, output_shape: tuple[int, ...], corner_safe: bool):
+    def __init__(
+        self,
+        group: MoleculeGroup,
+        image,
+        order: int,
+        scale: float,
+        output_shape: tuple[int, ...],
+        corner_safe: bool,
+    ):
         self._group = group
         self._image = image
         self._order = order
@@ -926,16 +952,18 @@ class LoaderGroup(Generic[_K]):
     def __iter__(self) -> Iterator[tuple[_K, SubtomogramLoader]]:
         for key, mole in self._group:
             loader = SubtomogramLoader(
-                self._image, 
-                mole, 
-                order=self._order, 
-                scale=self._scale, 
-                output_shape=self._output_shape, 
+                self._image,
+                mole,
+                order=self._order,
+                scale=self._scale,
+                output_shape=self._output_shape,
                 corner_safe=self._corner_safe,
             )
             yield key, loader
-    
-    def average(self, output_shape: tuple[int, ...] | None = None) -> dict[_K, NDArray[np.float32]]:
+
+    def average(
+        self, output_shape: tuple[int, ...] | None = None
+    ) -> dict[_K, NDArray[np.float32]]:
         """Calculate average image."""
         if output_shape is None:
             output_shape = self._output_shape
@@ -945,9 +973,10 @@ class LoaderGroup(Generic[_K]):
             keys.append(key)
             dsk = loader.construct_dask(output_shape)
             tasks.append(da.mean(dsk, axis=0))
-        
+
         out: list[NDArray[np.float32]] = da.compute(tasks)[0]
         return {key: img for key, img in zip(keys, out)}
+
 
 def get_feature_list(corr_max, local_shifts, rotvec) -> list[pl.Series]:
     features = [
