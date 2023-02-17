@@ -36,9 +36,17 @@ class AlignmentResult(NamedTuple):
     """The optimal alignment result."""
 
     label: int
-    shift: np.ndarray
-    quat: np.ndarray
+    shift: NDArray[np.float32]
+    quat: NDArray[np.float32]
     score: float
+
+    def affine_matrix(self, shape: tuple[int, int, int]) -> NDArray[np.float32]:
+        """Return the affine matrix."""
+        rotator = Rotation.from_quat(self.quat)
+        shift_matrix = np.eye(4, dtype=np.float32)
+        shift_matrix[:3, 3] = self.shift
+        rot_matrix = compose_matrices(np.array(shape) / 2 - 0.5, [rotator])[0]
+        return shift_matrix @ rot_matrix
 
 
 class BaseAlignmentModel(ABC):
@@ -269,11 +277,9 @@ class BaseAlignmentModel(ABC):
             Transformed input image and the alignment result.
         """
         result = self.align(img, max_shifts=max_shifts, quaternion=None, pos=None)
-        rotator = Rotation.from_quat(result.quat)
-        matrix = compose_matrices(np.array(img.shape) / 2 - 0.5, [rotator])[0]
+        mtx = result.affine_matrix(img.shape)
         _cval = _normalize_cval(cval, img)
-        img_shifted = ndi.shift(img, -result.shift, cval=_cval)
-        img_trans: NDArray[np.float32] = ndi.affine_transform(img_shifted, matrix, cval=_cval)  # type: ignore
+        img_trans = ndi.affine_transform(img, mtx, cval=_cval)
         return img_trans, result
 
     def _optimize_single(
@@ -367,6 +373,7 @@ class RotationImplemented(BaseAlignmentModel):
         img: NDArray[np.float32],
         max_shifts: tuple[subpixel, subpixel, subpixel],
         quaternion: NDArray[np.float32] | None,
+        pos: NDArray[np.float32] | None,
     ) -> AlignmentResult:
         """
         Align an image using current alignment parameters.
@@ -383,7 +390,7 @@ class RotationImplemented(BaseAlignmentModel):
         AlignmentResult
             Result of alignment.
         """
-        iopt, shift, _, corr = super().align(img, max_shifts, quaternion)
+        iopt, shift, _, corr = super().align(img, max_shifts, quaternion, pos)
         quat = self.quaternions[iopt % self._n_rotations]
         return AlignmentResult(label=iopt, shift=shift, quat=quat, score=corr)
 
@@ -438,11 +445,9 @@ class RotationImplemented(BaseAlignmentModel):
             score=opt_result[2],
         )
 
-        rotator = Rotation.from_quat(result.quat)
+        mtx = result.affine_matrix(img.shape)
         _img_cval = _normalize_cval(cval, img)
-        matrix = compose_matrices(np.array(img.shape) / 2 - 0.5, [rotator])[0]
-        img_shifted = ndi.shift(img, -result.shift, cval=_img_cval)
-        img_trans: NDArray[np.float32] = ndi.affine_transform(img_shifted, matrix, cval=_img_cval)  # type: ignore
+        img_trans: NDArray[np.float32] = ndi.affine_transform(img, mtx, cval=_img_cval)  # type: ignore
         return img_trans, result
 
     def _transform_template(

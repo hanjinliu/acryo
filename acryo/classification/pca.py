@@ -42,7 +42,7 @@ class PcaClassifier:
         self.n_clusters = n_clusters
 
         self._pca = PCA(n_components=n_components)
-        self._kmeans = KMeans(n_clusters=n_clusters, random_state=seed)
+        self._kmeans = KMeans(n_clusters=n_clusters, random_state=seed, n_init=10)
 
     @property
     def pca(self) -> PCA:

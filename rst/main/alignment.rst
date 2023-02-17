@@ -201,6 +201,22 @@ calculate the optimal shift/rotation parameters. To transform the sub-volume, us
   :class:`numpy.ndarray` object of quaternion. If you are using :class:`acryo.Molecules`,
   its quaternions can directly be used here. This is basically used to mask the missing wedge.
 
+The return value ``result`` is a named-tuple :class:`AlignmentResult` object. It contains the
+following fields.
+
+.. code-block:: python
+
+    class AlignmentResult(NamedTuple):
+        label: int
+        shift: NDArray[np.float32]
+        quat: NDArray[np.float32]
+        score: float
+
+- ``label`` is the integer label of the best alignment if multiple templates are used.
+- ``shift`` is the optimal shift in z, y and x direction.
+- ``quat`` is the optimal rotation in quaternion.
+- ``score`` is the alignment score of the best alignment.
+
 Fit images
 ----------
 
@@ -276,3 +292,10 @@ When you override methods, the following should be noted.
       to mask the missing wedge.
     - ``pos`` is the position of the sub-volume in the original tomogram. Its
       unit is pixel. This parameter can be used for CTF correction of defocusing.
+    - The return value must be a tuple of ``(shift, rotation, score)``.
+
+      - ``shift`` is the optimal shift in z, y and x direction. More precisely,
+        ``ndi.shift(img, -shift)`` will properly align the image to the template.
+      - ``rotation`` is the optimal rotation in quaternion. If the alignment model
+        does not optimize the rotation, this value should be ``array([0, 0, 0, 1])``.
+      - ``score`` is the score of the alignment. Larger score means better alignment.

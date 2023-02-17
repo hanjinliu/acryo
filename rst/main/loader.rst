@@ -24,7 +24,7 @@ A :class:`SubtomogramLoader` is a pair of a 3D tomogram image and a
 Subtomogram averaging
 =====================
 
-:meth:`SubtomogramLoader.average` crops all the subtomograms around the molecules and
+:meth:`average` crops all the subtomograms around the molecules and
 average them. This method always returns a 3D :class:`numpy.ndarray` object.
 
 .. code-block:: python
@@ -46,24 +46,27 @@ average them. This method always returns a 3D :class:`numpy.ndarray` object.
 Subtomogram Alignment
 =====================
 
-:meth:`SubtomogramLoader.align` crops all the subtomograms around the molecules and
+Templated alignment
+-------------------
+
+:meth:`align` crops all the subtomograms around the molecules and
 align them to the given template image (reference image). This method will return
 a new :class:`SubtomogramLoader` object with the updated :class:`Molecules` object.
 
-You have to provide a template image, optionally a mask image and an alignment model.
+You have to provide a template image, optionally a mask image, maximum shifts and
+an alignment model. The default alignment model is :class:`ZNCCAlignment`.
 
 .. code-block:: python
 
     from dask import array as da
     from acryo import SubtomogramLoader, Molecules
-    from acryo.alignment import ZNCCAlignment
 
     image = da.random.random((100, 100, 100))
     template = np.random.random((20, 20, 20))
     molecules = Molecules([[40, 40, 60], [60, 60, 40]])
 
     loader = SubtomogramLoader(image, molecules)
-    out = loader.align(template, alignment_model=ZNCCAlignment)
+    out = loader.align(template, max_shifts=(5, 5, 5))
 
 If you want to give parameters to the alignment model, you can use the :meth:`with_params`
 method of alignment model classes. It returns a factory function for the parametrized model.
@@ -71,4 +74,23 @@ method of alignment model classes. It returns a factory function for the paramet
 .. code-block:: python
 
     loader = SubtomogramLoader(image, molecules)
-    out = loader.align(template, alignment_model=ZNCCAlignment.with_params(cutoff=0.5))
+    out = loader.align(
+        template,
+         max_shifts=(5, 5, 5),
+         alignment_model=ZNCCAlignment.with_params(cutoff=0.5),
+        )
+
+Template-free alignment
+-----------------------
+
+If no a priori information is available for the template image, you'll use the subtomogram
+averaging result as the template image. During this task, each subtomogram will be loaded
+twice so it is not efficient to call :meth:`average` and :meth:`align` separately.
+
+:meth:`align_no_template` creates a local cache of subtomograms so that alignment will be
+faster.
+
+.. code-block:: python
+
+    loader = SubtomogramLoader(image, molecules)
+    out = loader.align_no_template(max_shifts=(5, 5, 5), output_shape=(20, 20, 20))

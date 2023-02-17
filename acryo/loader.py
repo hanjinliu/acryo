@@ -418,7 +418,8 @@ class SubtomogramLoader:
         else:
             mmap = np.memmap(path, **kwargs)
 
-        mmap[:] = dask_array[:]
+        da.store(dask_array, mmap, compute=True)
+
         darr = da.from_array(
             mmap,
             chunks=(1,) + self.output_shape,  # type: ignore
@@ -617,7 +618,7 @@ class SubtomogramLoader:
         self,
         templates: list[NDArray[np.float32]],
         *,
-        mask: NDArray[np.float32] | None = None,
+        mask: MaskType = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
         **align_kwargs,
