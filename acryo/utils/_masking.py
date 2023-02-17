@@ -5,7 +5,7 @@ from numpy.typing import NDArray
 from scipy import ndimage as ndi
 
 
-class OtsuSmoother:
+class SoftOtsu:
     """
     Image smoothing by Otsu thresholding, dilation and Gaussian blurring.
 

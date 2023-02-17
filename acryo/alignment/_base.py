@@ -70,6 +70,8 @@ class BaseAlignmentModel(ABC):
 
     """
 
+    _DUMMY_QUAT = np.array([0.0, 0.0, 0.0, 1.0])
+
     def __init__(
         self,
         template: TemplateType,
@@ -224,13 +226,12 @@ class BaseAlignmentModel(ABC):
         AlignmentResult
             Result of alignment.
         """
-        img_masked = img * self._mask
         if quaternion is None:
-            _quat = np.array([0.0, 0.0, 0.0, 1.0])
+            _quat = self._DUMMY_QUAT
         else:
             _quat = quaternion
         return self._align_func(
-            self.pre_transform(img_masked),
+            self.pre_transform(img * self._mask),
             self.template_input,
             max_shifts,
             _quat,
@@ -324,8 +325,6 @@ class RotationImplemented(BaseAlignmentModel):
     simple parameter searching algorithm to it. Thus, ``optimize`` only has to
     optimize shift of images.
     """
-
-    _DUMMY_QUAT = np.array([0.0, 0.0, 0.0, 1.0])
 
     def __init__(
         self,
