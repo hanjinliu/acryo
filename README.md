@@ -1,7 +1,16 @@
 # acryo
 
-An extensible cryo-EM/ET toolkit for Python. Currently only the subtomogram averaging part is implemented.
-The purpose of this library is to make data analysis on cryo-EM/ET more available for scientists.
+An extensible cryo-EM/ET toolkit for Python.
+The purpose of this library is to make data analysis on cryo-EM/ET more safe, efficient and reproducible.
+Currently only the subtomogram averaging part is implemented.
+
+[📘 Documentation](https://hanjinliu.github.io/acryo/)
+
+### Install
+
+```bash
+pip install acryo -U
+```
 
 ### Highlights
 
@@ -16,9 +25,3 @@ The purpose of this library is to make data analysis on cryo-EM/ET more availabl
    `scipy.spatial.transform.Rotation` for orientation.
 4. Tomogram simulation using `TomogramSimulator`.
 5. Masked PCA clustering.
-
-### Install
-
-```bash
-pip install acryo -U
-```
