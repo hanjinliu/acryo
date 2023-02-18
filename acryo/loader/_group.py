@@ -64,7 +64,7 @@ class LoaderGroup(Generic[_K, _L]):
     def average(
         self, output_shape: tuple[int, ...] | None = None
     ) -> dict[_K, NDArray[np.float32]]:
-        """Calculate average image."""
+        """Calculate average images."""
         tasks = []
         keys: list[str] = []
         for key, loader in self:
@@ -97,11 +97,16 @@ class LoaderGroup(Generic[_K, _L]):
             Number of split set of averaged image.
         seed : random seed, default is 0
             Random seed to determine how subtomograms will be split.
+        squeeze : bool, default is True
+            If true and n_set is 1, return a dictionary of 4D arrays.
+        output_shape : tuple of int, optional
+            Output shape of the averaged image. If not given, the default output
+            shape of the loader objects will be used.
 
         Returns
         -------
-        np.ndarray
-            Averaged image
+        dict of np.ndarray
+            Averaged images with keys of the group keys.
         """
         rng = np.random.default_rng(seed=seed)
 
@@ -141,6 +146,32 @@ class LoaderGroup(Generic[_K, _L]):
         alignment_model: type[BaseAlignmentModel] | AlignmentFactory = ZNCCAlignment,
         **align_kwargs,
     ) -> Self[_K, _L]:
+        """
+        Align subtomograms to the template image.
+
+        This method conduct so called "subtomogram alignment". Only shifts and rotations
+        are calculated in this method. To get averaged image, you'll have to run "average"
+        method using the resulting LoaderGroup instance.
+
+        Parameters
+        ----------
+        template : np.ndarray, optional
+            Template image.
+        mask : np.ndarray or callable of np.ndarray to np.ndarray optional
+            Mask image. Must in the same shape as the template.
+        max_shifts : int or tuple of int, default is (1., 1., 1.)
+            Maximum shift between subtomograms and template.
+        alignment_model : subclass of BaseAlignmentModel, optional
+            Alignment model class used for subtomogram alignment. By default,
+            ``ZNCCAlignment`` will be used.
+        align_kwargs : optional keyword arguments
+            Additional keyword arguments passed to the input alignment model.
+
+        Returns
+        -------
+        LoaderGroup
+            A loader group instance with updated molecules.
+        """
         model = alignment_model(
             template=template,
             mask=mask,
@@ -175,6 +206,31 @@ class LoaderGroup(Generic[_K, _L]):
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
         **align_kwargs,
     ) -> Self[_K, _L]:
+        """
+        Align subtomograms without template image.
+
+        A template-free version of :func:`align`. This method first
+        calculates averaged image and uses it for the alignment template. To
+        avoid loading same subtomograms twice, a memory-mapped array is created
+        internally (so the second subtomogram loading is faster).
+
+        Parameters
+        ----------
+        mask : np.ndarray or callable, optional
+            Mask image. Must in the same shape as the template.
+        max_shifts : int or tuple of int, default is (1., 1., 1.)
+            Maximum shift between subtomograms and template.
+        alignment_model : subclass of BaseAlignmentModel, optional
+            Alignment model class used for subtomogram alignment. By default,
+            ``ZNCCAlignment`` will be used.
+        align_kwargs : optional keyword arguments
+            Additional keyword arguments passed to the input alignment model.
+
+        Returns
+        -------
+        LoaderGroup
+            A loader group with updated molecules.
+        """
         out: list[tuple[_K, _L]] = []
         for key, loader in self:
             with loader.cached(output_shape=output_shape):
@@ -199,6 +255,32 @@ class LoaderGroup(Generic[_K, _L]):
         label_name: str = "labels",
         **align_kwargs,
     ) -> Self[_K, _L]:
+        """
+        Align subtomograms with multiple template images.
+
+        A multi-template version of :func:`align`. This method calculate cross
+        correlation for every template and uses the best local shift, rotation and
+        template.
+
+        Parameters
+        ----------
+        templates: list of ImgArray
+            Template images.
+        mask : np.ndarray, optional
+            Mask image. Must in the same shape as the template.
+        max_shifts : int or tuple of int, default is (1., 1., 1.)
+            Maximum shift between subtomograms and template.
+        alignment_model : subclass of BaseAlignmentModel, optional
+            Alignment model class used for subtomogram alignment. By default,
+            ``ZNCCAlignment`` will be used.
+        align_kwargs : optional keyword arguments
+            Additional keyword arguments passed to the input alignment model.
+
+        Returns
+        -------
+        LoaderGroup
+            A loader group with updated molecules.
+        """
         model = alignment_model(
             template=list(templates),
             mask=mask,
@@ -241,6 +323,9 @@ class LoaderGroup(Generic[_K, _L]):
         all_tasks: list[list[Delayed]] = []
         if schema is None:
             schema = [fn.__name__ for fn in funcs]
+        if len(set(schema)) != len(schema):
+            raise ValueError("Schema names must be unique.")
+        keys: list[str] = []
         for key, loader in self:
             taskset = []
             for fn in funcs:
@@ -249,17 +334,22 @@ class LoaderGroup(Generic[_K, _L]):
                 )
                 taskset.append(tasks)
             all_tasks.append(taskset)
-        all_results = np.array(da.compute(all_tasks)[0])
-
-        return pl.DataFrame(all_results, schema=schema)
+            keys.append(key)
+        all_results = da.compute(all_tasks)[0]
+        out: dict[_K, pl.DataFrame] = {}
+        for key, result in zip(keys, all_results):
+            out[key] = pl.DataFrame(np.array(result), schema=schema)
+        return out
 
     def count(self) -> dict[_K, int]:
-        return {loader.count() for key, loader in self}
+        """Dictionary of the molecule count in each group."""
+        return {key: loader.count() for key, loader in self}
 
     def filter(
         self,
         predicate: pl.Expr | str | pl.Series | list[bool] | np.ndarray,
     ) -> Self[_K, _L]:
+        """Filter the molecules in each group."""
         return self.__class__((key, loader.filter(predicate)) for key, loader in self)
 
 

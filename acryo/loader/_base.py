@@ -339,6 +339,11 @@ class LoaderBase(ABC):
             Number of split set of averaged image.
         seed : random seed, default is 0
             Random seed to determine how subtomograms will be split.
+        squeeze : bool, default is True
+            If true and n_set is 1, return a 4D array.
+        output_shape : tuple of int, optional
+            Output shape of the averaged image. If not given, the default output
+            shape of the loader object will be used.
 
         Returns
         -------
@@ -389,7 +394,7 @@ class LoaderBase(ABC):
         template : np.ndarray, optional
             Template image.
         mask : np.ndarray or callable of np.ndarray to np.ndarray optional
-            Mask image. Must in the same shae as the template.
+            Mask image. Must in the same shape as the template.
         max_shifts : int or tuple of int, default is (1., 1., 1.)
             Maximum shift between subtomograms and template.
         alignment_model : subclass of BaseAlignmentModel, optional
@@ -400,8 +405,8 @@ class LoaderBase(ABC):
 
         Returns
         -------
-        SubtomogramLoader
-            An loader instance with updated molecules.
+        subtomogram loader object
+            A loader instance of the same type with updated molecules.
         """
         _max_shifts_px = np.asarray(max_shifts) / self.scale
 
@@ -455,7 +460,7 @@ class LoaderBase(ABC):
         """
         Align subtomograms without template image.
 
-        A template-free version of :func:`iter_align`. This method first
+        A template-free version of :func:`align`. This method first
         calculates averaged image and uses it for the alignment template. To
         avoid loading same subtomograms twice, a memory-mapped array is created
         internally (so the second subtomogram loading is faster).
@@ -474,8 +479,8 @@ class LoaderBase(ABC):
 
         Returns
         -------
-        SubtomogramLoader
-            An loader instance with updated molecules.
+        subtomogram loader object
+            A loader instance of the same type with updated molecules.
         """
         if output_shape is None and isinstance(mask, np.ndarray):
             output_shape = mask.shape
@@ -504,7 +509,7 @@ class LoaderBase(ABC):
         """
         Align subtomograms with multiple template images.
 
-        A multi-template version of :func:`iter_align`. This method calculate cross
+        A multi-template version of :func:`align`. This method calculate cross
         correlation for every template and uses the best local shift, rotation and
         template.
 
@@ -524,8 +529,8 @@ class LoaderBase(ABC):
 
         Returns
         -------
-        SubtomogramLoader
-            An loader instance with updated molecules.
+        subtomogram loader object
+            A loader instance of the same type with updated molecules.
         """
 
         _max_shifts_px = np.asarray(max_shifts) / self.scale
@@ -588,13 +593,30 @@ class LoaderBase(ABC):
         funcs: list[Callable[[NDArray[np.float32]], Any]],
         schema: list[str] | None = None,
     ) -> pl.DataFrame:
+        """
+        Aggregation of subtomograms using a list of functions.
+
+        Parameters
+        ----------
+        funcs : list of callable
+            Functions that take a subtomogram as input and return an aggregated result.
+        schema : list[str], optional
+            DataFrame schema.
+
+        Returns
+        -------
+        pl.DataFrame
+            Aggregated results.
+        """
         all_tasks: list[list[Delayed]] = []
+        if schema is None:
+            schema = [fn.__name__ for fn in funcs]
+        if len(set(schema)) != len(schema):
+            raise ValueError("Schema names must be unique.")
         for fn in funcs:
             tasks = self.construct_mapping_tasks(fn, output_shape=self.output_shape)
             all_tasks.append(tasks)
         all_results = np.array(da.compute(all_tasks)[0])
-        if schema is None:
-            schema = [fn.__name__ for fn in funcs]
         return pl.DataFrame(all_results, schema=schema)
 
     def fsc(

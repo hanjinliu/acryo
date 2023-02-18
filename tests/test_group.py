@@ -42,3 +42,8 @@ def test_align_multi_templates():
     template1 = np.ones((9, 9, 9), dtype=np.float32)
     template2 = np.ones((9, 9, 9), dtype=np.float32) * 2
     out = group.align_multi_templates([template1, template2])
+
+
+def test_agg():
+    group = _get_group()
+    group.agg([np.mean, np.std])
