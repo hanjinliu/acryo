@@ -16,7 +16,7 @@ Loader = Callable[[str], tuple[np.memmap, float]]
 _L = TypeVar("_L", bound=Loader)
 
 
-class ImageReader:
+class ImageReaderRegistry:
     def __init__(self):
         self._reader: dict[str, Loader] = {}
 
@@ -40,42 +40,47 @@ class ImageReader:
         img, scale = self._reader[ext](path)
         return ImageData(image=as_dask(img, chunks=chunks), scale=scale)
 
+    def imread_array(self, path: str) -> tuple[np.ndarray, float]:
+        _, ext = os.path.splitext(path)
+        img, scale = self._reader[ext](path)
+        return np.asarray(img, dtype=np.float32), scale
 
-READER = ImageReader()
+
+REG = ImageReaderRegistry()
 
 
 def imread(path: str, chunks: Any = "auto") -> ImageData:
-    return READER.imread(path, chunks=chunks)
+    return REG.imread(path, chunks=chunks)
 
 
 def register(*ext: str) -> Callable[[_L], _L]:
-    return READER.register(*ext)
+    return REG.register(*ext)
 
 
-@READER.register(".tif", ".tiff")
-def open_tif(path: str):
-    try:
-        from tifffile import TiffFile
-    except ImportError as e:
-        ext = os.path.splitext(path)[1]
-        e.msg = (
-            f"No module named tifffile. To read {ext[1:]} files, please\n"
-            "$ pip install tifffile"
-        )
-        raise e
+# TODO: check scale unit and uncomment this
+# @READER.register(".tif", ".tiff")
+# def open_tif(path: str):
+#     try:
+#         from tifffile import TiffFile
+#     except ImportError as e:
+#         ext = os.path.splitext(path)[1]
+#         e.msg = (
+#             f"No module named tifffile. To read {ext[1:]} files, please\n"
+#             "$ pip install tifffile"
+#         )
+#         raise e
 
-    with TiffFile(path) as tif:
-        pagetag = tif.series[0].pages[0].tags  # type: ignore
+#     with TiffFile(path) as tif:
+#         pagetag = tif.series[0].pages[0].tags  # type: ignore
 
-        tags = {v.name: v.value for v in pagetag.values()}
-        scale = tags["XResolution"][1]
+#         tags = {v.name: v.value for v in pagetag.values()}
+#         scale = tags["XResolution"][1]
 
-        img: np.memmap = tif.asarray(out="memmap")  # type: ignore
+#         img: np.memmap = tif.asarray(out="memmap")  # type: ignore
+#     return img, scale
 
-    return img, scale
 
-
-@READER.register(".mrc", ".rec", ".map")
+@REG.register(".mrc", ".rec", ".map")
 def open_mrc(path: str):
     try:
         import mrcfile
@@ -88,7 +93,7 @@ def open_mrc(path: str):
         raise e
 
     with mrcfile.mmap(path, mode="r") as mrc:
-        scale: float = mrc.voxel_size.x
+        scale: float = mrc.voxel_size.x / 10
         img: np.memmap = mrc.data  # type: ignore
 
     return img, scale

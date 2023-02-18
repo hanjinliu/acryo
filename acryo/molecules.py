@@ -1,6 +1,17 @@
 from __future__ import annotations
 from pathlib import Path
-from typing import Any, Iterable, TYPE_CHECKING, Iterator, Union
+from typing import (
+    Any,
+    Hashable,
+    Iterable,
+    TYPE_CHECKING,
+    Iterator,
+    Sequence,
+    TypeVar,
+    Union,
+    Generic,
+    overload,
+)
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 import polars as pl
@@ -182,11 +193,15 @@ class Molecules:
         pos = df.select(pos_cols)
         rotvec = df.select(rot_cols)
         cols = pos.columns + rotvec.columns
-        others = df.select([c for c in df.columns if c not in cols])
+        feature_columns = [c for c in df.columns if c not in cols]
+        if len(feature_columns) == 0:
+            features = None
+        else:
+            features = df.select(feature_columns)
         return cls(
             pos.to_numpy(),
             Rotation.from_rotvec(rotvec.to_numpy()),
-            features=others,
+            features=features,
         )
 
     @property
@@ -787,7 +802,15 @@ class Molecules:
             feat = pl.concat([self.features, other.features], how=how)
         return self.__class__(pos, Rotation.from_quat(rot), features=feat)
 
-    def groupby(self, by: str | list[str]):
+    @overload
+    def groupby(self, by: str | pl.Expr) -> MoleculeGroup[str]:
+        ...
+
+    @overload
+    def groupby(self, by: Sequence[str | pl.Expr]) -> MoleculeGroup[tuple[str, ...]]:
+        ...
+
+    def groupby(self, by):
         """Group molecules into sub-groups."""
         df = self.to_dataframe()
         return MoleculeGroup(df.groupby(by, maintain_order=True))
@@ -802,11 +825,16 @@ class Molecules:
         return self.__class__.from_dataframe(df_filt)
 
 
-class MoleculeGroup:
+_K = TypeVar("_K", bound=Hashable)
+
+
+class MoleculeGroup(Generic[_K]):
+    """A groupby-like object for molecules."""
+
     def __init__(self, group: GroupBy[pl.DataFrame]):
         self._group = group
 
-    def __iter__(self) -> Iterator[tuple[Any, Molecules]]:
+    def __iter__(self) -> Iterator[tuple[_K, Molecules]]:
         for key, df in self._group:
             mole = Molecules.from_dataframe(df)
             yield key, mole
