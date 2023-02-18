@@ -2,4 +2,4 @@
 Piping Images to the Loader
 ===========================
 
-TODO
+Subtomogram alignment usually requires a template and mask images.

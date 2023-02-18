@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Callable, TypeVar
 from typing_extensions import ParamSpec, Concatenate
+import numpy as np
 from acryo.loader import ImageProvider, ImageConverter
 import inspect
 
@@ -33,7 +34,7 @@ def provider_function(
 
 
 def converter_function(
-    fn: Callable[Concatenate[float, _P], _R]
+    fn: Callable[Concatenate[np.ndarray, _P], _R]
 ) -> Callable[_P, ImageConverter]:
     """
     Convert a function into a curried function that returns a image converter.
