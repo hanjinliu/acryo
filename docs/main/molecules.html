@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Molecules &mdash; acryo 0.1.1 documentation</title>
+      <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="../_static/css/theme.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+
+        <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
+        <script src="../_static/jquery.js"></script>
+        <script src="../_static/underscore.js"></script>
+        <script src="../_static/doctools.js"></script>
+        <script async="async" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+        <script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+        <script>mermaid.initialize({startOnLoad:true});</script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Subtomogram Loader" href="loader.html" />
+    <link rel="prev" title="acryo" href="../index.html" />
+</head>
+
+<body class="wy-body-for-nav">
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+            <a href="../index.html" class="icon icon-home"> acryo
+          </a>
+              <div class="version">
+                0.1.1
+              </div>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Molecules</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#construction">Construction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#physical-parameters">Physical Parameters</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#molecule-axes">Molecule Axes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#physical-transformation">Physical Transformation</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#lateral-translation">Lateral translation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#self-centered-rotation">Self-centered rotation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#molecule-features">Molecule Features</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#filter-molecules">Filter molecules</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#group-molecules">Group molecules</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#save-molecules">Save Molecules</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="loader.html">Subtomogram Loader</a></li>
+<li class="toctree-l1"><a class="reference internal" href="pipe.html">Piping Images to the Loader</a></li>
+<li class="toctree-l1"><a class="reference internal" href="alignment.html">Alignment Model</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">acryo</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home"></a> &raquo;</li>
+      <li>Molecules</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/main/molecules.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+
+  <section id="molecules">
+<h1>Molecules<a class="headerlink" href="#molecules" title="Permalink to this headline"></a></h1>
+<p>A <code class="xref py py-class docutils literal notranslate"><span class="pre">Molecules</span></code> is an array of 3D molecules with three components.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pos</span><span class="p">,</span> <span class="n">rot</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">features</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span> <span class="o">...</span>
+</pre></div>
+</div>
+<ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">pos</span></code> (<cite>numpy.ndarray</cite>) … positions of the molecules.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">rot</span></code> (<cite>scipy.spatial.transform.Rotation</cite>) … rotation angles of the molecules.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">features</span></code> (<cite>polars.DataFrame</cite>) … scalar features of the molecules.</p></li>
+</ol>
+<figure class="align-default" id="id1">
+<img alt="coordinate system" src="../_images/molecule.png" />
+<figcaption>
+<p><span class="caption-text"><strong>Fig. 1</strong> Coordinate system of a molecule.</span><a class="headerlink" href="#id1" title="Permalink to this image"></a></p>
+</figcaption>
+</figure>
+<p>“Position” is a 3D coordinate of the molecules. “Rotation” is a rotation operator that
+converts the molecule axes <span class="math notranslate nohighlight">\(\vec{X}, \vec{Y}, \vec{Z}\)</span> to the world coordinate
+axes <span class="math notranslate nohighlight">\(\vec{x}, \vec{y}, \vec{z}\)</span>.</p>
+<p>Hereafter, “world coordinate” means <span class="math notranslate nohighlight">\(\vec{x}, \vec{y}, \vec{z}\)</span> and “molecule
+coordinate” means <span class="math notranslate nohighlight">\(\vec{X}, \vec{Y}, \vec{Z}\)</span>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Any arrays representing 3D coordinates are arranged in z, y, x order in <a class="reference internal" href="../apidoc/acryo.html#module-acryo" title="acryo"><code class="xref py py-mod docutils literal notranslate"><span class="pre">acryo</span></code></a>.
+This is because the (x, y, z) element of a 3D array <code class="docutils literal notranslate"><span class="pre">arr</span></code> is accessed by
+<code class="docutils literal notranslate"><span class="pre">arr[z,</span> <span class="pre">y,</span> <span class="pre">x]</span></code>.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p><a class="reference internal" href="../apidoc/acryo.html#module-acryo" title="acryo"><code class="xref py py-mod docutils literal notranslate"><span class="pre">acryo</span></code></a> uses the right-handed coordinate system, which means that any axes
+satisfy the rule <span class="math notranslate nohighlight">\(\vec{x} \times \vec{y} = \vec{z}\)</span>. However, all the arrays
+are in z, y, x order so that programatically, you have to calculate in the
+left-handed manner.</p>
+<p>For instance, if you have x, y vectors <code class="docutils literal notranslate"><span class="pre">x</span></code> and <code class="docutils literal notranslate"><span class="pre">y</span></code>, you have to run
+<code class="docutils literal notranslate"><span class="pre">z</span> <span class="pre">=</span> <span class="pre">-np.cross(x,</span> <span class="pre">y)</span></code> to get the z vector. The rotation vector <code class="docutils literal notranslate"><span class="pre">[np.pi,</span> <span class="pre">0,</span> <span class="pre">0]</span></code>
+corresponds to 90-degree <strong>anti-clockwise</strong> rotation around the z-axis.</p>
+</div>
+<div class="contents local topic" id="contents">
+<p class="topic-title">Contents</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#construction" id="id2">Construction</a></p></li>
+<li><p><a class="reference internal" href="#physical-parameters" id="id3">Physical Parameters</a></p></li>
+<li><p><a class="reference internal" href="#molecule-axes" id="id4">Molecule Axes</a></p></li>
+<li><p><a class="reference internal" href="#physical-transformation" id="id5">Physical Transformation</a></p></li>
+<li><p><a class="reference internal" href="#molecule-features" id="id6">Molecule Features</a></p></li>
+<li><p><a class="reference internal" href="#save-molecules" id="id7">Save Molecules</a></p></li>
+</ul>
+</div>
+<section id="construction">
+<h2><a class="toc-backref" href="#id2">Construction</a><a class="headerlink" href="#construction" title="Permalink to this headline"></a></h2>
+<p>The basic constructor of <code class="xref py py-class docutils literal notranslate"><span class="pre">Molecules</span></code> takes an array of positions and
+another array that represents molecule rotations.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">scipy.spatial.transform</span> <span class="kn">import</span> <span class="n">Rotation</span>
+<span class="kn">from</span> <span class="nn">acryo</span> <span class="kn">import</span> <span class="n">Molecules</span>
+
+<span class="n">mole</span> <span class="o">=</span> <span class="n">Molecules</span><span class="p">(</span>
+    <span class="n">pos</span><span class="o">=</span><span class="p">[[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">],</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">]],</span>  <span class="c1"># positions</span>
+    <span class="n">rot</span><span class="o">=</span><span class="n">Rotation</span><span class="o">.</span><span class="n">from_euler</span><span class="p">(</span><span class="s1">&#39;xyz&#39;</span><span class="p">,</span> <span class="p">[[</span><span class="mi">20</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]]),</span>  <span class="c1"># rotations</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<p>The <code class="docutils literal notranslate"><span class="pre">mole</span></code> object defined here has two molecules at positions <span class="math notranslate nohighlight">\((z=0, y=1, x=2)\)</span>
+and <span class="math notranslate nohighlight">\((z=1, y=2, x=3)\)</span> with rotations given by the <code class="docutils literal notranslate"><span class="pre">rot</span></code> argument. The rotation
+argument means that <code class="docutils literal notranslate"><span class="pre">rot.apply([0,</span> <span class="pre">0,</span> <span class="pre">1])</span></code> matches the molecule axis <span class="math notranslate nohighlight">\(\vec{X}\)</span>.</p>
+<p>Many class methods defined in <code class="xref py py-class docutils literal notranslate"><span class="pre">scipy.spatial.transform.Rotation</span></code> are also
+available as short-hand expressions. All of them take an array of positions and
+other arguments required to construct a <code class="xref py py-class docutils literal notranslate"><span class="pre">scipy.spatial.transform.Rotation</span></code>.</p>
+<ul class="simple">
+<li><p><code class="xref py py-meth docutils literal notranslate"><span class="pre">Molecules.from_euler()</span></code> … construction using Euler angles.</p></li>
+<li><p><code class="xref py py-meth docutils literal notranslate"><span class="pre">Molecules.from_rotvec()</span></code> … construction using rotation vector.</p></li>
+<li><p><code class="xref py py-meth docutils literal notranslate"><span class="pre">Molecules.from_quat()</span></code> … construction using quaternions.</p></li>
+<li><p><code class="xref py py-meth docutils literal notranslate"><span class="pre">Molecules.from_matrix()</span></code> … construction using rotation matrix.</p></li>
+</ul>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">mole</span> <span class="o">=</span> <span class="n">Molecules</span><span class="o">.</span><span class="n">from_euler</span><span class="p">(</span>
+    <span class="n">pos</span><span class="o">=</span><span class="p">[[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">]],</span>
+    <span class="n">angles</span><span class="o">=</span><span class="p">[[</span><span class="mi">20</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">30</span><span class="p">,</span> <span class="mi">0</span><span class="p">]],</span>
+    <span class="n">degrees</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="physical-parameters">
+<h2><a class="toc-backref" href="#id3">Physical Parameters</a><a class="headerlink" href="#physical-parameters" title="Permalink to this headline"></a></h2>
+<p>Physical parameters of <code class="xref py py-class docutils literal notranslate"><span class="pre">Molecules</span></code> can be obtained by following properties.</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">Molecules.pos</span></code> … positions of molecules in a (N, 3) array.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Molecules.rotator</span></code> … <code class="xref py py-class docutils literal notranslate"><span class="pre">scipy.spatial.transform.Rotation</span></code> object.</p></li>
+</ul>
+<p>Array representation of the rotation can be obtained by following methods.</p>
+<ul class="simple">
+<li><p><code class="xref py py-meth docutils literal notranslate"><span class="pre">Molecules.euler_angle()</span></code></p></li>
+<li><p><code class="xref py py-meth docutils literal notranslate"><span class="pre">Molecules.rotvec()</span></code></p></li>
+<li><p><code class="xref py py-meth docutils literal notranslate"><span class="pre">Molecules.quaternion()</span></code></p></li>
+<li><p><code class="xref py py-meth docutils literal notranslate"><span class="pre">Molecules.matrix()</span></code></p></li>
+</ul>
+</section>
+<section id="molecule-axes">
+<h2><a class="toc-backref" href="#id4">Molecule Axes</a><a class="headerlink" href="#molecule-axes" title="Permalink to this headline"></a></h2>
+<p>The axes of the rotated molecules (<span class="math notranslate nohighlight">\(\vec{X}, \vec{Y}, \vec{Z}\)</span> in Fig. 1)
+can be obtained as 3D vectors in the world coordinates using properties <code class="docutils literal notranslate"><span class="pre">x</span></code>, <code class="docutils literal notranslate"><span class="pre">y</span></code> and</p>
+<blockquote>
+<div><p><code class="docutils literal notranslate"><span class="pre">z</span></code> .</p>
+</div></blockquote>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">mole</span> <span class="o">=</span> <span class="n">Molecules</span><span class="o">.</span><span class="n">from_rotvec</span><span class="p">(</span>
+    <span class="p">[[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]],</span>
+    <span class="p">[[</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]],</span>  <span class="c1"># 90-degree rotation around z-axis</span>
+<span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">mole</span><span class="o">.</span><span class="n">x</span><span class="p">)</span>  <span class="c1"># [0., -1., 0.]</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">mole</span><span class="o">.</span><span class="n">y</span><span class="p">)</span>  <span class="c1"># [0., 0., 1.]</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">mole</span><span class="o">.</span><span class="n">z</span><span class="p">)</span>  <span class="c1"># [1., 0., 0.]</span>
+</pre></div>
+</div>
+</section>
+<section id="physical-transformation">
+<h2><a class="toc-backref" href="#id5">Physical Transformation</a><a class="headerlink" href="#physical-transformation" title="Permalink to this headline"></a></h2>
+<p><code class="xref py py-class docutils literal notranslate"><span class="pre">Molecules</span></code> supports several methods to transform molecules in the physical
+coordinate system.</p>
+<section id="lateral-translation">
+<h3>Lateral translation<a class="headerlink" href="#lateral-translation" title="Permalink to this headline"></a></h3>
+<p>If you want to translate molecules with their rotation fixed, following methods
+will be useful.</p>
+<ul class="simple">
+<li><p><code class="xref py py-meth docutils literal notranslate"><span class="pre">Molecules.translate()</span></code> … translate molecules in the world coordinates.</p></li>
+<li><p><code class="xref py py-meth docutils literal notranslate"><span class="pre">Molecules.translate_internal()</span></code> … translate molecules in the molecule coordinates.</p></li>
+</ul>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">mole</span> <span class="o">=</span> <span class="n">Molecules</span><span class="p">([[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">]])</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">mole</span><span class="o">.</span><span class="n">pos</span><span class="p">)</span>  <span class="c1"># [[0., 0., 0.], [1., 1., 1.]]</span>
+
+<span class="n">mole</span><span class="o">.</span><span class="n">translate</span><span class="p">([[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="p">[</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">]])</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">mole</span><span class="o">.</span><span class="n">pos</span><span class="p">)</span>  <span class="c1"># [[1., 0., 0.], [4., 4., 0.]]</span>
+</pre></div>
+</div>
+</section>
+<section id="self-centered-rotation">
+<h3>Self-centered rotation<a class="headerlink" href="#self-centered-rotation" title="Permalink to this headline"></a></h3>
+<p>If you want to rotate each molecules with their positions fixed, following methods
+will be useful.</p>
+<ul class="simple">
+<li><p><code class="xref py py-meth docutils literal notranslate"><span class="pre">Molecules.rotate_by()</span></code> … rotate each molecule using a <code class="xref py py-class docutils literal notranslate"><span class="pre">scipy.spatial.transform.Rotation</span></code>
+object.</p></li>
+<li><p><code class="xref py py-meth docutils literal notranslate"><span class="pre">Molecules.rotate_by_euler_angle()</span></code> … rotate each molecule using an array of
+Euler angles.</p></li>
+<li><p><code class="xref py py-meth docutils literal notranslate"><span class="pre">Molecules.rotate_by_rotvec()</span></code> … rotate each molecule using an array of
+rotation vectors.</p></li>
+<li><p><code class="xref py py-meth docutils literal notranslate"><span class="pre">Molecules.rotate_by_quaternion()</span></code> … rotate each molecule using an array of
+quaternions.</p></li>
+<li><p><code class="xref py py-meth docutils literal notranslate"><span class="pre">Molecules.rotate_by_matrix()</span></code> … rotate each molecule using an array of
+rotation matrices</p></li>
+<li><p><code class="xref py py-meth docutils literal notranslate"><span class="pre">Molecules.rotate_by_rotvec_internal()</span></code> … rotate each molecule using an array of
+rotation vectors. The components of the rotation vectors are described in the molecule
+coordinates of each molecules.</p></li>
+</ul>
+</section>
+</section>
+<section id="molecule-features">
+<h2><a class="toc-backref" href="#id6">Molecule Features</a><a class="headerlink" href="#molecule-features" title="Permalink to this headline"></a></h2>
+<p>“Features” means any scalar values associated with each molecule. Typical examples are:</p>
+<ul class="simple">
+<li><p>The shift of each molecule from the original position after subtomogram alignment.</p></li>
+<li><p>The cross-correlation coefficient between the subtomogram around each molecule and the
+reference image.</p></li>
+<li><p>Cluster labels of each molecule after classification.</p></li>
+</ul>
+<p><code class="xref py py-class docutils literal notranslate"><span class="pre">Molecules</span></code> object has a property <code class="docutils literal notranslate"><span class="pre">features</span></code> that stores the features as a
+<cite>polars.DataFrame</cite> object. You can set any DataFrame-like object to <code class="docutils literal notranslate"><span class="pre">features</span></code>.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># set features on construction</span>
+<span class="n">mole</span> <span class="o">=</span> <span class="n">Molecules</span><span class="p">(</span>
+    <span class="n">pos</span><span class="o">=</span><span class="p">[[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">]],</span>
+    <span class="n">features</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;xcorr&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mf">0.8</span><span class="p">,</span> <span class="mf">0.9</span><span class="p">]},</span>
+<span class="p">)</span>
+
+<span class="c1"># set features afterwhile</span>
+<span class="kn">import</span> <span class="nn">polars</span> <span class="k">as</span> <span class="nn">pl</span>
+
+<span class="n">mole</span><span class="o">.</span><span class="n">features</span> <span class="o">=</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">({</span><span class="s1">&#39;xcorr&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mf">0.8</span><span class="p">,</span> <span class="mf">0.9</span><span class="p">]})</span>
+</pre></div>
+</div>
+<section id="filter-molecules">
+<h3>Filter molecules<a class="headerlink" href="#filter-molecules" title="Permalink to this headline"></a></h3>
+<p>Molecule features can be used to filter molecules. The <code class="xref py py-meth docutils literal notranslate"><span class="pre">Molecules.filter()</span></code> method
+is a simple wrapper of <code class="xref py py-meth docutils literal notranslate"><span class="pre">polars.DataFrame.filter()</span></code> to filter molecules by its features.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">polars</span> <span class="k">as</span> <span class="nn">pl</span>
+
+<span class="n">mole</span> <span class="o">=</span> <span class="n">Molecules</span><span class="p">(</span>
+    <span class="n">pos</span><span class="o">=</span><span class="p">[[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span> <span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">]],</span>
+    <span class="n">features</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;xcorr&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mf">0.8</span><span class="p">,</span> <span class="mf">0.9</span><span class="p">,</span> <span class="mf">0.7</span><span class="p">]},</span>
+<span class="p">)</span>
+
+<span class="c1"># filter molecules with xcorr &gt; 0.85</span>
+<span class="n">mole_filt</span> <span class="o">=</span> <span class="n">mole</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s1">&#39;xcorr&#39;</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mf">0.85</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">mole_filt</span><span class="o">.</span><span class="n">pos</span><span class="p">)</span>  <span class="c1"># [[1., 1., 1.]]</span>
+</pre></div>
+</div>
+</section>
+<section id="group-molecules">
+<h3>Group molecules<a class="headerlink" href="#group-molecules" title="Permalink to this headline"></a></h3>
+<p>Molecule features can be used to group molecules. The <code class="xref py py-meth docutils literal notranslate"><span class="pre">Molecules.groupby()</span></code> method
+is a simple wrapper of <code class="xref py py-meth docutils literal notranslate"><span class="pre">polars.DataFrame.groupby()</span></code> to split a <code class="xref py py-class docutils literal notranslate"><span class="pre">Molecules</span></code>
+object into sub-groups.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">polars</span> <span class="k">as</span> <span class="nn">pl</span>
+
+<span class="n">mole</span> <span class="o">=</span> <span class="n">Molecules</span><span class="p">(</span>
+    <span class="n">pos</span><span class="o">=</span><span class="p">[[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span> <span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">]],</span>
+    <span class="n">features</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;labels&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;A&quot;</span><span class="p">,</span> <span class="s2">&quot;B&quot;</span><span class="p">,</span> <span class="s2">&quot;A&quot;</span><span class="p">]},</span>
+<span class="p">)</span>
+
+<span class="c1"># group molecules by their labels</span>
+<span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">mole_sub</span> <span class="ow">in</span> <span class="n">mole</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;labels&quot;</span><span class="p">):</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;label =&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">mole_sub</span><span class="o">.</span><span class="n">pos</span><span class="p">)</span>
+
+<span class="c1"># --- Out ---</span>
+<span class="c1"># label = A</span>
+<span class="c1"># [[0. 0. 0.]</span>
+<span class="c1">#  [2. 2. 2.]]</span>
+<span class="c1"># label = B</span>
+<span class="c1"># [[1. 1. 1.]]</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="save-molecules">
+<h2><a class="toc-backref" href="#id7">Save Molecules</a><a class="headerlink" href="#save-molecules" title="Permalink to this headline"></a></h2>
+<p>A <code class="xref py py-class docutils literal notranslate"><span class="pre">Molecules</span></code> object can be saved to a file using <code class="xref py py-meth docutils literal notranslate"><span class="pre">Molecules.to_csv()</span></code> method.
+This method merges the molecule positions, rotation and the features into a single table
+data like below. In <a class="reference internal" href="../apidoc/acryo.html#module-acryo" title="acryo"><code class="xref py py-mod docutils literal notranslate"><span class="pre">acryo</span></code></a>, rotation vector is used to save the rotations because
+it is the most compact form and is not as coordinate sensitive as Euler angle.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">mole</span> <span class="o">=</span> <span class="n">Molecules</span><span class="o">.</span><span class="n">from_rotvec</span><span class="p">(</span>
+    <span class="p">[[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="p">[</span><span class="mi">3</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span> <span class="p">[</span><span class="mi">5</span><span class="p">,</span> <span class="mi">6</span><span class="p">,</span> <span class="mi">2</span><span class="p">]],</span>
+    <span class="p">[[</span><span class="mf">0.5</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">,</span> <span class="mf">0.7</span><span class="p">],</span> <span class="p">[</span><span class="mf">0.6</span><span class="p">,</span> <span class="mf">0.2</span><span class="p">,</span> <span class="mf">0.4</span><span class="p">],</span> <span class="p">[</span><span class="mf">0.7</span><span class="p">,</span> <span class="mf">0.3</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">]]</span>
+<span class="p">)</span>
+<span class="n">mole</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="s2">&quot;path/to/molecules.csv&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 14%" />
+<col style="width: 14%" />
+<col style="width: 14%" />
+<col style="width: 19%" />
+<col style="width: 19%" />
+<col style="width: 19%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>z</p></th>
+<th class="head"><p>y</p></th>
+<th class="head"><p>x</p></th>
+<th class="head"><p>zvec</p></th>
+<th class="head"><p>yvec</p></th>
+<th class="head"><p>xvec</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>1.0</p></td>
+<td><p>2.0</p></td>
+<td><p>0.0</p></td>
+<td><p>0.5</p></td>
+<td><p>0.1</p></td>
+<td><p>0.7</p></td>
+</tr>
+<tr class="row-odd"><td><p>3.0</p></td>
+<td><p>4.0</p></td>
+<td><p>1.0</p></td>
+<td><p>0.6</p></td>
+<td><p>0.2</p></td>
+<td><p>0.4</p></td>
+</tr>
+<tr class="row-even"><td><p>5.0</p></td>
+<td><p>6.0</p></td>
+<td><p>2.0</p></td>
+<td><p>0.7</p></td>
+<td><p>0.3</p></td>
+<td><p>0.1</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="../index.html" class="btn btn-neutral float-left" title="acryo" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="loader.html" class="btn btn-neutral float-right" title="Subtomogram Loader" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2023, Hanjin Liu.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+
+</body>
+</html>
