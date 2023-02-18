@@ -305,18 +305,6 @@ def _get_indices(shape: tuple[int, ...]) -> NDArray[np.float32]:
     return np.fft.fftshift(np.stack(list(inds), axis=-1), axes=(0, 1, 2))
 
 
-def random_splitter(
-    rng: np.random.Generator,
-    nmole: int,
-) -> tuple[NDArray[np.bool_], NDArray[np.bool_]]:
-    sl = rng.choice(np.arange(nmole), nmole // 2).tolist()
-    indices0 = np.zeros(nmole, dtype=np.bool_)
-    indices0[sl] = True
-    indices1 = np.ones(nmole, dtype=np.bool_)
-    indices1[sl] = False
-    return indices0, indices1
-
-
 def normalize_shape(a: int | Sequence[int], ndim: int):
     if isinstance(a, int):
         _output_shape = (a,) * ndim

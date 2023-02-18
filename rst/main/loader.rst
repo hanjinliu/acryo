@@ -125,3 +125,31 @@ align the molecules and determine the best template for each molecule.
 
 Here, input templates must be given as a list of :class:`numpy.ndarray` objects of the
 same shape. ``label_name`` is the name used for the feature colummn of the best template.
+
+Filtering/Grouping Loaders
+==========================
+
+:meth:`filter` and :meth:`groupby` are two methods that are quite similar to the ones
+in :class:`Molecules` or :class:`DataFrame`.
+
+Filtering
+---------
+
+:meth:`filter` is a method that returns a new loader object with filtered molecules.
+
+.. code-block:: python
+
+    loader = SubtomogramLoader(image, molecules)
+    out = loader.filter(pl.col("score") > 0.5)
+    assert (out.molecules.features["score"] > 0.5).all()
+
+Grouping
+--------
+
+:meth:`groupby` is a method that returns a generator of (key, loader) pairs.
+
+.. code-block:: python
+
+    loader = SubtomogramLoader(image, molecules)
+    for cluster, ldr in loader.groupby("cluster_id"):
+        assert (out.molecules.features["cluster_id"] == cluster).all()

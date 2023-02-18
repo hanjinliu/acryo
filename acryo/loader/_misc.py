@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Iterable, Any
 import numpy as np
+from numpy.typing import NDArray
 import polars as pl
 
 
@@ -51,3 +52,15 @@ def allocate(size: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     local_rot[:, 3] = 1  # identity map in quaternion
 
     return local_shifts, local_rot, corr_max
+
+
+def random_splitter(
+    rng: np.random.Generator,
+    nmole: int,
+) -> tuple[NDArray[np.bool_], NDArray[np.bool_]]:
+    sl = rng.choice(np.arange(nmole), nmole // 2).tolist()
+    indices0 = np.zeros(nmole, dtype=np.bool_)
+    indices0[sl] = True
+    indices1 = np.ones(nmole, dtype=np.bool_)
+    indices1[sl] = False
+    return indices0, indices1

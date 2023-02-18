@@ -26,6 +26,7 @@ from acryo.alignment import (
     ZNCCAlignment,
     RotationImplemented,
     AlignmentFactory,
+    AlignmentResult,
 )
 from acryo._types import nm, pixel
 from acryo.molecules import Molecules
@@ -116,7 +117,12 @@ class LoaderBase(ABC):
         ...
 
     def copy(self) -> Self:
+        """Return a copy of the loader."""
         return self.replace()
+
+    def count(self) -> int:
+        """Return the number of subtomograms."""
+        return len(self.molecules)
 
     def iter_mapping_tasks(
         self,
@@ -344,13 +350,18 @@ class LoaderBase(ABC):
         dask_array = self.construct_dask(output_shape=output_shape)
         nmole = dask_array.shape[0]
         for _ in range(n_set):
-            ind0, ind1 = _utils.random_splitter(rng, nmole)
-            dask_avg0 = da.mean(dask_array[ind0], axis=0)
-            dask_avg1 = da.mean(dask_array[ind1], axis=0)
-            tasks.extend([dask_avg0, dask_avg1])
+            ind0, ind1 = _misc.random_splitter(rng, nmole)
+            _stack = da.stack(
+                [
+                    da.mean(dask_array[ind0], axis=0),
+                    da.mean(dask_array[ind1], axis=0),
+                ],
+                axis=0,
+            )
+            tasks.append(_stack)
 
         out = da.compute(tasks)[0]
-        stack = np.stack(out, axis=0).reshape(n_set, 2, *output_shape)
+        stack = np.stack(out, axis=0)
         if squeeze and n_set == 1:
             stack = stack[0]
         return stack
@@ -400,16 +411,22 @@ class LoaderBase(ABC):
         tasks = self.construct_mapping_tasks(
             model.align,
             max_shifts=_max_shifts_px,
-            output_shape=template.shape,
+            output_shape=model.input_shape,
             var_kwarg=dict(
                 quaternion=self.molecules.quaternion(),
                 pos=self.molecules.pos / self.scale,
             ),
         )
         all_results = da.compute(tasks)[0]
+        return self._post_align(all_results, template.shape)
 
-        local_shifts, local_rot, scores = _misc.allocate(len(tasks))
-        for i, result in enumerate(all_results):
+    def _post_align(
+        self,
+        results: list[AlignmentResult],
+        shape: tuple[int, int, int],
+    ) -> Self:
+        local_shifts, local_rot, scores = _misc.allocate(len(results))
+        for i, result in enumerate(results):
             _, local_shifts[i], local_rot[i], scores[i] = result
 
         rotator = Rotation.from_quat(local_rot)
@@ -422,7 +439,7 @@ class LoaderBase(ABC):
             _misc.get_feature_list(scores, local_shifts, rotator.as_rotvec()),
         )
 
-        return self.replace(molecules=mole_aligned, output_shape=template.shape)
+        return self.replace(molecules=mole_aligned, output_shape=shape)
 
     def align_no_template(
         self,
@@ -509,14 +526,6 @@ class LoaderBase(ABC):
             An loader instance with updated molecules.
         """
 
-        n_templates = len(templates)
-        nsubtomograms = len(self.molecules)
-
-        local_shifts, local_rot, corr_max = _misc.allocate(nsubtomograms)
-
-        # optimal template ID
-        labels = np.zeros(nsubtomograms, dtype=np.uint32)
-
         _max_shifts_px = np.asarray(max_shifts) / self.scale
 
         model = alignment_model(
@@ -527,16 +536,32 @@ class LoaderBase(ABC):
         tasks = self.construct_mapping_tasks(
             model.align,
             max_shifts=_max_shifts_px,
-            output_shape=templates[0].shape,
+            output_shape=model.input_shape,
             var_kwarg=dict(
                 quaternion=self.molecules.quaternion(),
                 pos=self.molecules.pos / self.scale,
             ),
         )
         all_results = da.compute(tasks)[0]
+        if isinstance(model, RotationImplemented) and model._n_rotations > 1:
+            remainder = len(templates)
+        else:
+            remainder = -1
+        return self._post_align_multi_templates(
+            all_results, model.input_shape, remainder, label_name
+        )
 
-        local_shifts, local_rot, scores = _misc.allocate(len(tasks))
-        for i, result in enumerate(all_results):
+    def _post_align_multi_templates(
+        self,
+        results: list[AlignmentResult],
+        shape: tuple[int, int, int],
+        remainder: int = -1,
+        label_name: str = "labels",
+    ):
+
+        local_shifts, local_rot, scores = _misc.allocate(len(results))
+        labels = np.zeros(len(results), dtype=np.uint32)
+        for i, result in enumerate(results):
             labels[i], local_shifts[i], local_rot[i], scores[i] = result
 
         rotator = Rotation.from_quat(local_rot)
@@ -545,18 +570,16 @@ class LoaderBase(ABC):
             rotator,
         )
 
-        if isinstance(model, RotationImplemented) and model._n_rotations > 1:
-            labels %= n_templates
+        if remainder > 1:
+            labels %= remainder
         labels = labels.astype(np.uint8)
 
-        feature_list = _misc.get_feature_list(
-            corr_max, local_shifts, rotator.as_rotvec()
-        )
+        feature_list = _misc.get_feature_list(scores, local_shifts, rotator.as_rotvec())
         mole_aligned.features = self.molecules.features.with_columns(
             feature_list + [pl.Series(label_name, labels)]
         )
 
-        return self.replace(molecules=mole_aligned, output_shape=templates[0].shape)
+        return self.replace(molecules=mole_aligned, output_shape=shape)
 
     def agg(
         self,
@@ -722,15 +745,15 @@ class LoaderBase(ABC):
         return self.replace(molecules=self.molecules.filter(predicate))
 
     @overload
-    def groupby(self, by: str | pl.Expr) -> LoaderGroup[str]:
+    def groupby(self, by: str | pl.Expr) -> LoaderGroup[str, Self]:
         ...
 
     @overload
-    def groupby(self, by: list[str | pl.Expr]) -> LoaderGroup[tuple[str, ...]]:
+    def groupby(self, by: list[str | pl.Expr]) -> LoaderGroup[tuple[str, ...], Self]:
         ...
 
     def groupby(self, by):
-        return LoaderGroup(
+        return LoaderGroup._from_loader(
             self,
             by,
             order=self.order,
