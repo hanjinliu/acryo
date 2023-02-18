@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Callable, TypeVar
 from typing_extensions import ParamSpec, Concatenate
-import numpy as np
-from acryo.loader import ImageProvider, ImageConverter
 import inspect
+import numpy as np
+from acryo.pipe._classes import ImageProvider, ImageConverter
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")

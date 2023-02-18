@@ -34,7 +34,7 @@ from acryo._types import nm, pixel
 from acryo.molecules import Molecules
 from acryo.loader import _misc
 from acryo.loader._group import LoaderGroup
-from acryo.loader._input import ImageProvider, ImageConverter
+from acryo.pipe._classes import ImageProvider, ImageConverter
 
 if TYPE_CHECKING:
     from typing_extensions import Self

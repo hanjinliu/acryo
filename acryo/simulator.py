@@ -7,9 +7,10 @@ from numpy.typing import NDArray
 from scipy import ndimage as ndi
 from scipy.spatial.transform import Rotation
 
+from acryo import _utils
 from acryo._types import nm, pixel
 from acryo.molecules import Molecules
-from acryo import _utils
+from acryo.pipe._classes import ImageProvider
 
 if TYPE_CHECKING:
     from typing_extensions import Self, Literal
@@ -23,7 +24,7 @@ class Component(NamedTuple):
     """A component of tomogram."""
 
     molecules: Molecules
-    image: np.ndarray
+    image: NDArray[np.float32] | ImageProvider
 
 
 class TomogramSimulator:
@@ -125,7 +126,7 @@ class TomogramSimulator:
     def add_molecules(
         self,
         molecules: Molecules,
-        image: np.ndarray,
+        image: NDArray[np.float32] | ImageProvider,
         *,
         name: str | None = None,
         overwrite: bool = False,
@@ -138,8 +139,8 @@ class TomogramSimulator:
         molecules : Molecules
             Molecules object that defines the coordinates and orientations of the
             input molecules.
-        image : np.ndarray
-            Density image of the input molecules.
+        image : np.ndarray or ImageProvider
+            Density image of the input molecules, or an image provider.
         name : str, optional
             Name of the molecules., by default None
         overwrite : bool, default is False
@@ -154,7 +155,14 @@ class TomogramSimulator:
             name = f"component<{hex(id(molecules))}>"
         if not overwrite and name in self._components:
             raise ValueError(f"Component of name {name!r} already exists.")
-        self._components[name] = Component(molecules, image.astype(np.float32))
+        if isinstance(image, np.ndarray):
+            if image.dtype != np.float32:
+                image = image.astype(np.float32)
+        elif not isinstance(image, ImageProvider):
+            raise TypeError(
+                f"The second argument must be an array or an ImageProvider, got {type(image)}."
+            )
+        self._components[name] = Component(molecules, image)
         return self
 
     def collect_molecules(self) -> Molecules:
@@ -219,17 +227,21 @@ class TomogramSimulator:
         """Simulate a grayscale tomogram."""
         tomogram = np.zeros(shape, dtype=np.float32)
         for mol, image in self._components.values():
-            starts, stops, mtxs = _prep_iterators(mol, image, self._scale)
+            if isinstance(image, ImageProvider):
+                img = image(self.scale)
+            else:
+                img = image
+            starts, stops, mtxs = _prep_iterators(mol, img, self._scale)
 
             # prefilter here to avoid repeated computation
             if self.order > 1:
-                image = ndi.spline_filter(image, order=self.order, mode="constant")
+                img = ndi.spline_filter(img, order=self.order, mode="constant")
 
             for start, stop, mtx in zip(starts, stops, mtxs):
-                sl_src, sl_dst = _prep_slices(start, stop, shape, image.shape)
+                sl_src, sl_dst = _prep_slices(start, stop, shape, img.shape)
 
                 transformed = ndi.affine_transform(
-                    image,
+                    img,
                     mtx,
                     mode="constant",
                     cval=0.0,
@@ -248,23 +260,27 @@ class TomogramSimulator:
         """Simulate a colored tomogram."""
         tomogram = np.zeros((3,) + shape, dtype=np.float32)
         for mol, image in self._components.values():
+            if isinstance(image, ImageProvider):
+                img = image(self.scale)
+            else:
+                img = image
             # image slice must be integer so split it into two parts
-            img_min = image.min()
-            img_max = image.max()
-            starts, stops, mtxs = _prep_iterators(mol, image, self._scale)
+            img_min = img.min()
+            img_max = img.max()
+            starts, stops, mtxs = _prep_iterators(mol, img, self._scale)
 
             # prefilter here to avoid repeated computation
             if self.order > 1:
-                image = ndi.spline_filter(image, order=self.order, mode="constant")
+                img = ndi.spline_filter(img, order=self.order, mode="constant")
 
             feat = mol.features
             for i, (start, stop, mtx) in enumerate(zip(starts, stops, mtxs)):
                 _cr, _cg, _cb = colormap(feat[i])
-                sl_src, sl_dst = _prep_slices(start, stop, shape, image.shape)
+                sl_src, sl_dst = _prep_slices(start, stop, shape, img.shape)
                 sl_dst = (slice(None),) + sl_dst
 
                 transformed = ndi.affine_transform(
-                    image,
+                    img,
                     mtx,
                     mode="constant",
                     cval=0.0,
@@ -282,8 +298,12 @@ class TomogramSimulator:
         """Simulate a grayscale tomogram."""
         tomogram = np.zeros(shape, dtype=np.float32)
         for mol, image in self._components.values():
-            starts, stops, mtxs = _prep_iterators(mol, image, self._scale)
-            zsize = mol.pos[:, 0].max() / self.scale + np.sum(image.shape)
+            if isinstance(image, ImageProvider):
+                img = image(self.scale)
+            else:
+                img = image
+            starts, stops, mtxs = _prep_iterators(mol, img, self._scale)
+            zsize = mol.pos[:, 0].max() / self.scale + np.sum(img.shape)
             shape3d = (int(np.ceil(zsize)),) + shape
 
             # reduce z axis
@@ -291,12 +311,12 @@ class TomogramSimulator:
 
             # prefilter here to avoid repeated computation
             if self.order > 1:
-                image = ndi.spline_filter(image, order=self.order, mode="constant")
+                img = ndi.spline_filter(img, order=self.order, mode="constant")
 
             for start, stop, mtx in zip(starts, stops, mtxs):
-                sl_src, sl_dst = _prep_slices(start, stop, shape3d, image.shape)
+                sl_src, sl_dst = _prep_slices(start, stop, shape3d, img.shape)
                 transformed = ndi.affine_transform(
-                    image,
+                    img,
                     mtx,
                     mode="constant",
                     cval=0.0,
