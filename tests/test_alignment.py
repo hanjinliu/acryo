@@ -71,3 +71,36 @@ def test_pca_classify():
     )
     mask = temp > np.mean(temp)
     loader.classify(mask.astype(np.float32), tilt_range=(-60, 60))
+
+
+def test_multi_align():
+    from acryo import TomogramSimulator, Molecules
+
+    sim = TomogramSimulator(scale=1)
+    img0 = np.zeros((9, 9, 9), dtype=np.float32)
+    img0[3:5, 3:5, 3:5] = 1
+    img1 = np.zeros((9, 9, 9), dtype=np.float32)
+    for sl in [
+        (4, 4, 4),
+        (3, 4, 4),
+        (4, 3, 4),
+        (4, 4, 3),
+        (5, 4, 4),
+        (4, 5, 4),
+        (4, 4, 5),
+    ]:
+        img1[sl] = 1
+
+    sim.add_molecules(Molecules([[10, 15, 15], [10, 35, 15]]), img0)
+    sim.add_molecules(Molecules([[10, 15, 35]]), img1)
+
+    tomo = sim.simulate((20, 50, 50))
+    mole = Molecules([[10, 15, 15], [10, 15, 35], [10, 35, 15]]).translate(
+        [[0, 1, 0], [1, 1, 0], [0, 1, -1]]
+    )
+    loader = SubtomogramLoader(tomo, mole, order=3, scale=1)
+    label_name = "labels"
+    out = loader.align_multi_templates(
+        [img0, img1], max_shifts=2, label_name=label_name
+    )
+    assert list(out.features[label_name]) == [0, 1, 0]

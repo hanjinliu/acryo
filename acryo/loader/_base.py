@@ -1,42 +1,50 @@
-# pyright: reportPrivateImportUsage=false
-
 from __future__ import annotations
-import psutil
+
+from contextlib import contextmanager
+from abc import ABC, abstractmethod, abstractproperty
 from typing import (
     Callable,
     TYPE_CHECKING,
+    ContextManager,
     Iterable,
     Iterator,
     NamedTuple,
-    TypeVar,
     Any,
+    SupportsIndex,
+    Union,
+    overload,
 )
 import tempfile
-from scipy.spatial.transform import Rotation
 import numpy as np
+from numpy.typing import NDArray
 from dask import array as da
 from dask.delayed import delayed
+from scipy.spatial.transform import Rotation
 import polars as pl
 
 from acryo.alignment import (
     BaseAlignmentModel,
     ZNCCAlignment,
     RotationImplemented,
+    AlignmentFactory,
+    AlignmentResult,
 )
-from acryo._types import nm, pixel
-from acryo._reader import imread
-from acryo.molecules import Molecules
 from acryo import _utils
+from acryo._types import nm, pixel
+from acryo.molecules import Molecules
+from acryo.loader import _misc
+from acryo.loader._group import LoaderGroup
+from acryo.loader._input import ImageProvider, ImageConverter
 
 if TYPE_CHECKING:
     from typing_extensions import Self
     from dask.delayed import Delayed
-    from numpy.typing import NDArray
     from acryo.classification import PcaClassifier
 
+    _ShapeType = Union[pixel, tuple[pixel, ...], None]
 
-_R = TypeVar("_R")
-MEMORY_LIMIT = psutil.virtual_memory().total
+TemplateInputType = Union[NDArray[np.float32], ImageProvider]
+MaskInputType = Union[NDArray[np.float32], ImageProvider, ImageConverter, None]
 
 
 class Unset:
@@ -47,109 +55,28 @@ class Unset:
         return "Unset"
 
 
-class SubtomogramLoader:
-    """
-    A class for efficient loading of subtomograms.
-
-    A ``SubtomogramLoader`` instance is basically composed of two elements,
-    an image and a Molecules object. A subtomogram is loaded by creating a
-    local rotated Cartesian coordinate at a molecule and calculating mapping
-    from the image to the subtomogram.
-
-    Parameters
-    ----------
-    image : np.ndarray or da.Array
-        Tomogram image. Must be 3-D.
-    molecules : Molecules
-        Molecules object that represents positions and orientations of
-        subtomograms.
-    order : int, default is 3
-        Interpolation order of subtomogram sampling.
-        - 0 = Nearest neighbor
-        - 1 = Linear interpolation
-        - 3 = Cubic interpolation
-    scale : float, default is 1.0
-        Physical scale of pixel, such as nm. This value does not affect
-        averaging/alignment results but molecule coordinates are multiplied
-        by this value. This parameter is useful when another loader with
-        binned image is created.
-    output_shape : int or tuple of int, optional
-        Shape of output subtomogram in pixel. This parameter is not required
-        if template (or mask) image is available immediately.
-    corner_safe : bool, default is False
-        If true, regions around molecules will be cropped at a volume larger
-        than ``output_shape`` so that densities at the corners will not be
-        lost due to rotation. If target density is globular, this parameter
-        should be set false to save computation time.
-    """
-
+class LoaderBase(ABC):
     def __init__(
         self,
-        image: np.ndarray | da.Array,
-        molecules: Molecules,
         order: int = 3,
         scale: nm = 1.0,
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
         corner_safe: bool = False,
     ) -> None:
-        # check type of input image
-        if not isinstance(image, (np.ndarray, da.Array)):
-            raise TypeError(
-                "Input image of a SubtomogramLoader instance must be np.ndarray "
-                f"or dask.Array, got {type(image)}."
-            )
-
-        self._image = image
-
-        # check type of molecules
-        if not isinstance(molecules, Molecules):
-            raise TypeError(
-                "The second argument 'molecules' must be a Molecules object, got"
-                f"{type(molecules)}."
-            )
-        self._molecules = molecules
-
+        ndim = 3
         self._order, self._output_shape, self._scale, self._corner_safe = check_input(
-            order, output_shape, scale, corner_safe, image.ndim
+            order, output_shape, scale, corner_safe, ndim
         )
         self._cached_dask_array: da.Array | None = None
 
-    def __repr__(self) -> str:
-        shape = self.image.shape
-        mole_repr = repr(self.molecules)
-        return (
-            f"{self.__class__.__name__}(tomogram={shape}, molecules={mole_repr}, "
-            f"output_shape={self.output_shape}, order={self.order}, "
-            f"scale={self.scale:.4f})"
-        )
-
-    @classmethod
-    def imread(
-        cls,
-        path: str,
-        molecules: Molecules,
-        order: int = 3,
-        scale: nm | None = None,
-        output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
-        corner_safe: bool = False,
-        chunks: Any = "auto",
-    ):
-        dask_array, _scale = imread(path, chunks)
-        if scale is None:
-            scale = _scale
-        return cls(
-            dask_array,
-            molecules=molecules,
-            order=order,
-            scale=scale,
-            output_shape=output_shape,
-            corner_safe=corner_safe,
-        )
+    @abstractproperty
+    def molecules(self) -> Molecules:
+        """All the molecules"""
 
     @property
-    def image(self) -> NDArray[np.float32] | da.Array:
-        """Return tomogram image."""
-        return self._image
+    def features(self) -> pl.DataFrame:
+        """Collect all the features from all the molecules"""
+        return self.molecules.features
 
     @property
     def scale(self) -> nm:
@@ -157,19 +84,9 @@ class SubtomogramLoader:
         return self._scale
 
     @property
-    def output_shape(self) -> tuple[pixel, ...] | Unset:
+    def output_shape(self) -> tuple[pixel, pixel, pixel] | Unset:
         """Return the output subtomogram shape."""
         return self._output_shape
-
-    @property
-    def molecules(self) -> Molecules:
-        """Return the molecules of the subtomogram loader."""
-        return self._molecules
-
-    @property
-    def features(self) -> pl.DataFrame:
-        """The features of molecules."""
-        return self._molecules.features
 
     @property
     def order(self) -> int:
@@ -178,12 +95,20 @@ class SubtomogramLoader:
 
     @property
     def corner_safe(self) -> bool:
+        """Whether rotation is corner-safe."""
         return self._corner_safe
 
-    def __len__(self) -> int:
-        """Return the number of subtomograms."""
-        return self.molecules.pos.shape[0]
+    @abstractmethod
+    def construct_dask(self, output_shape: _ShapeType = None) -> da.Array:
+        ...
 
+    @abstractmethod
+    def construct_loading_tasks(
+        self, output_shape: _ShapeType = None
+    ) -> list[da.Array]:
+        ...
+
+    @abstractmethod
     def replace(
         self,
         molecules: Molecules | None = None,
@@ -192,120 +117,21 @@ class SubtomogramLoader:
         scale: float | None = None,
         corner_safe: bool | None = None,
     ) -> Self:
-        """Return a new instance with different parameter(s)."""
-        if molecules is None:
-            molecules = self.molecules
-        if output_shape is None:
-            output_shape = self.output_shape
-        if order is None:
-            order = self.order
-        if scale is None:
-            scale = self.scale
-        if corner_safe is None:
-            corner_safe = self.corner_safe
-        return self.__class__(
-            self.image,
-            molecules=molecules,
-            output_shape=output_shape,
-            order=order,
-            scale=scale,
-            corner_safe=corner_safe,
-        )
+        ...
 
     def copy(self) -> Self:
-        """Create a shallow copy of the loader."""
+        """Return a copy of the loader."""
         return self.replace()
 
-    def binning(self, binsize: pixel = 2, *, compute: bool = True) -> Self:
-        tr = -(binsize - 1) / 2 * self.scale
-        molecules = self.molecules.translate([tr, tr, tr])
-        binned_image = _utils.bin_image(self.image, binsize=binsize)
-        if isinstance(binned_image, da.Array) and compute:
-            binned_image = binned_image.compute()
-        out = self.replace(
-            molecules=molecules,
-            scale=self.scale * binsize,
-        )
-
-        out._image = binned_image
-        return out
-
-    def construct_loading_tasks(
-        self,
-        output_shape: pixel | tuple[pixel, ...] | None = None,
-    ) -> list[Delayed]:
-        """
-        Construct a list of subtomogram lazy loader.
-
-        Returns
-        -------
-        list of Delayed object
-            Each object returns a subtomogram on execution by ``da.compute``.
-        """
-        image = self.image
-        scale = self.scale
-        if isinstance(image, np.ndarray):
-            image = da.from_array(image)
-
-        output_shape = self._get_output_shape(output_shape)
-
-        if self.corner_safe:
-            _prep = _utils.prepare_affine_cornersafe
-        else:
-            _prep = _utils.prepare_affine
-        tasks = []
-        for i in range(len(self)):
-            subvol, mtx = _prep(
-                image,
-                center=self.molecules.pos[i] / scale,
-                output_shape=output_shape,
-                rot=self.molecules.rotator[i],
-            )
-            task = _utils.rotated_crop(
-                subvol,
-                mtx,
-                shape=output_shape,
-                order=self.order,
-                mode="constant",
-                cval=np.mean,
-            )
-            tasks.append(task)
-
-        return tasks
-
-    def construct_dask(
-        self,
-        output_shape: pixel | tuple[pixel, ...] | None = None,
-    ) -> da.Array:
-        """
-        Construct a dask array of subtomograms.
-
-        This function is always needed before parallel processing. If subtomograms
-        are cached in a memory-map it will be used instead.
-
-        Returns
-        -------
-        da.Array
-            An 4-D array which ``arr[i]`` corresponds to the ``i``-th subtomogram.
-        """
-        if self._cached_dask_array is not None:
-            return self._cached_dask_array
-
-        output_shape = self._get_output_shape(output_shape)
-
-        tasks = self.construct_loading_tasks(output_shape=output_shape)
-        arrays = []
-        for task in tasks:
-            arrays.append(da.from_delayed(task, shape=output_shape, dtype=np.float32))
-
-        out = da.stack(arrays, axis=0)
-        return out
+    def count(self) -> int:
+        """Return the number of subtomograms."""
+        return len(self.molecules)
 
     def iter_mapping_tasks(
         self,
         func: Callable,
         *const_args,
-        output_shape: pixel | tuple[pixel, ...] | None = None,
+        output_shape: _ShapeType = None,
         var_kwarg: dict[str, Iterable[Any]] | None = None,
         **const_kwargs,
     ) -> Iterator[Delayed]:
@@ -327,6 +153,7 @@ class SubtomogramLoader:
         da.delayed.Delayed object
             Delayed tasks that are ready for ``da.compute``.
         """
+        output_shape = self._get_output_shape(output_shape)
         dask_array = self.construct_loading_tasks(output_shape=output_shape)
         delayed_f = delayed(func)
         if var_kwarg is None:
@@ -334,7 +161,7 @@ class SubtomogramLoader:
         else:
             it = (
                 delayed_f(ar, *const_args, **const_kwargs, **kw)
-                for ar, kw in zip(dask_array, _dict_iterrows(var_kwarg))
+                for ar, kw in zip(dask_array, _misc.dict_iterrows(var_kwarg))
             )
         return it
 
@@ -342,7 +169,7 @@ class SubtomogramLoader:
         self,
         func: Callable,
         *const_args,
-        output_shape: pixel | tuple[pixel, ...] | None = None,
+        output_shape: _ShapeType = None,
         var_kwarg: dict[str, Iterable[Any]] | None = None,
         **const_kwargs,
     ) -> list[Delayed]:
@@ -374,11 +201,7 @@ class SubtomogramLoader:
             )
         )
 
-    def create_cache(
-        self,
-        output_shape: pixel | tuple[pixel] | None = None,
-        path: str | None = None,
-    ) -> da.Array:
+    def create_cache(self, output_shape: _ShapeType = None) -> da.Array:
         """
         Create cached stack of subtomograms.
 
@@ -392,49 +215,98 @@ class SubtomogramLoader:
         -------
         da.Array
             A lazy-loading array that uses the memory-mapped array.
-
-        Examples
-        --------
-        1. Get i-th subtomogram.
-
-        >>> arr = loader.create_cache()
-        >>> arr[i]
-
-        2. Subtomogram averaging.
-
-        >>> arr = loader.create_cache()
-        >>> avg = np.mean(arr, axis=0).mean()
-
         """
         output_shape = self._get_output_shape(output_shape)
+        if self._cache_available(output_shape):
+            # cache is already available
+            return self._cached_dask_array
         dask_array = self.construct_dask(output_shape=output_shape)
-        shape = (len(self.molecules),) + output_shape
-        kwargs = dict(dtype=np.float32, mode="w+", shape=shape)
-        if path is None:
-            with tempfile.NamedTemporaryFile() as ntf:
-                mmap = np.memmap(ntf, **kwargs)
-        else:
-            mmap = np.memmap(path, **kwargs)
+        shape = dask_array.shape
+        with tempfile.NamedTemporaryFile() as ntf:
+            mmap = np.memmap(ntf, dtype=np.float32, mode="w+", shape=shape)
 
-        mmap[:] = dask_array[:]
+        da.store(dask_array, mmap, compute=True)
+
         darr = da.from_array(
             mmap,
-            chunks=(1,) + self.output_shape,  # type: ignore
+            chunks=("auto",) + self.output_shape,  # type: ignore
             meta=np.array([], dtype=np.float32),
         )
+        self._cached_dask_array = darr
         return darr
 
-    def asnumpy(self, *, lim: int = MEMORY_LIMIT) -> NDArray[np.float32]:
-        """Create a 4D image stack of all the subtomograms."""
-        arr = self.construct_dask()
-        if arr.nbytes > lim:
-            raise MemoryError("The array is too large to be loaded into memory.")
-        return arr.compute()
+    def clear_cache(self):
+        del self._cached_dask_array
+        self._cached_dask_array = None
+        return None
 
-    def average(
+    @contextmanager
+    def cached(self, output_shape: _ShapeType = None) -> ContextManager[da.Array]:
+        """
+        Context manager for caching subtomograms of give shape.
+
+        Subtomograms are cached in a temporary memory-map file. Within this context
+        loading subtomograms of given output shape will be faster.
+        """
+        old_cache = self._cached_dask_array
+        arr = self.create_cache(output_shape=output_shape)
+        try:
+            yield arr
+        finally:
+            del self._cached_dask_array
+            self._cached_dask_array = old_cache
+
+    def load(
         self,
-        output_shape: pixel | tuple[pixel] | None = None,
-    ) -> NDArray[np.float32]:
+        idx: SupportsIndex | slice | Iterable[SupportsIndex],
+        output_shape: _ShapeType = None,
+    ):
+        """
+        Load subtomogram(s) of given index.
+
+        Parameters
+        ----------
+        idx : int, slice or iterable of int
+            Subtomogram index.
+        output_shape : int or tuple of int, optional
+            Shape of the output subtomograms.
+
+        Returns
+        -------
+        3D array or 4D array
+            Subtomogram(s) of given index.
+        """
+        tasks = self.construct_loading_tasks(output_shape=output_shape)
+        if isinstance(idx, SupportsIndex):
+            return tasks[idx].compute()
+        elif isinstance(idx, slice):
+            return da.stack(tasks[idx], axis=0).compute()
+        elif isinstance(idx, Iterable):
+            return da.stack([tasks[i] for i in idx], axis=0).compute()
+        else:
+            raise TypeError(f"Invalid index type: {type(idx)}")
+
+    def load_iter(
+        self, output_shape: _ShapeType = None
+    ) -> Iterator[NDArray[np.float32]]:
+        """
+        Iterate over subtomograms.
+
+        Parameters
+        ----------
+        output_shape : int or tuple of int, optional
+            Shape of the output subtomograms.
+
+        Yields
+        ------
+        3D array
+            Subtomogram
+        """
+        tasks = self.construct_loading_tasks(output_shape=output_shape)
+        for task in tasks:
+            yield task.compute()
+
+    def average(self, output_shape: _ShapeType = None) -> NDArray[np.float32]:
         """
         Calculate the average of subtomograms.
 
@@ -446,6 +318,7 @@ class SubtomogramLoader:
         np.ndarray
             Averaged image
         """
+        output_shape = self._get_output_shape(output_shape)
         dask_array = self.construct_dask(output_shape=output_shape)
         return da.compute(da.mean(dask_array, axis=0))[0]
 
@@ -454,7 +327,7 @@ class SubtomogramLoader:
         n_set: int = 1,
         seed: int | None = 0,
         squeeze: bool = True,
-        output_shape: pixel | tuple[pixel] | None = None,
+        output_shape: _ShapeType = None,
     ) -> NDArray[np.float32]:
         """
         Split subtomograms into two set and average separately.
@@ -469,6 +342,11 @@ class SubtomogramLoader:
             Number of split set of averaged image.
         seed : random seed, default is 0
             Random seed to determine how subtomograms will be split.
+        squeeze : bool, default is True
+            If true and n_set is 1, return a 4D array.
+        output_shape : tuple of int, optional
+            Output shape of the averaged image. If not given, the default output
+            shape of the loader object will be used.
 
         Returns
         -------
@@ -482,24 +360,29 @@ class SubtomogramLoader:
         dask_array = self.construct_dask(output_shape=output_shape)
         nmole = dask_array.shape[0]
         for _ in range(n_set):
-            ind0, ind1 = _utils.random_splitter(rng, nmole)
-            dask_avg0 = da.mean(dask_array[ind0], axis=0)
-            dask_avg1 = da.mean(dask_array[ind1], axis=0)
-            tasks.extend([dask_avg0, dask_avg1])
+            ind0, ind1 = _misc.random_splitter(rng, nmole)
+            _stack = da.stack(
+                [
+                    da.mean(dask_array[ind0], axis=0),
+                    da.mean(dask_array[ind1], axis=0),
+                ],
+                axis=0,
+            )
+            tasks.append(_stack)
 
         out = da.compute(tasks)[0]
-        stack = np.stack(out, axis=0).reshape(n_set, 2, *output_shape)
+        stack = np.stack(out, axis=0)
         if squeeze and n_set == 1:
             stack = stack[0]
         return stack
 
     def align(
         self,
-        template: NDArray[np.float32],
+        template: TemplateInputType,
         *,
-        mask: NDArray[np.float32] | None = None,
+        mask: MaskInputType = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
-        alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
+        alignment_model: type[BaseAlignmentModel] | AlignmentFactory = ZNCCAlignment,
         **align_kwargs,
     ) -> Self:
         """
@@ -513,8 +396,8 @@ class SubtomogramLoader:
         ----------
         template : np.ndarray, optional
             Template image.
-        mask : np.ndarray, optional
-            Mask image. Must in the same shae as the template.
+        mask : np.ndarray or callable of np.ndarray to np.ndarray optional
+            Mask image. Must in the same shape as the template.
         max_shifts : int or tuple of int, default is (1., 1., 1.)
             Maximum shift between subtomograms and template.
         alignment_model : subclass of BaseAlignmentModel, optional
@@ -525,26 +408,35 @@ class SubtomogramLoader:
 
         Returns
         -------
-        SubtomogramLoader
-            An loader instance with updated molecules.
+        subtomogram loader object
+            A loader instance of the same type with updated molecules.
         """
         _max_shifts_px = np.asarray(max_shifts) / self.scale
 
         model = alignment_model(
-            template=template,
-            mask=mask,
+            template=self._get_template_image(template),
+            mask=self._get_mask_image(mask),
             **align_kwargs,
         )
         tasks = self.construct_mapping_tasks(
             model.align,
             max_shifts=_max_shifts_px,
-            output_shape=template.shape,
-            var_kwarg=dict(quaternion=self.molecules.quaternion()),
+            output_shape=model.input_shape,
+            var_kwarg=dict(
+                quaternion=self.molecules.quaternion(),
+                pos=self.molecules.pos / self.scale,
+            ),
         )
         all_results = da.compute(tasks)[0]
+        return self._post_align(all_results, model.input_shape)
 
-        local_shifts, local_rot, scores = _allocate(len(self))
-        for i, result in enumerate(all_results):
+    def _post_align(
+        self,
+        results: list[AlignmentResult],
+        shape: tuple[int, int, int],
+    ) -> Self:
+        local_shifts, local_rot, scores = _misc.allocate(len(results))
+        for i, result in enumerate(results):
             _, local_shifts[i], local_rot[i], scores[i] = result
 
         rotator = Rotation.from_quat(local_rot)
@@ -554,26 +446,24 @@ class SubtomogramLoader:
         )
 
         mole_aligned.features = self.molecules.features.with_columns(
-            get_feature_list(scores, local_shifts, rotator.as_rotvec()),
+            _misc.get_feature_list(scores, local_shifts, rotator.as_rotvec()),
         )
 
-        return self.replace(molecules=mole_aligned, output_shape=template.shape)
+        return self.replace(molecules=mole_aligned, output_shape=shape)
 
     def align_no_template(
         self,
         *,
-        mask: NDArray[np.float32]
-        | Callable[[NDArray[np.float32]], NDArray[np.float32]]
-        | None = None,
+        mask: MaskInputType = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
-        output_shape: pixel | tuple[pixel] | None = None,
+        output_shape: _ShapeType = None,
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
         **align_kwargs,
     ) -> Self:
         """
         Align subtomograms without template image.
 
-        A template-free version of :func:`iter_align`. This method first
+        A template-free version of :func:`align`. This method first
         calculates averaged image and uses it for the alignment template. To
         avoid loading same subtomograms twice, a memory-mapped array is created
         internally (so the second subtomogram loading is faster).
@@ -592,44 +482,37 @@ class SubtomogramLoader:
 
         Returns
         -------
-        SubtomogramLoader
-            An loader instance with updated molecules.
+        subtomogram loader object
+            A loader instance of the same type with updated molecules.
         """
         if output_shape is None and isinstance(mask, np.ndarray):
             output_shape = mask.shape
 
-        all_subvols = self.create_cache(output_shape=output_shape)
-
-        template: NDArray[np.float32] = da.compute(da.mean(all_subvols, axis=0))[0]
-
-        # get mask image
-        if isinstance(mask, np.ndarray):
-            _mask = mask
-        elif callable(mask):
-            _mask = mask(template)
-        else:
-            _mask = mask
-        return self.align(
-            template,
-            mask=_mask,
-            max_shifts=max_shifts,
-            alignment_model=alignment_model,
-            **align_kwargs,
-        )
+        with self.cached(output_shape=output_shape):
+            template = self.average(output_shape=output_shape)
+            out = self.align(
+                template,
+                mask=self._get_mask_image(mask),
+                max_shifts=max_shifts,
+                alignment_model=alignment_model,
+                **align_kwargs,
+            )
+        return out
 
     def align_multi_templates(
         self,
-        templates: list[NDArray[np.float32]],
+        templates: list[TemplateInputType],
         *,
-        mask: NDArray[np.float32] | None = None,
+        mask: MaskInputType = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
+        label_name: str = "labels",
         **align_kwargs,
     ) -> Self:
         """
         Align subtomograms with multiple template images.
 
-        A multi-template version of :func:`iter_align`. This method calculate cross
+        A multi-template version of :func:`align`. This method calculate cross
         correlation for every template and uses the best local shift, rotation and
         template.
 
@@ -649,34 +532,46 @@ class SubtomogramLoader:
 
         Returns
         -------
-        SubtomogramLoader
-            An loader instance with updated molecules.
+        subtomogram loader object
+            A loader instance of the same type with updated molecules.
         """
-
-        n_templates = len(templates)
-
-        local_shifts, local_rot, corr_max = _allocate(len(self))
-
-        # optimal template ID
-        labels = np.zeros(len(self), dtype=np.uint32)
 
         _max_shifts_px = np.asarray(max_shifts) / self.scale
 
         model = alignment_model(
-            template=np.stack(list(templates), axis=0),
-            mask=mask,
+            template=[self._get_template_image(t) for t in templates],
+            mask=self._get_mask_image(mask),
             **align_kwargs,
         )
         tasks = self.construct_mapping_tasks(
             model.align,
             max_shifts=_max_shifts_px,
-            output_shape=templates[0].shape,
-            var_kwarg=dict(quaternion=self.molecules.quaternion()),
+            output_shape=model.input_shape,
+            var_kwarg=dict(
+                quaternion=self.molecules.quaternion(),
+                pos=self.molecules.pos / self.scale,
+            ),
         )
         all_results = da.compute(tasks)[0]
+        if isinstance(model, RotationImplemented) and model._n_rotations > 1:
+            remainder = len(templates)
+        else:
+            remainder = -1
+        return self._post_align_multi_templates(
+            all_results, model.input_shape, remainder, label_name
+        )
 
-        local_shifts, local_rot, scores = _allocate(len(self))
-        for i, result in enumerate(all_results):
+    def _post_align_multi_templates(
+        self,
+        results: list[AlignmentResult],
+        shape: tuple[int, int, int],
+        remainder: int = -1,
+        label_name: str = "labels",
+    ):
+
+        local_shifts, local_rot, scores = _misc.allocate(len(results))
+        labels = np.zeros(len(results), dtype=np.uint32)
+        for i, result in enumerate(results):
             labels[i], local_shifts[i], local_rot[i], scores[i] = result
 
         rotator = Rotation.from_quat(local_rot)
@@ -685,35 +580,47 @@ class SubtomogramLoader:
             rotator,
         )
 
-        if isinstance(model, RotationImplemented) and model._n_rotations > 1:
-            labels %= n_templates
+        if remainder > 1:
+            labels %= remainder
         labels = labels.astype(np.uint8)
 
-        feature_list = get_feature_list(corr_max, local_shifts, rotator.as_rotvec())
+        feature_list = _misc.get_feature_list(scores, local_shifts, rotator.as_rotvec())
         mole_aligned.features = self.molecules.features.with_columns(
-            feature_list + pl.Series("labels", labels)
+            feature_list + [pl.Series(label_name, labels)]
         )
 
-        return self.replace(molecules=mole_aligned, output_shape=templates[0].shape)
+        return self.replace(molecules=mole_aligned, output_shape=shape)
 
-    def subtomoprops(
+    def agg(
         self,
-        template: NDArray[np.float32],
-        func: Callable[[NDArray[np.float32], NDArray[np.float32]], _R],
-        mask: NDArray[np.float32] | None = None,
-    ) -> list[_R]:
-        if mask is None:
-            _mask = 1.0
-        else:
-            _mask = mask
-        template_masked = template * _mask
+        funcs: list[Callable[[NDArray[np.float32]], Any]],
+        schema: list[str] | None = None,
+    ) -> pl.DataFrame:
+        """
+        Aggregation of subtomograms using a list of functions.
 
-        tasks = self.construct_mapping_tasks(
-            func, template_masked, output_shape=template.shape
-        )
-        all_results: list[_R] = da.compute(tasks)[0]
+        Parameters
+        ----------
+        funcs : list of callable
+            Functions that take a subtomogram as input and return an aggregated result.
+        schema : list[str], optional
+            DataFrame schema.
 
-        return all_results
+        Returns
+        -------
+        pl.DataFrame
+            Aggregated results.
+        """
+        all_tasks: list[list[Delayed]] = []
+        if schema is None:
+            schema = [fn.__name__ for fn in funcs]
+        if len(set(schema)) != len(schema):
+            raise ValueError("Schema names must be unique.")
+        for fn in funcs:
+            tasks = self.construct_mapping_tasks(fn, output_shape=self.output_shape)
+            all_tasks.append(tasks)
+        all_results = np.array(da.compute(all_tasks)[0])
+        return pl.DataFrame(all_results, schema=schema)
 
     def fsc(
         self,
@@ -747,6 +654,8 @@ class SubtomogramLoader:
             output_shape = self.output_shape
             if isinstance(output_shape, Unset):
                 raise TypeError("Output shape is unknown.")
+        elif isinstance(mask, ImageProvider):
+            _mask = mask(self.scale)
         else:
             _mask = mask
             output_shape = mask.shape
@@ -775,15 +684,15 @@ class SubtomogramLoader:
 
     def classify(
         self,
-        template: NDArray[np.float32] | None = None,
-        mask: NDArray[np.float32] | None = None,
+        template: TemplateInputType | None = None,
+        mask: MaskInputType = None,
         *,
         cutoff: float = 0.5,
         n_components: int = 2,
         n_clusters: int = 2,
         tilt_range: tuple[float, float] | None = None,
         seed: int = 0,
-        label_name: str = "labels",
+        label_name: str = "cluster",
     ) -> ClassificationResult:
         """
         Classify 3D densities by PCA of wedge-masked differences.
@@ -791,7 +700,8 @@ class SubtomogramLoader:
         Parameters
         ----------
         template : 3D array, optional
-            Template image. If not given, average image will be used.
+            Template image to calculate the difference. If not given, average image will
+            be used.
         mask : 3D array, optional
             Soft mask of the same shape as the template or the output_shape parameter.
         n_components : int, default is 2
@@ -802,7 +712,7 @@ class SubtomogramLoader:
             Tilt range in degree.
         seed : int, default is 0
             Random seed used for K-means clustering.
-        label_name : str, default is "labels"
+        label_name : str, default is "cluster"
             Column name used for the output classes.
 
         Returns
@@ -818,40 +728,42 @@ class SubtomogramLoader:
         """
         from acryo.classification import PcaClassifier
 
-        if isinstance(self.output_shape, Unset):
-            if mask is None:
-                raise ValueError("Cannot determine output shape.")
+        if template is not None:
+            template = self._get_template_image(template)
+        mask = self._get_mask_image(mask)
+        if isinstance(mask, np.ndarray):
             shape = mask.shape
+        elif isinstance(template, np.ndarray):
+            shape = template.shape
+        elif isinstance(self.output_shape, Unset):
+            raise ValueError("Cannot determine output shape.")
         else:
             shape = self.output_shape
 
-        if mask is not None and mask.shape != shape:
-            raise ValueError(
-                f"Mask shape {mask.shape} must be the same as the output shape {shape}."
+        with self.cached(shape):
+            if template is None:
+                template = self.average(shape)
+
+            model = ZNCCAlignment(template, mask, cutoff=cutoff, tilt_range=tilt_range)
+            tasks: list[da.Array] = []
+            for task in self.iter_mapping_tasks(
+                model.masked_difference,
+                output_shape=shape,
+                var_kwarg=dict(quaternion=self.molecules.quaternion()),
+            ):
+                tasks.append(da.from_delayed(task, shape=shape, dtype=np.float32))
+
+            stack = da.stack(tasks, axis=0)
+
+            clf = PcaClassifier(
+                stack,
+                mask,
+                n_components=n_components,
+                n_clusters=n_clusters,
+                seed=seed,
             )
+            clf.run()
 
-        if template is None:
-            template = self.average(shape)
-
-        model = ZNCCAlignment(template, mask, cutoff=cutoff, tilt_range=tilt_range)
-        tasks: list[da.Array] = []
-        for task in self.iter_mapping_tasks(
-            model.masked_difference,
-            output_shape=shape,
-            var_kwarg=dict(quaternion=self.molecules.quaternion()),
-        ):
-            tasks.append(da.from_delayed(task, shape=shape, dtype=np.float32))
-
-        stack = da.stack(tasks, axis=0)
-
-        clf = PcaClassifier(
-            stack,
-            mask,
-            n_components=n_components,
-            n_clusters=n_clusters,
-            seed=seed,
-        )
-        clf.run()
         mole = self.molecules.copy()
         mole.features = mole.features.with_columns(pl.Series(label_name, clf._labels))
         new = self.replace(molecules=mole)
@@ -864,36 +776,55 @@ class SubtomogramLoader:
         """Return a new loader with filtered molecules."""
         return self.replace(molecules=self.molecules.filter(predicate))
 
-    def _get_output_shape(
-        self, output_shape: pixel | tuple[pixel] | None
-    ) -> tuple[pixel, ...]:
+    @overload
+    def groupby(self, by: str | pl.Expr) -> LoaderGroup[str, Self]:
+        ...
+
+    @overload
+    def groupby(self, by: list[str | pl.Expr]) -> LoaderGroup[tuple[str, ...], Self]:
+        ...
+
+    def groupby(self, by):
+        return LoaderGroup._from_loader(self, by)
+
+    def _cache_available(self, shape: tuple[pixel, ...]) -> bool:
+        if self._cached_dask_array is None:
+            return False
+        return self._cached_dask_array.shape[1:] == shape
+
+    def _get_output_shape(self, output_shape: _ShapeType) -> tuple[pixel, ...]:
         if output_shape is None:
             if isinstance(self.output_shape, Unset):
                 raise ValueError("Output shape is unknown.")
             _output_shape = self.output_shape
         else:
-            _output_shape = _utils.normalize_shape(output_shape, ndim=self.image.ndim)
+            _output_shape = _misc.normalize_shape(output_shape, ndim=3)
         return _output_shape
+
+    def _get_template_image(self, template: TemplateInputType) -> NDArray[np.float32]:
+        if isinstance(template, np.ndarray):
+            return template
+        elif isinstance(template, ImageProvider):
+            out = template(self.scale)
+            return np.asarray(out, dtype=np.float32)
+        raise TypeError(f"Invalid template type: {type(template)}")
+
+    def _get_mask_image(self, mask: MaskInputType) -> NDArray[np.float32]:
+        if isinstance(mask, (np.ndarray, type(None))):
+            return mask
+        elif isinstance(mask, ImageProvider):
+            out = mask(self.scale)
+            return np.asarray(out, dtype=np.float32)
+        elif isinstance(mask, ImageConverter):
+            return mask
+        raise TypeError(f"Invalid mask type: {type(mask)}")
 
 
 class ClassificationResult(NamedTuple):
     """Tuple of classification results."""
 
-    loader: SubtomogramLoader
+    loader: LoaderBase
     classifier: PcaClassifier
-
-
-def get_feature_list(corr_max, local_shifts, rotvec) -> list[pl.Series]:
-    features = [
-        pl.Series("score", corr_max),
-        pl.Series("shift-z", np.round(local_shifts[:, 0], 2)),
-        pl.Series("shift-y", np.round(local_shifts[:, 1], 2)),
-        pl.Series("shift-x", np.round(local_shifts[:, 2], 2)),
-        pl.Series("rotvec-z", np.round(rotvec[:, 0], 5)),
-        pl.Series("rotvec-y", np.round(rotvec[:, 1], 5)),
-        pl.Series("rotvec-x", np.round(rotvec[:, 2], 5)),
-    ]
-    return features
 
 
 def check_input(
@@ -913,7 +844,7 @@ def check_input(
     if isinstance(output_shape, Unset):
         _output_shape = output_shape
     else:
-        _output_shape = _utils.normalize_shape(output_shape, ndim=ndim)
+        _output_shape = _misc.normalize_shape(output_shape, ndim=ndim)
 
     # check scale
     _scale = float(scale)
@@ -922,38 +853,3 @@ def check_input(
 
     _corner_safe = bool(corner_safe)
     return order, _output_shape, _scale, _corner_safe
-
-
-def _allocate(size: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    # shift in local Cartesian
-    local_shifts = np.zeros((size, 3))
-
-    # maximum ZNCC
-    corr_max = np.zeros(size)
-
-    # rotation (quaternion) in local Cartesian
-    local_rot = np.zeros((size, 4))
-    local_rot[:, 3] = 1  # identity map in quaternion
-
-    return local_shifts, local_rot, corr_max
-
-
-def _dict_iterrows(d: dict[str, Iterable[Any]]):
-    """
-    Generater similar to pl.DataFrame.iterrows().
-
-    >>> _dict_iterrows({'a': [1, 2, 3], 'b': [4, 5, 6]})
-
-    will yield {'a': 1, 'b': 4}, {'a': 2, 'b': 5}, {'a': 3, 'b': 6}.
-    """
-    keys = d.keys()
-    value_iters = [iter(v) for v in d.values()]
-
-    dict_out = dict.fromkeys(keys, None)
-    while True:
-        try:
-            for k, viter in zip(keys, value_iters):
-                dict_out[k] = next(viter)
-            yield dict_out
-        except StopIteration:
-            break

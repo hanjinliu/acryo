@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Subtomogram Loader &mdash; acryo 0.1.1 documentation</title>
+      <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="../_static/css/theme.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+
+        <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
+        <script src="../_static/jquery.js"></script>
+        <script src="../_static/underscore.js"></script>
+        <script src="../_static/doctools.js"></script>
+        <script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+        <script>mermaid.initialize({startOnLoad:true});</script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Piping Images to the Loader" href="pipe.html" />
+    <link rel="prev" title="Molecules" href="molecules.html" />
+</head>
+
+<body class="wy-body-for-nav">
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+            <a href="../index.html" class="icon icon-home"> acryo
+          </a>
+              <div class="version">
+                0.1.1
+              </div>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="molecules.html">Molecules</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Subtomogram Loader</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#creating-a-subtomogram-loader">Creating a Subtomogram Loader</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#subtomogram-averaging">Subtomogram Averaging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#subtomogram-alignment">Subtomogram Alignment</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#templated-alignment">Templated alignment</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#template-free-alignment">Template-free alignment</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#multi-template-alignment">Multi-template alignment</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#image-preprocessing-workflow">Image preprocessing workflow</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#filtering-loader">Filtering Loader</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#grouping-loader">Grouping Loader</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#group-wise-averaging">Group wise averaging</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#group-wise-alignment">Group wise alignment</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#loading-from-collection-of-tomograms">Loading from Collection of Tomograms</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="pipe.html">Piping Images to the Loader</a></li>
+<li class="toctree-l1"><a class="reference internal" href="alignment.html">Alignment Model</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">acryo</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home"></a> &raquo;</li>
+      <li>Subtomogram Loader</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/main/loader.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+
+  <section id="subtomogram-loader">
+<h1>Subtomogram Loader<a class="headerlink" href="#subtomogram-loader" title="Permalink to this headline"></a></h1>
+<p><a class="reference internal" href="../apidoc/acryo.html#module-acryo" title="acryo"><code class="xref py py-mod docutils literal notranslate"><span class="pre">acryo</span></code></a> aims at efficient analysis of tomographic data. Here, we show how to use
+<code class="xref py py-class docutils literal notranslate"><span class="pre">Molecules</span></code> with actual images to perform subtomogram averaging, alignment and
+many other tasks.</p>
+<div class="contents local topic" id="contents">
+<p class="topic-title">Contents</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#creating-a-subtomogram-loader" id="id1">Creating a Subtomogram Loader</a></p></li>
+<li><p><a class="reference internal" href="#subtomogram-averaging" id="id2">Subtomogram Averaging</a></p></li>
+<li><p><a class="reference internal" href="#subtomogram-alignment" id="id3">Subtomogram Alignment</a></p></li>
+<li><p><a class="reference internal" href="#filtering-loader" id="id4">Filtering Loader</a></p></li>
+<li><p><a class="reference internal" href="#grouping-loader" id="id5">Grouping Loader</a></p></li>
+<li><p><a class="reference internal" href="#loading-from-collection-of-tomograms" id="id6">Loading from Collection of Tomograms</a></p></li>
+</ul>
+</div>
+<section id="creating-a-subtomogram-loader">
+<h2><a class="toc-backref" href="#id1">Creating a Subtomogram Loader</a><a class="headerlink" href="#creating-a-subtomogram-loader" title="Permalink to this headline"></a></h2>
+<p>A <code class="xref py py-class docutils literal notranslate"><span class="pre">SubtomogramLoader</span></code> is a pair of a 3D tomogram image and a
+<code class="xref py py-class docutils literal notranslate"><span class="pre">Molecules</span></code> object, with some additional parameters.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">image</span><span class="p">,</span> <span class="n">molecules</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">scale</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">output_shape</span><span class="o">=</span><span class="n">Unset</span><span class="p">(),</span> <span class="n">corner_safe</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span> <span class="o">...</span>
+</pre></div>
+</div>
+<ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">image</span></code> (<cite>numpy.ndarray</cite> or <cite>dask.Array</cite>) … the tomogram image.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">molecules</span></code> (<cite>Molecules</cite>) … molecules in the tomogram.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">order</span></code> (<cite>int</cite>) … order of the spline interpolation. 0=nearest, 1=linear, 3=cubic.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">scale</span></code> (<cite>float</cite>) … scale (physical/pixel) of the tomogram image. This
+parameter must match the positions of <code class="docutils literal notranslate"><span class="pre">molecules</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">output_shape</span></code> (<cite>tuple</cite>) … shape of the output subtomograms, which will be
+used to determine the subtomogram shape during subtomogram averaging.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">corner_safe</span></code> (<cite>bool</cite>) … if true, the subtomogram loader will ensure that
+the volume inside the given output shape will not be affected after rotation,
+otherwise the corners of the subtomograms will be dimmer.</p></li>
+</ol>
+<p><code class="xref py py-class docutils literal notranslate"><span class="pre">SubtomogramLoader</span></code> can be constructed from a image file using the <code class="xref py py-meth docutils literal notranslate"><span class="pre">imread()</span></code> method
+or the public <code class="xref py py-func docutils literal notranslate"><span class="pre">imread()</span></code> function.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">acryo</span> <span class="kn">import</span> <span class="n">Molecules</span><span class="p">,</span> <span class="n">imread</span>
+
+<span class="n">loader</span> <span class="o">=</span> <span class="n">imread</span><span class="p">(</span><span class="s2">&quot;path/to/image.mrc&quot;</span><span class="p">,</span> <span class="n">Molecules</span><span class="o">.</span><span class="n">from_csv</span><span class="p">(</span><span class="s2">&quot;path/to/molecules.csv&quot;</span><span class="p">))</span>
+</pre></div>
+</div>
+</section>
+<section id="subtomogram-averaging">
+<h2><a class="toc-backref" href="#id2">Subtomogram Averaging</a><a class="headerlink" href="#subtomogram-averaging" title="Permalink to this headline"></a></h2>
+<p><code class="xref py py-meth docutils literal notranslate"><span class="pre">average()</span></code> crops all the subtomograms around the molecules and
+average them. This method always returns a 3D <code class="xref py py-class docutils literal notranslate"><span class="pre">numpy.ndarray</span></code> object.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">dask</span> <span class="kn">import</span> <span class="n">array</span> <span class="k">as</span> <span class="n">da</span>
+<span class="kn">from</span> <span class="nn">acryo</span> <span class="kn">import</span> <span class="n">SubtomogramLoader</span><span class="p">,</span> <span class="n">Molecules</span>
+
+<span class="n">image</span> <span class="o">=</span> <span class="n">da</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">((</span><span class="mi">100</span><span class="p">,</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">100</span><span class="p">))</span>
+<span class="n">molecules</span> <span class="o">=</span> <span class="n">Molecules</span><span class="p">([[</span><span class="mi">40</span><span class="p">,</span> <span class="mi">40</span><span class="p">,</span> <span class="mi">60</span><span class="p">],</span> <span class="p">[</span><span class="mi">60</span><span class="p">,</span> <span class="mi">60</span><span class="p">,</span> <span class="mi">40</span><span class="p">]])</span>
+
+<span class="c1"># give output shape beforehand</span>
+<span class="n">loader</span> <span class="o">=</span> <span class="n">SubtomogramLoader</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">molecules</span><span class="p">,</span> <span class="n">output_shape</span><span class="o">=</span><span class="p">(</span><span class="mi">64</span><span class="p">,</span> <span class="mi">64</span><span class="p">,</span> <span class="mi">64</span><span class="p">))</span>
+<span class="n">avg</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">average</span><span class="p">()</span>
+
+<span class="c1"># or give output shape after construction</span>
+<span class="n">loader</span> <span class="o">=</span> <span class="n">SubtomogramLoader</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">molecules</span><span class="p">)</span>
+<span class="n">avg</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">average</span><span class="p">(</span><span class="n">output_shape</span><span class="o">=</span><span class="p">(</span><span class="mi">64</span><span class="p">,</span> <span class="mi">64</span><span class="p">,</span> <span class="mi">64</span><span class="p">))</span>
+</pre></div>
+</div>
+</section>
+<section id="subtomogram-alignment">
+<h2><a class="toc-backref" href="#id3">Subtomogram Alignment</a><a class="headerlink" href="#subtomogram-alignment" title="Permalink to this headline"></a></h2>
+<section id="templated-alignment">
+<h3>Templated alignment<a class="headerlink" href="#templated-alignment" title="Permalink to this headline"></a></h3>
+<p><code class="xref py py-meth docutils literal notranslate"><span class="pre">align()</span></code> crops all the subtomograms around the molecules and
+align them to the given template image (reference image). This method will return
+a new <code class="xref py py-class docutils literal notranslate"><span class="pre">SubtomogramLoader</span></code> object with the updated <code class="xref py py-class docutils literal notranslate"><span class="pre">Molecules</span></code> object.</p>
+<p>You have to provide a template image, optionally a mask image, maximum shifts and
+an alignment model. The default alignment model is <code class="xref py py-class docutils literal notranslate"><span class="pre">ZNCCAlignment</span></code>. For more
+details about the alignment models, see <a class="reference internal" href="alignment.html"><span class="doc">Alignment Model</span></a>.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">dask</span> <span class="kn">import</span> <span class="n">array</span> <span class="k">as</span> <span class="n">da</span>
+<span class="kn">from</span> <span class="nn">acryo</span> <span class="kn">import</span> <span class="n">SubtomogramLoader</span><span class="p">,</span> <span class="n">Molecules</span>
+
+<span class="n">image</span> <span class="o">=</span> <span class="n">da</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">((</span><span class="mi">100</span><span class="p">,</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">100</span><span class="p">))</span>
+<span class="n">template</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">((</span><span class="mi">20</span><span class="p">,</span> <span class="mi">20</span><span class="p">,</span> <span class="mi">20</span><span class="p">))</span>
+<span class="n">molecules</span> <span class="o">=</span> <span class="n">Molecules</span><span class="p">([[</span><span class="mi">40</span><span class="p">,</span> <span class="mi">40</span><span class="p">,</span> <span class="mi">60</span><span class="p">],</span> <span class="p">[</span><span class="mi">60</span><span class="p">,</span> <span class="mi">60</span><span class="p">,</span> <span class="mi">40</span><span class="p">]])</span>
+
+<span class="n">loader</span> <span class="o">=</span> <span class="n">SubtomogramLoader</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">molecules</span><span class="p">)</span>
+<span class="n">out</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">align</span><span class="p">(</span><span class="n">template</span><span class="p">,</span> <span class="n">max_shifts</span><span class="o">=</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">5</span><span class="p">))</span>
+</pre></div>
+</div>
+<p>If you want to give parameters to the alignment model, you can use the <code class="xref py py-meth docutils literal notranslate"><span class="pre">with_params()</span></code>
+method of alignment model classes. It returns a factory function for the parametrized model.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">loader</span> <span class="o">=</span> <span class="n">SubtomogramLoader</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">molecules</span><span class="p">)</span>
+<span class="n">out</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">align</span><span class="p">(</span>
+    <span class="n">template</span><span class="p">,</span>
+    <span class="n">max_shifts</span><span class="o">=</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">5</span><span class="p">),</span>
+    <span class="n">alignment_model</span><span class="o">=</span><span class="n">ZNCCAlignment</span><span class="o">.</span><span class="n">with_params</span><span class="p">(</span><span class="n">cutoff</span><span class="o">=</span><span class="mf">0.5</span><span class="p">),</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="template-free-alignment">
+<h3>Template-free alignment<a class="headerlink" href="#template-free-alignment" title="Permalink to this headline"></a></h3>
+<p>If no a priori information is available for the template image, you’ll use the subtomogram
+averaging result as the template image. During this task, each subtomogram will be loaded
+twice so it is not efficient to call <code class="xref py py-meth docutils literal notranslate"><span class="pre">average()</span></code> and <code class="xref py py-meth docutils literal notranslate"><span class="pre">align()</span></code> separately.</p>
+<p><code class="xref py py-meth docutils literal notranslate"><span class="pre">align_no_template()</span></code> creates a local cache of subtomograms so that alignment will be
+faster.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">loader</span> <span class="o">=</span> <span class="n">SubtomogramLoader</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">molecules</span><span class="p">)</span>
+<span class="n">out</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">align_no_template</span><span class="p">(</span><span class="n">max_shifts</span><span class="o">=</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">5</span><span class="p">),</span> <span class="n">output_shape</span><span class="o">=</span><span class="p">(</span><span class="mi">20</span><span class="p">,</span> <span class="mi">20</span><span class="p">,</span> <span class="mi">20</span><span class="p">))</span>
+</pre></div>
+</div>
+</section>
+<section id="multi-template-alignment">
+<h3>Multi-template alignment<a class="headerlink" href="#multi-template-alignment" title="Permalink to this headline"></a></h3>
+<p>If a tomogram is composed of heterogeneous molecules, you can use multiple templates to
+align the molecules and determine the best template for each molecule.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">loader</span> <span class="o">=</span> <span class="n">SubtomogramLoader</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">molecules</span><span class="p">)</span>
+<span class="n">out</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">align_multi_templates</span><span class="p">(</span>
+    <span class="p">[</span><span class="n">template0</span><span class="p">,</span> <span class="n">template1</span><span class="p">,</span> <span class="n">template2</span><span class="p">],</span>
+    <span class="n">max_shifts</span><span class="o">=</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">5</span><span class="p">),</span>
+    <span class="n">alignment_model</span><span class="o">=</span><span class="n">ZNCCAlignment</span><span class="o">.</span><span class="n">with_params</span><span class="p">(</span><span class="n">cutoff</span><span class="o">=</span><span class="mf">0.5</span><span class="p">),</span>
+    <span class="n">label_name</span><span class="o">=</span><span class="s2">&quot;template_id&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="n">out</span><span class="o">.</span><span class="n">molecules</span><span class="o">.</span><span class="n">features</span><span class="p">[</span><span class="s2">&quot;template_id&quot;</span><span class="p">]</span>  <span class="c1"># get the best template id for each molecule</span>
+</pre></div>
+</div>
+<p>Here, input templates must be given as a list of <code class="xref py py-class docutils literal notranslate"><span class="pre">numpy.ndarray</span></code> objects of the
+same shape. <code class="docutils literal notranslate"><span class="pre">label_name</span></code> is the name used for the feature colummn of the best template.</p>
+</section>
+<section id="image-preprocessing-workflow">
+<h3>Image preprocessing workflow<a class="headerlink" href="#image-preprocessing-workflow" title="Permalink to this headline"></a></h3>
+<p>During subtomogram alignment, template images and mask images are usually provided from
+image files. They also need preprocessing such as rescaling and smoothing.</p>
+<p>See <a class="reference internal" href="pipe.html"><span class="doc">Piping Images to the Loader</span></a> for the details.</p>
+</section>
+</section>
+<section id="filtering-loader">
+<h2><a class="toc-backref" href="#id4">Filtering Loader</a><a class="headerlink" href="#filtering-loader" title="Permalink to this headline"></a></h2>
+<p><code class="xref py py-meth docutils literal notranslate"><span class="pre">filter()</span></code> is the method quite similar to that in <code class="xref py py-class docutils literal notranslate"><span class="pre">Molecules</span></code> or <code class="xref py py-class docutils literal notranslate"><span class="pre">DataFrame</span></code>.
+It returns a new <code class="xref py py-class docutils literal notranslate"><span class="pre">SubtomogramLoader</span></code> object with the filtered molecules.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">loader</span> <span class="o">=</span> <span class="n">SubtomogramLoader</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">molecules</span><span class="p">)</span>
+<span class="n">out</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&quot;score&quot;</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mf">0.5</span><span class="p">)</span>
+<span class="k">assert</span> <span class="p">(</span><span class="n">out</span><span class="o">.</span><span class="n">molecules</span><span class="o">.</span><span class="n">features</span><span class="p">[</span><span class="s2">&quot;score&quot;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mf">0.5</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>
+</pre></div>
+</div>
+</section>
+<section id="grouping-loader">
+<h2><a class="toc-backref" href="#id5">Grouping Loader</a><a class="headerlink" href="#grouping-loader" title="Permalink to this headline"></a></h2>
+<p><code class="xref py py-meth docutils literal notranslate"><span class="pre">groupby()</span></code> is a method that returns a <code class="xref py py-class docutils literal notranslate"><span class="pre">LoaderGroup</span></code> object. An <code class="xref py py-class docutils literal notranslate"><span class="pre">LoaderGroup</span></code>
+object is very similar to those returned by <code class="xref py py-meth docutils literal notranslate"><span class="pre">groupby()</span></code> methods of <code class="xref py py-class docutils literal notranslate"><span class="pre">polars.DataFrame</span></code>,
+<code class="xref py py-class docutils literal notranslate"><span class="pre">Molecules</span></code> or <code class="xref py py-class docutils literal notranslate"><span class="pre">pandas.DataFrame</span></code>.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">loader</span> <span class="o">=</span> <span class="n">SubtomogramLoader</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">molecules</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">cluster</span><span class="p">,</span> <span class="n">ldr</span> <span class="ow">in</span> <span class="n">loader</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;cluster_id&quot;</span><span class="p">):</span>
+    <span class="k">assert</span> <span class="p">(</span><span class="n">out</span><span class="o">.</span><span class="n">molecules</span><span class="o">.</span><span class="n">features</span><span class="p">[</span><span class="s2">&quot;cluster_id&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">cluster</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>
+</pre></div>
+</div>
+<p><code class="xref py py-class docutils literal notranslate"><span class="pre">LoaderGroup</span></code> has many methods of the same name as those in <code class="xref py py-class docutils literal notranslate"><span class="pre">SubtomogramLoader</span></code>.</p>
+<section id="group-wise-averaging">
+<h3>Group wise averaging<a class="headerlink" href="#group-wise-averaging" title="Permalink to this headline"></a></h3>
+<p><code class="xref py py-class docutils literal notranslate"><span class="pre">LoaderGroup</span></code> supports all the averaging methods.</p>
+<ul class="simple">
+<li><p><code class="xref py py-meth docutils literal notranslate"><span class="pre">average()</span></code></p></li>
+<li><p><code class="xref py py-meth docutils literal notranslate"><span class="pre">average_split()</span></code></p></li>
+</ul>
+<p>In <code class="xref py py-class docutils literal notranslate"><span class="pre">LoaderGroup</span></code> version, result is returned as a <code class="docutils literal notranslate"><span class="pre">dict</span></code>
+of group key and the averages.</p>
+</section>
+<section id="group-wise-alignment">
+<h3>Group wise alignment<a class="headerlink" href="#group-wise-alignment" title="Permalink to this headline"></a></h3>
+<p><code class="xref py py-class docutils literal notranslate"><span class="pre">LoaderGroup</span></code> also supports all the alignment methods</p>
+<ul class="simple">
+<li><p><code class="xref py py-meth docutils literal notranslate"><span class="pre">align()</span></code></p></li>
+<li><p><code class="xref py py-meth docutils literal notranslate"><span class="pre">align_no_template()</span></code></p></li>
+<li><p><code class="xref py py-meth docutils literal notranslate"><span class="pre">align_multi_templates()</span></code></p></li>
+</ul>
+<p>In <code class="xref py py-class docutils literal notranslate"><span class="pre">LoaderGroup</span></code> version, result is returned as an updated <code class="xref py py-class docutils literal notranslate"><span class="pre">LoaderGroup</span></code>.</p>
+<p>If you want to collect aligned <code class="xref py py-class docutils literal notranslate"><span class="pre">Molecules</span></code> objects, following codes are
+essentially equivalent.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># call align() for each loader</span>
+<span class="n">aligned</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="k">for</span> <span class="n">cluster</span><span class="p">,</span> <span class="n">ldr</span> <span class="ow">in</span> <span class="n">loader</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;cluster_id&quot;</span><span class="p">):</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">ldr</span><span class="o">.</span><span class="n">align</span><span class="p">(</span><span class="n">template</span><span class="p">)</span>
+    <span class="n">aligned</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">out</span><span class="o">.</span><span class="n">molecules</span><span class="p">)</span>
+
+<span class="c1"># call align() of the LoaderGroup object.</span>
+<span class="n">aligned</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="k">for</span> <span class="n">cluster</span><span class="p">,</span> <span class="n">ldr</span> <span class="ow">in</span> <span class="n">loader</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;cluster_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">align</span><span class="p">(</span><span class="n">template</span><span class="p">):</span>
+    <span class="n">aligned</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">out</span><span class="o">.</span><span class="n">molecules</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Since each group does not necessarily composed of the same molecules, you can use a mapping
+of templates for alignment functions.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">templates</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="mi">0</span><span class="p">:</span> <span class="n">template0</span><span class="p">,</span>
+    <span class="mi">1</span><span class="p">:</span> <span class="n">template1</span><span class="p">,</span>
+    <span class="mi">2</span><span class="p">:</span> <span class="n">template2</span><span class="p">,</span>
+<span class="p">}</span>
+<span class="n">aligned</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;cluster_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">align_multi_templates</span><span class="p">(</span><span class="n">templates</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="loading-from-collection-of-tomograms">
+<h2><a class="toc-backref" href="#id6">Loading from Collection of Tomograms</a><a class="headerlink" href="#loading-from-collection-of-tomograms" title="Permalink to this headline"></a></h2>
+<p>Cryo-ET image analysis is usually performed on a collection of tomograms. Data management
+becomes very complicated in this case.</p>
+<p><a class="reference internal" href="../apidoc/acryo.html#module-acryo" title="acryo"><code class="xref py py-mod docutils literal notranslate"><span class="pre">acryo</span></code></a> provides a <code class="xref py py-class docutils literal notranslate"><span class="pre">TomogramCollection</span></code> class for this purpose. <code class="xref py py-class docutils literal notranslate"><span class="pre">TomogramCollection</span></code>
+shares the same interface with <code class="xref py py-class docutils literal notranslate"><span class="pre">SubtomogramLoader</span></code>. It is constructed using the same parameters.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">scale</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">output_shape</span><span class="o">=</span><span class="n">Unset</span><span class="p">(),</span> <span class="n">corner_safe</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span> <span class="o">...</span>
+</pre></div>
+</div>
+<p><code class="xref py py-class docutils literal notranslate"><span class="pre">TomogramCollection</span></code> can be constructed from a list of <code class="xref py py-class docutils literal notranslate"><span class="pre">SubtomogramLoader</span></code> objects.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">acryo</span> <span class="kn">import</span> <span class="n">Molecules</span><span class="p">,</span> <span class="n">imread</span><span class="p">,</span> <span class="n">TomogramCollection</span>
+
+<span class="n">collection</span> <span class="o">=</span> <span class="n">TomogramCollection</span><span class="o">.</span><span class="n">from_loaders</span><span class="p">(</span>
+    <span class="p">[</span>
+        <span class="n">imread</span><span class="p">(</span><span class="s2">&quot;path/to/image-0.mrc&quot;</span><span class="p">,</span> <span class="n">Molecules</span><span class="o">.</span><span class="n">from_csv</span><span class="p">(</span><span class="s2">&quot;path/to/molecules-0.csv&quot;</span><span class="p">)),</span>
+        <span class="n">imread</span><span class="p">(</span><span class="s2">&quot;path/to/image-1.mrc&quot;</span><span class="p">,</span> <span class="n">Molecules</span><span class="o">.</span><span class="n">from_csv</span><span class="p">(</span><span class="s2">&quot;path/to/molecules-1.csv&quot;</span><span class="p">)),</span>
+        <span class="n">imread</span><span class="p">(</span><span class="s2">&quot;path/to/image-2.mrc&quot;</span><span class="p">,</span> <span class="n">Molecules</span><span class="o">.</span><span class="n">from_csv</span><span class="p">(</span><span class="s2">&quot;path/to/molecules-2.csv&quot;</span><span class="p">)),</span>
+    <span class="p">],</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">avg</span> <span class="o">=</span> <span class="n">collection</span><span class="o">.</span><span class="n">average</span><span class="p">(</span><span class="n">output_shape</span><span class="o">=</span><span class="p">(</span><span class="mi">20</span><span class="p">,</span> <span class="mi">20</span><span class="p">,</span> <span class="mi">20</span><span class="p">))</span>
+<span class="n">out</span> <span class="o">=</span> <span class="n">collection</span><span class="o">.</span><span class="n">align</span><span class="p">(</span><span class="n">template</span><span class="p">,</span> <span class="n">max_shifts</span><span class="o">=</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">5</span><span class="p">))</span>
+<span class="n">group</span> <span class="o">=</span> <span class="n">collection</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;cluster_id&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="molecules.html" class="btn btn-neutral float-left" title="Molecules" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="pipe.html" class="btn btn-neutral float-right" title="Piping Images to the Loader" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2023, Hanjin Liu.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+
+</body>
+</html>

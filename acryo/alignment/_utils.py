@@ -29,7 +29,7 @@ def _normalize_ranges(rng: RangeLike | Ranges) -> Ranges:
         return (rng_,) * 3
 
 
-def normalize_rotations(rotations: Ranges | None) -> np.ndarray:
+def normalize_rotations(rotations: Ranges | Rotation | None) -> np.ndarray:
     """
     Normalize various rotation expressions to quaternions.
 
@@ -43,7 +43,9 @@ def normalize_rotations(rotations: Ranges | None) -> np.ndarray:
     np.ndarray
         Corresponding quaternions in shape (N, 4).
     """
-    if rotations is not None:
+    if isinstance(rotations, Rotation):
+        quat = rotations.as_quat()
+    elif rotations is not None:
         _rotations = _normalize_ranges(rotations)
         angles = []
         for max_rot, step in _rotations:

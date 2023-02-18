@@ -91,3 +91,9 @@ def test_alignment():
     collection = _get_collection()
     out = collection.align(np.ones((3, 3, 3), dtype=np.float32))
     assert len(out.molecules) == 6
+
+
+def test_align_no_template():
+    collection = _get_collection()
+    out = collection.replace(output_shape=(3, 3, 3)).align_no_template()
+    assert len(out.molecules) == 6
