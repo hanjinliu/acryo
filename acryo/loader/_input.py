@@ -74,7 +74,7 @@ def _assert_3d_array(out, func):
 
 def _assert_0_or_1_args(func: Callable) -> Callable[[Any], Any]:
     nargs = sum(
-        p
+        1
         for p in inspect.signature(func).parameters.values()
         if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
     )

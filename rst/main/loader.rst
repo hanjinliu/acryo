@@ -22,15 +22,14 @@ A :class:`SubtomogramLoader` is a pair of a 3D tomogram image and a
 
 1. ``image`` (`numpy.ndarray` or `dask.Array`) ... the tomogram image.
 2. ``molecules`` (`Molecules`) ... molecules in the tomogram.
-3. ``order`` (`int`) ... order of the spline interpolation. 0=nearest, 1=linear,
-    3=cubic.
+3. ``order`` (`int`) ... order of the spline interpolation. 0=nearest, 1=linear, 3=cubic.
 4. ``scale`` (`float`) ... scale (physical/pixel) of the tomogram image. This
-    parameter must match the positions of ``molecules``.
+   parameter must match the positions of ``molecules``.
 5. ``output_shape`` (`tuple`) ... shape of the output subtomograms, which will be
-    used to determine the subtomogram shape during subtomogram averaging.
+   used to determine the subtomogram shape during subtomogram averaging.
 6. ``corner_safe`` (`bool`) ... if true, the subtomogram loader will ensure that
-    the volume inside the given output shape will not be affected after rotation,
-    otherwise the corners of the subtomograms will be dimmer.
+   the volume inside the given output shape will not be affected after rotation,
+   otherwise the corners of the subtomograms will be dimmer.
 
 :class:`SubtomogramLoader` can be constructed from a image file using the :meth:`imread` method
 or the public :func:`imread` function.
@@ -134,6 +133,15 @@ align the molecules and determine the best template for each molecule.
 
 Here, input templates must be given as a list of :class:`numpy.ndarray` objects of the
 same shape. ``label_name`` is the name used for the feature colummn of the best template.
+
+Image preprocessing workflow
+----------------------------
+
+During subtomogram alignment, template images and mask images are usually provided from
+image files. They also need preprocessing such as rescaling and smoothing.
+
+
+See :doc:`./pipe` for the details.
 
 Filtering Loader
 ================

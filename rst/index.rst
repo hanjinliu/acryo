@@ -34,6 +34,7 @@ Contents
 
    ./main/molecules
    ./main/loader
+   ./main/pipe
    ./main/alignment
 
 

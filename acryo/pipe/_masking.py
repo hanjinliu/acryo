@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 from scipy import ndimage as ndi
-from acryo.utils._curry import converter_function
+from acryo.pipe._curry import converter_function
 
 
 @converter_function
