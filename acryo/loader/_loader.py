@@ -107,7 +107,7 @@ class SubtomogramLoader(LoaderBase):
         corner_safe: bool = False,
         chunks: Any = "auto",
     ):
-        dask_array, _scale = imread(path, chunks)
+        dask_array, _scale = imread(str(path), chunks)
         if scale is None:
             scale = _scale
         return cls(

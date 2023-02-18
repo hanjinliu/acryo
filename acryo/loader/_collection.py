@@ -4,7 +4,7 @@ from __future__ import annotations
 from types import MappingProxyType
 
 import weakref
-from typing import Hashable, Iterator, TYPE_CHECKING
+from typing import Hashable, Iterable, Iterator, TYPE_CHECKING
 import numpy as np
 import polars as pl
 
@@ -80,6 +80,25 @@ class TomogramCollection(LoaderBase):
         image = loader.image
         molecules = loader.molecules
         return self.add_tomogram(image, molecules)
+
+    @classmethod
+    def from_loaders(
+        cls,
+        loaders: Iterable[SubtomogramLoader],
+        order: int = 3,
+        scale: nm = 1.0,
+        output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
+        corner_safe: bool = False,
+    ) -> Self:
+        self = cls(
+            order=order,
+            scale=scale,
+            output_shape=output_shape,
+            corner_safe=corner_safe,
+        )
+        for loader in loaders:
+            self.add_loader(loader)
+        return self
 
     @property
     def molecules(self) -> Molecules:

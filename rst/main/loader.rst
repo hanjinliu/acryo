@@ -32,6 +32,15 @@ A :class:`SubtomogramLoader` is a pair of a 3D tomogram image and a
     the volume inside the given output shape will not be affected after rotation,
     otherwise the corners of the subtomograms will be dimmer.
 
+:class:`SubtomogramLoader` can be constructed from a image file using the :meth:`imread` method
+or the public :func:`imread` function.
+
+.. code-block:: python
+
+    from acryo import Molecules, imread
+
+    loader = imread("path/to/image.mrc", Molecules.from_csv("path/to/molecules.csv"))
+
 Subtomogram averaging
 =====================
 
@@ -191,3 +200,48 @@ essentially equivalent.
     aligned = []
     for cluster, ldr in loader.groupby("cluster_id").align(template):
         aligned.append(out.molecules)
+
+Since each group does not necessarily composed of the same molecules, you can use a mapping
+of templates for alignment functions.
+
+.. code-block:: python
+
+    templates = {
+        0: template0,
+        1: template1,
+        2: template2,
+    }
+    aligned = loader.groupby("cluster_id").align_multi_templates(templates)
+
+Loading from Collection of Tomograms
+====================================
+
+Cryo-ET image analysis is usually performed on a collection of tomograms. Data management
+becomes very complicated in this case.
+
+:mod:`acryo` provides a :class:`TomogramCollection` class for this purpose. :class:`TomogramCollection`
+shares the same interface with :class:`SubtomogramLoader`. It is constructed using the same parameters.
+
+.. code-block:: python
+
+    def __init__(self, order=3, scale=1.0, output_shape=Unset(), corner_safe=False): ...
+
+:class:`TomogramCollection` can be constructed from a list of :class:`SubtomogramLoader` objects.
+
+.. code-block:: python
+
+    from acryo import Molecules, imread, TomogramCollection
+
+    collection = TomogramCollection.from_loaders(
+        [
+            imread("path/to/image-0.mrc", Molecules.from_csv("path/to/molecules-0.csv")),
+            imread("path/to/image-1.mrc", Molecules.from_csv("path/to/molecules-1.csv")),
+            imread("path/to/image-2.mrc", Molecules.from_csv("path/to/molecules-2.csv")),
+        ],
+    )
+
+.. code-block:: python
+
+    avg = collection.average(output_shape=(20, 20, 20))
+    out = collection.align(template, max_shifts=(5, 5, 5))
+    group = collection.groupby("cluster_id")

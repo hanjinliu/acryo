@@ -46,6 +46,11 @@ class LoaderGroup(Generic[_K, _L]):
     ):
         self._it = it
 
+    @property
+    def keys(self) -> list[_K]:
+        """All the keys in the group."""
+        return [key for key, _ in self._it]
+
     @classmethod
     def _from_loader(cls, loader: _L, by: _K) -> Self[_K, _L]:
         return cls(
@@ -233,19 +238,6 @@ class LoaderGroup(Generic[_K, _L]):
         LoaderGroup
             A loader group with updated molecules.
         """
-        # out: list[tuple[_K, _L]] = []
-        # for key, loader in self:
-        #     with loader.cached(output_shape=output_shape):
-        #         template = loader.average(output_shape=output_shape)
-        #         aligned = loader.align(
-        #             template,
-        #             mask=mask,
-        #             max_shifts=max_shifts,
-        #             alignment_model=alignment_model,
-        #             **align_kwargs,
-        #         )
-        #     out.append((key, aligned))
-        # return out
         avg = self.average(output_shape=output_shape)
         return self.align(
             avg,
