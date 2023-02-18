@@ -16,6 +16,7 @@ from typing import (
 )
 import tempfile
 import numpy as np
+from numpy.typing import NDArray
 from dask import array as da
 from dask.delayed import delayed
 from scipy.spatial.transform import Rotation
@@ -28,20 +29,23 @@ from acryo.alignment import (
     AlignmentFactory,
     AlignmentResult,
 )
+from acryo import _utils
 from acryo._types import nm, pixel
 from acryo.molecules import Molecules
-from acryo import _utils
+from acryo.alignment._base import MaskType
 from acryo.loader import _misc
 from acryo.loader._group import LoaderGroup
+from acryo.loader._provider import ImageProvider
 
 if TYPE_CHECKING:
     from typing_extensions import Self
     from dask.delayed import Delayed
-    from numpy.typing import NDArray
     from acryo.classification import PcaClassifier
-    from acryo.alignment._base import MaskType
 
     _ShapeType = Union[pixel, tuple[pixel, ...], None]
+
+TemplateInputType = Union[NDArray[np.float32], ImageProvider]
+MaskInputType = Union[MaskType, ImageProvider]
 
 
 class Unset:
@@ -375,9 +379,9 @@ class LoaderBase(ABC):
 
     def align(
         self,
-        template: NDArray[np.float32],
+        template: TemplateInputType,
         *,
-        mask: MaskType = None,
+        mask: MaskInputType = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
         alignment_model: type[BaseAlignmentModel] | AlignmentFactory = ZNCCAlignment,
         **align_kwargs,
@@ -411,8 +415,8 @@ class LoaderBase(ABC):
         _max_shifts_px = np.asarray(max_shifts) / self.scale
 
         model = alignment_model(
-            template=template,
-            mask=mask,
+            template=self._get_template_image(template),
+            mask=self._get_mask_image(mask),
             **align_kwargs,
         )
         tasks = self.construct_mapping_tasks(
@@ -425,7 +429,7 @@ class LoaderBase(ABC):
             ),
         )
         all_results = da.compute(tasks)[0]
-        return self._post_align(all_results, template.shape)
+        return self._post_align(all_results, model.input_shape)
 
     def _post_align(
         self,
@@ -451,7 +455,7 @@ class LoaderBase(ABC):
     def align_no_template(
         self,
         *,
-        mask: MaskType = None,
+        mask: MaskInputType = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
         output_shape: _ShapeType = None,
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
@@ -489,7 +493,7 @@ class LoaderBase(ABC):
             template = self.average(output_shape=output_shape)
             out = self.align(
                 template,
-                mask=mask,
+                mask=self._get_mask_image(mask),
                 max_shifts=max_shifts,
                 alignment_model=alignment_model,
                 **align_kwargs,
@@ -498,9 +502,9 @@ class LoaderBase(ABC):
 
     def align_multi_templates(
         self,
-        templates: list[NDArray[np.float32]],
+        templates: list[TemplateInputType],
         *,
-        mask: MaskType = None,
+        mask: MaskInputType = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
         label_name: str = "labels",
@@ -536,8 +540,8 @@ class LoaderBase(ABC):
         _max_shifts_px = np.asarray(max_shifts) / self.scale
 
         model = alignment_model(
-            template=list(templates),
-            mask=mask,
+            template=[self._get_template_image(t) for t in templates],
+            mask=self._get_mask_image(mask),
             **align_kwargs,
         )
         tasks = self.construct_mapping_tasks(
@@ -651,6 +655,8 @@ class LoaderBase(ABC):
             output_shape = self.output_shape
             if isinstance(output_shape, Unset):
                 raise TypeError("Output shape is unknown.")
+        elif isinstance(mask, ImageProvider):
+            _mask = mask(self.scale)
         else:
             _mask = mask
             output_shape = mask.shape
@@ -679,8 +685,8 @@ class LoaderBase(ABC):
 
     def classify(
         self,
-        template: NDArray[np.float32] | None = None,
-        mask: MaskType = None,
+        template: TemplateInputType | None = None,
+        mask: MaskInputType = None,
         *,
         cutoff: float = 0.5,
         n_components: int = 2,
@@ -723,6 +729,9 @@ class LoaderBase(ABC):
         """
         from acryo.classification import PcaClassifier
 
+        if template is not None:
+            template = self._get_template_image(template)
+        mask = self._get_mask_image(mask)
         if isinstance(mask, np.ndarray):
             shape = mask.shape
         elif isinstance(template, np.ndarray):
@@ -790,8 +799,26 @@ class LoaderBase(ABC):
                 raise ValueError("Output shape is unknown.")
             _output_shape = self.output_shape
         else:
-            _output_shape = _utils.normalize_shape(output_shape, ndim=3)
+            _output_shape = _misc.normalize_shape(output_shape, ndim=3)
         return _output_shape
+
+    def _get_template_image(self, template: TemplateInputType) -> NDArray[np.float32]:
+        if isinstance(template, np.ndarray):
+            return template
+        elif isinstance(template, ImageProvider):
+            out = template(self.scale)
+            return np.asarray(out, dtype=np.float32)
+        raise TypeError(f"Invalid template type: {type(template)}")
+
+    def _get_mask_image(self, mask: MaskInputType) -> NDArray[np.float32]:
+        if isinstance(mask, (np.ndarray, type(None))):
+            return mask
+        elif isinstance(mask, ImageProvider):
+            out = mask(self.scale)
+            return np.asarray(out, dtype=np.float32)
+        elif callable(mask):
+            return mask
+        raise TypeError(f"Invalid mask type: {type(mask)}")
 
 
 class ClassificationResult(NamedTuple):
@@ -818,7 +845,7 @@ def check_input(
     if isinstance(output_shape, Unset):
         _output_shape = output_shape
     else:
-        _output_shape = _utils.normalize_shape(output_shape, ndim=ndim)
+        _output_shape = _misc.normalize_shape(output_shape, ndim=ndim)
 
     # check scale
     _scale = float(scale)

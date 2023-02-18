@@ -182,7 +182,7 @@ class LoaderGroup(Generic[_K, _L]):
         template_map = _normalize_template(template)
         for key, loader in self:
             model = alignment_model(
-                template=template_map[key],
+                template=loader._get_template_image(template_map[key]),
                 mask=mask,
                 **align_kwargs,
             )
@@ -286,8 +286,9 @@ class LoaderGroup(Generic[_K, _L]):
         all_tasks: list[list[Delayed]] = []
         template_map = _normalize_template(templates)
         for key, loader in self:
+            _tmps = template_map[key]
             model = alignment_model(
-                template=list(template_map[key]),
+                template=[loader._get_template_image(t) for t in _tmps],
                 mask=mask,
                 **align_kwargs,
             )

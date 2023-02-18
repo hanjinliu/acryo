@@ -303,11 +303,3 @@ def _get_indices(shape: tuple[int, ...]) -> NDArray[np.float32]:
         # Note that the shifts in indices must resemble the shifts in fftshift.
         ind -= np.ceil(s / 2)
     return np.fft.fftshift(np.stack(list(inds), axis=-1), axes=(0, 1, 2))
-
-
-def normalize_shape(a: int | Sequence[int], ndim: int):
-    if isinstance(a, int):
-        _output_shape = (a,) * ndim
-    else:
-        _output_shape = tuple(a)
-    return _output_shape
