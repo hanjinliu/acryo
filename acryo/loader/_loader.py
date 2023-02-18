@@ -1,35 +1,24 @@
 # pyright: reportPrivateImportUsage=false
 
 from __future__ import annotations
-import psutil
 from typing import (
     TYPE_CHECKING,
-    Generic,
-    Hashable,
-    Iterator,
     NamedTuple,
-    TypeVar,
     Any,
-    overload,
 )
 import numpy as np
 from dask import array as da
-import polars as pl
 
 from acryo._types import nm, pixel
 from acryo._reader import imread
-from acryo._loader_base import LoaderBase, Unset
-from acryo.molecules import Molecules, MoleculeGroup
+from acryo.molecules import Molecules
 from acryo import _utils
+from acryo.loader._base import LoaderBase, Unset
 
 if TYPE_CHECKING:
     from typing_extensions import Self
     from numpy.typing import NDArray
     from acryo.classification import PcaClassifier
-
-
-_R = TypeVar("_R")
-MEMORY_LIMIT = psutil.virtual_memory().total
 
 
 class SubtomogramLoader(LoaderBase):
@@ -254,113 +243,12 @@ class SubtomogramLoader(LoaderBase):
         out = da.stack(tasks, axis=0)
         return out
 
-    def asnumpy(self, *, lim: int = MEMORY_LIMIT) -> NDArray[np.float32]:
-        """Create a 4D image stack of all the subtomograms."""
-        arr = self.construct_dask()
-        if arr.nbytes > lim:
-            raise MemoryError("The array is too large to be loaded into memory.")
-        return arr.compute()
-
-    @overload
-    def groupby(self, by: str | pl.Expr) -> LoaderGroup[str]:
-        ...
-
-    @overload
-    def groupby(self, by: list[str | pl.Expr]) -> LoaderGroup[tuple[str, ...]]:
-        ...
-
-    def groupby(self, by):
-        mole_group = self.molecules.groupby(by)
-        return LoaderGroup(
-            mole_group,
-            self.image,
-            self.order,
-            self.scale,
-            self.output_shape,
-            self.corner_safe,
-        )
-
-    def _get_output_shape(
-        self, output_shape: pixel | tuple[pixel] | None
-    ) -> tuple[pixel, ...]:
-        if output_shape is None:
-            if isinstance(self.output_shape, Unset):
-                raise ValueError("Output shape is unknown.")
-            _output_shape = self.output_shape
-        else:
-            _output_shape = _utils.normalize_shape(output_shape, ndim=self.image.ndim)
-        return _output_shape
-
 
 class ClassificationResult(NamedTuple):
     """Tuple of classification results."""
 
     loader: SubtomogramLoader
     classifier: PcaClassifier
-
-
-_K = TypeVar("_K", bound=Hashable)
-
-
-class LoaderGroup(Generic[_K]):
-    """A groupby-like object for subtomogram loaders."""
-
-    def __init__(
-        self,
-        group: MoleculeGroup,
-        image,
-        order: int,
-        scale: float,
-        output_shape: tuple[int, ...],
-        corner_safe: bool,
-    ):
-        self._group = group
-        self._image = image
-        self._order = order
-        self._scale = scale
-        self._output_shape = output_shape
-        self._corner_safe = corner_safe
-
-    def __iter__(self) -> Iterator[tuple[_K, SubtomogramLoader]]:
-        for key, mole in self._group:
-            loader = SubtomogramLoader(
-                self._image,
-                mole,
-                order=self._order,
-                scale=self._scale,
-                output_shape=self._output_shape,
-                corner_safe=self._corner_safe,
-            )
-            yield key, loader
-
-    def average(
-        self, output_shape: tuple[int, ...] | None = None
-    ) -> dict[_K, NDArray[np.float32]]:
-        """Calculate average image."""
-        if output_shape is None:
-            output_shape = self._output_shape
-        tasks = []
-        keys: list[str] = []
-        for key, loader in self:
-            keys.append(key)
-            dsk = loader.construct_dask(output_shape)
-            tasks.append(da.mean(dsk, axis=0))
-
-        out: list[NDArray[np.float32]] = da.compute(tasks)[0]
-        return {key: img for key, img in zip(keys, out)}
-
-
-def get_feature_list(corr_max, local_shifts, rotvec) -> list[pl.Series]:
-    features = [
-        pl.Series("score", corr_max),
-        pl.Series("shift-z", np.round(local_shifts[:, 0], 2)),
-        pl.Series("shift-y", np.round(local_shifts[:, 1], 2)),
-        pl.Series("shift-x", np.round(local_shifts[:, 2], 2)),
-        pl.Series("rotvec-z", np.round(rotvec[:, 0], 5)),
-        pl.Series("rotvec-y", np.round(rotvec[:, 1], 5)),
-        pl.Series("rotvec-x", np.round(rotvec[:, 2], 5)),
-    ]
-    return features
 
 
 def check_input(

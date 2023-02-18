@@ -10,6 +10,9 @@ from typing import (
     Iterator,
     NamedTuple,
     Any,
+    SupportsIndex,
+    Union,
+    overload,
 )
 import tempfile
 import numpy as np
@@ -27,6 +30,8 @@ from acryo.alignment import (
 from acryo._types import nm, pixel
 from acryo.molecules import Molecules
 from acryo import _utils
+from acryo.loader import _misc
+from acryo.loader._group import LoaderGroup
 
 if TYPE_CHECKING:
     from typing_extensions import Self
@@ -34,6 +39,8 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
     from acryo.classification import PcaClassifier
     from acryo.alignment._base import MaskType
+
+    _ShapeType = Union[pixel, tuple[pixel, ...], None]
 
 
 class Unset:
@@ -84,22 +91,20 @@ class LoaderBase(ABC):
 
     @property
     def corner_safe(self) -> bool:
+        """Whether rotation is corner-safe."""
         return self._corner_safe
 
     @abstractmethod
-    def construct_dask(
-        self,
-        output_shape: pixel | tuple[pixel, ...] | None = None,
-    ) -> da.Array:
+    def construct_dask(self, output_shape: _ShapeType = None) -> da.Array:
         ...
 
     @abstractmethod
     def construct_loading_tasks(
-        self,
-        output_shape: pixel | tuple[pixel, ...] | None = None,
+        self, output_shape: _ShapeType = None
     ) -> list[da.Array]:
         ...
 
+    @abstractmethod
     def replace(
         self,
         molecules: Molecules | None = None,
@@ -117,7 +122,7 @@ class LoaderBase(ABC):
         self,
         func: Callable,
         *const_args,
-        output_shape: pixel | tuple[pixel, ...] | None = None,
+        output_shape: _ShapeType = None,
         var_kwarg: dict[str, Iterable[Any]] | None = None,
         **const_kwargs,
     ) -> Iterator[Delayed]:
@@ -146,7 +151,7 @@ class LoaderBase(ABC):
         else:
             it = (
                 delayed_f(ar, *const_args, **const_kwargs, **kw)
-                for ar, kw in zip(dask_array, _dict_iterrows(var_kwarg))
+                for ar, kw in zip(dask_array, _misc.dict_iterrows(var_kwarg))
             )
         return it
 
@@ -154,7 +159,7 @@ class LoaderBase(ABC):
         self,
         func: Callable,
         *const_args,
-        output_shape: pixel | tuple[pixel, ...] | None = None,
+        output_shape: _ShapeType = None,
         var_kwarg: dict[str, Iterable[Any]] | None = None,
         **const_kwargs,
     ) -> list[Delayed]:
@@ -186,10 +191,7 @@ class LoaderBase(ABC):
             )
         )
 
-    def create_cache(
-        self,
-        output_shape: pixel | tuple[pixel] | None = None,
-    ) -> da.Array:
+    def create_cache(self, output_shape: _ShapeType = None) -> da.Array:
         """
         Create cached stack of subtomograms.
 
@@ -229,10 +231,7 @@ class LoaderBase(ABC):
         return None
 
     @contextmanager
-    def cached(
-        self,
-        output_shape: pixel | tuple[pixel] | None = None,
-    ) -> ContextManager[da.Array]:
+    def cached(self, output_shape: _ShapeType = None) -> ContextManager[da.Array]:
         """
         Context manager for caching subtomograms of give shape.
 
@@ -247,10 +246,57 @@ class LoaderBase(ABC):
             del self._cached_dask_array
             self._cached_dask_array = old_cache
 
-    def average(
+    def load(
         self,
-        output_shape: pixel | tuple[pixel] | None = None,
-    ) -> NDArray[np.float32]:
+        idx: SupportsIndex | slice | Iterable[SupportsIndex],
+        output_shape: _ShapeType = None,
+    ):
+        """
+        Load subtomogram(s) of given index.
+
+        Parameters
+        ----------
+        idx : int, slice or iterable of int
+            Subtomogram index.
+        output_shape : int or tuple of int, optional
+            Shape of the output subtomograms.
+
+        Returns
+        -------
+        3D array or 4D array
+            Subtomogram(s) of given index.
+        """
+        tasks = self.construct_loading_tasks(output_shape=output_shape)
+        if isinstance(idx, SupportsIndex):
+            return tasks[idx].compute()
+        elif isinstance(idx, slice):
+            return da.stack(tasks[idx], axis=0).compute()
+        elif isinstance(idx, Iterable):
+            return da.stack([tasks[i] for i in idx], axis=0).compute()
+        else:
+            raise TypeError(f"Invalid index type: {type(idx)}")
+
+    def load_iter(
+        self, output_shape: _ShapeType = None
+    ) -> Iterator[NDArray[np.float32]]:
+        """
+        Iterate over subtomograms.
+
+        Parameters
+        ----------
+        output_shape : int or tuple of int, optional
+            Shape of the output subtomograms.
+
+        Yields
+        ------
+        3D array
+            Subtomogram
+        """
+        tasks = self.construct_loading_tasks(output_shape=output_shape)
+        for task in tasks:
+            yield task.compute()
+
+    def average(self, output_shape: _ShapeType = None) -> NDArray[np.float32]:
         """
         Calculate the average of subtomograms.
 
@@ -270,7 +316,7 @@ class LoaderBase(ABC):
         n_set: int = 1,
         seed: int | None = 0,
         squeeze: bool = True,
-        output_shape: pixel | tuple[pixel] | None = None,
+        output_shape: _ShapeType = None,
     ) -> NDArray[np.float32]:
         """
         Split subtomograms into two set and average separately.
@@ -362,7 +408,7 @@ class LoaderBase(ABC):
         )
         all_results = da.compute(tasks)[0]
 
-        local_shifts, local_rot, scores = _allocate(len(tasks))
+        local_shifts, local_rot, scores = _misc.allocate(len(tasks))
         for i, result in enumerate(all_results):
             _, local_shifts[i], local_rot[i], scores[i] = result
 
@@ -373,7 +419,7 @@ class LoaderBase(ABC):
         )
 
         mole_aligned.features = self.molecules.features.with_columns(
-            get_feature_list(scores, local_shifts, rotator.as_rotvec()),
+            _misc.get_feature_list(scores, local_shifts, rotator.as_rotvec()),
         )
 
         return self.replace(molecules=mole_aligned, output_shape=template.shape)
@@ -383,7 +429,7 @@ class LoaderBase(ABC):
         *,
         mask: MaskType = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
-        output_shape: pixel | tuple[pixel] | None = None,
+        output_shape: _ShapeType = None,
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
         **align_kwargs,
     ) -> Self:
@@ -464,11 +510,12 @@ class LoaderBase(ABC):
         """
 
         n_templates = len(templates)
+        nsubtomograms = len(self.molecules)
 
-        local_shifts, local_rot, corr_max = _allocate(len(self))
+        local_shifts, local_rot, corr_max = _misc.allocate(nsubtomograms)
 
         # optimal template ID
-        labels = np.zeros(len(self), dtype=np.uint32)
+        labels = np.zeros(nsubtomograms, dtype=np.uint32)
 
         _max_shifts_px = np.asarray(max_shifts) / self.scale
 
@@ -488,7 +535,7 @@ class LoaderBase(ABC):
         )
         all_results = da.compute(tasks)[0]
 
-        local_shifts, local_rot, scores = _allocate(len(tasks))
+        local_shifts, local_rot, scores = _misc.allocate(len(tasks))
         for i, result in enumerate(all_results):
             labels[i], local_shifts[i], local_rot[i], scores[i] = result
 
@@ -502,7 +549,9 @@ class LoaderBase(ABC):
             labels %= n_templates
         labels = labels.astype(np.uint8)
 
-        feature_list = get_feature_list(corr_max, local_shifts, rotator.as_rotvec())
+        feature_list = _misc.get_feature_list(
+            corr_max, local_shifts, rotator.as_rotvec()
+        )
         mole_aligned.features = self.molecules.features.with_columns(
             feature_list + [pl.Series(label_name, labels)]
         )
@@ -512,7 +561,7 @@ class LoaderBase(ABC):
     def agg(
         self,
         funcs: list[Callable[[NDArray[np.float32]], Any]],
-        schema=None,
+        schema: list[str] | None = None,
     ) -> pl.DataFrame:
         all_tasks: list[list[Delayed]] = []
         for fn in funcs:
@@ -672,14 +721,30 @@ class LoaderBase(ABC):
         """Return a new loader with filtered molecules."""
         return self.replace(molecules=self.molecules.filter(predicate))
 
+    @overload
+    def groupby(self, by: str | pl.Expr) -> LoaderGroup[str]:
+        ...
+
+    @overload
+    def groupby(self, by: list[str | pl.Expr]) -> LoaderGroup[tuple[str, ...]]:
+        ...
+
+    def groupby(self, by):
+        return LoaderGroup(
+            self,
+            by,
+            order=self.order,
+            scale=self.scale,
+            output_shape=self.output_shape,
+            corner_safe=self.corner_safe,
+        )
+
     def _cache_available(self, shape: tuple[pixel, ...]) -> bool:
         if self._cached_dask_array is None:
             return False
         return self._cached_dask_array.shape[1:] == shape
 
-    def _get_output_shape(
-        self, output_shape: pixel | tuple[pixel] | None
-    ) -> tuple[pixel, ...]:
+    def _get_output_shape(self, output_shape: _ShapeType) -> tuple[pixel, ...]:
         if output_shape is None:
             if isinstance(self.output_shape, Unset):
                 raise ValueError("Output shape is unknown.")
@@ -722,51 +787,3 @@ def check_input(
 
     _corner_safe = bool(corner_safe)
     return order, _output_shape, _scale, _corner_safe
-
-
-def get_feature_list(corr_max, local_shifts, rotvec) -> list[pl.Series]:
-    features = [
-        pl.Series("score", corr_max),
-        pl.Series("shift-z", np.round(local_shifts[:, 0], 2)),
-        pl.Series("shift-y", np.round(local_shifts[:, 1], 2)),
-        pl.Series("shift-x", np.round(local_shifts[:, 2], 2)),
-        pl.Series("rotvec-z", np.round(rotvec[:, 0], 5)),
-        pl.Series("rotvec-y", np.round(rotvec[:, 1], 5)),
-        pl.Series("rotvec-x", np.round(rotvec[:, 2], 5)),
-    ]
-    return features
-
-
-def _dict_iterrows(d: dict[str, Iterable[Any]]):
-    """
-    Generater similar to pl.DataFrame.iterrows().
-
-    >>> _dict_iterrows({'a': [1, 2, 3], 'b': [4, 5, 6]})
-
-    will yield {'a': 1, 'b': 4}, {'a': 2, 'b': 5}, {'a': 3, 'b': 6}.
-    """
-    keys = d.keys()
-    value_iters = [iter(v) for v in d.values()]
-
-    dict_out = dict.fromkeys(keys, None)
-    while True:
-        try:
-            for k, viter in zip(keys, value_iters):
-                dict_out[k] = next(viter)
-            yield dict_out
-        except StopIteration:
-            break
-
-
-def _allocate(size: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    # shift in local Cartesian
-    local_shifts = np.zeros((size, 3))
-
-    # maximum ZNCC
-    corr_max = np.zeros(size)
-
-    # rotation (quaternion) in local Cartesian
-    local_rot = np.zeros((size, 4))
-    local_rot[:, 3] = 1  # identity map in quaternion
-
-    return local_shifts, local_rot, corr_max

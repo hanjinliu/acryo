@@ -2,6 +2,17 @@
 Subtomogram Loader
 ==================
 
+:mod:`acryo` aims at efficient analysis of tomographic data. Here, we show how to use
+:class:`Molecules` with actual images to perform subtomogram averaging, alignment and
+many other tasks.
+
+.. contents:: Contents
+    :local:
+    :depth: 1
+
+Subtomogram Loader
+==================
+
 A :class:`SubtomogramLoader` is a pair of a 3D tomogram image and a
 :class:`Molecules` object, with some additional parameters.
 

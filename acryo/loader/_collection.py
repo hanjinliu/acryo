@@ -3,20 +3,22 @@
 from __future__ import annotations
 from types import MappingProxyType
 
+import weakref
 from typing import Hashable, Iterator, TYPE_CHECKING
 import numpy as np
 import polars as pl
 
 from dask import array as da
 
-from acryo.loader import SubtomogramLoader, Unset
 from acryo.molecules import Molecules
 from acryo._types import nm, pixel
-from acryo._loader_base import LoaderBase
+from acryo.loader._base import LoaderBase
+from acryo.loader._loader import SubtomogramLoader, Unset
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
     from typing_extensions import Self
+    from acryo.loader._base import _ShapeType
 
 IMAGE_ID_LABEL = "image"
 
@@ -42,12 +44,11 @@ class TomogramCollection(LoaderBase):
         super().__init__(order, scale, output_shape, corner_safe)
         self._images: dict[Hashable, NDArray[np.float32] | da.Array] = {}
         self._molecules: Molecules = Molecules.empty([IMAGE_ID_LABEL])
-        self._loaders = LoaderAccessor(self)
 
     @property
     def loaders(self) -> LoaderAccessor:
         """Interface to access the subtomogram loaders."""
-        return self._loaders
+        return LoaderAccessor(self)
 
     @property
     def images(self) -> MappingProxyType:
@@ -83,7 +84,7 @@ class TomogramCollection(LoaderBase):
     def replace(
         self,
         molecules: Molecules | None = None,
-        output_shape: pixel | tuple[pixel, pixel, pixel] | Unset | None = None,
+        output_shape: _ShapeType | Unset = None,
         order: int | None = None,
         scale: float | None = None,
         corner_safe: bool | None = None,
@@ -115,7 +116,7 @@ class TomogramCollection(LoaderBase):
         return out
 
     def construct_loading_tasks(
-        self, output_shape: pixel | tuple[pixel, ...] | None = None
+        self, output_shape: _ShapeType = None
     ) -> list[da.Array]:
         return sum(
             (
@@ -125,10 +126,7 @@ class TomogramCollection(LoaderBase):
             start=[],
         )
 
-    def construct_dask(
-        self,
-        output_shape: pixel | tuple[pixel, ...] | None = None,
-    ) -> da.Array:
+    def construct_dask(self, output_shape: _ShapeType = None) -> da.Array:
         dask_arrays: list[da.Array] = []
         for loader in self.loaders:
             dask_arrays.append(loader.construct_dask(output_shape=output_shape))
@@ -137,14 +135,10 @@ class TomogramCollection(LoaderBase):
 
 class LoaderAccessor:
     def __init__(self, collection: TomogramCollection):
-        self._collection = collection
-
-    @property
-    def collection(self) -> TomogramCollection:
-        return self._collection
+        self._collection = weakref.ref(collection)
 
     def __getitem__(self, idx: int) -> SubtomogramLoader:
-        col = self.collection
+        col = self._collection()
         mole = col.filter(pl.col(IMAGE_ID_LABEL) == idx).molecules
         if mole.features.shape[0] == 0:
             raise KeyError(idx)
@@ -160,7 +154,7 @@ class LoaderAccessor:
         return loader
 
     def __iter__(self) -> Iterator[SubtomogramLoader]:
-        col = self.collection
+        col = self._collection()
 
         for key, group in col.molecules.groupby(IMAGE_ID_LABEL):
             image = col._images[key]
