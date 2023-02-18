@@ -3,57 +3,11 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 from scipy import ndimage as ndi
+from acryo.utils._curry import converter_function
 
 
-class SoftOtsu:
-    """
-    Image smoothing by Otsu thresholding, dilation and Gaussian blurring.
-
-    Parameters
-    ----------
-    sigma : float, default is 1.0
-        Standard deviation of the Gaussian kernel.
-    radius : int, default is 1
-        Radius of the structuring element for dilation/erosion.
-    bins : int, default is 256
-        Number of bins for Otsu thresholding.
-    """
-
-    def __init__(self, sigma: float = 1.0, radius: int = 1, bins: int = 256):
-        self._sigma = sigma
-        self._radius = radius
-        self._bins = bins
-        self._structure = None
-
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(radius={self._radius}, sigma={self._sigma})"
-
-    @property
-    def structure(self) -> NDArray[np.bool_]:
-        if self._structure is None:
-            r = abs(self._radius)
-            zz, yy, xx = np.indices((2 * r + 1, 2 * r + 1, 2 * r + 1))
-            self._structure = (xx - r) ** 2 + (yy - r) ** 2 + (zz - r) ** 2 <= r**2
-        return self._structure
-
-    def __call__(self, img: NDArray[np.float32]) -> NDArray[np.float32]:
-        binary = img < _threshold_otsu(img, self._bins)
-        if self._radius > 0:
-            mask = ndi.binary_erosion(
-                binary, structure=self.structure, border_value=True
-            )
-        elif self._radius < 0:
-            mask = ndi.binary_dilation(
-                binary, structure=self.structure, border_value=True
-            )
-        else:
-            mask = binary
-        dist = ndi.distance_transform_edt(mask)
-        blurred_mask = np.exp(-(dist**2) / 2 / self._sigma**2)
-        return blurred_mask
-
-
-def _threshold_otsu(img: NDArray[np.float32], bins: int = 256) -> float:
+@converter_function
+def threshold_otsu(img: NDArray[np.float32], bins: int = 256) -> NDArray[np.bool_]:
     hist, edges = np.histogram(img.ravel(), bins=bins)
     centers: NDArray[np.float32] = (edges[:-1] + edges[1:]) / 2
     npixel0 = np.cumsum(hist)
@@ -72,4 +26,31 @@ def _threshold_otsu(img: NDArray[np.float32], bins: int = 256) -> float:
     s = npixel0 * npixel1 * (mean0 - mean1) ** 2
 
     imax = np.argmax(s)
-    return centers[imax]
+    thr = centers[imax]
+    return img > thr
+
+
+@converter_function
+def dilation(img: NDArray[np.bool_], radius: float) -> NDArray[np.bool_]:
+    if radius == 0:
+        return img
+    r = abs(radius)
+    zz, yy, xx = np.indices((2 * r + 1, 2 * r + 1, 2 * r + 1))
+    structure = (xx - r) ** 2 + (yy - r) ** 2 + (zz - r) ** 2 <= r**2
+    if radius > 0:
+        out = ndi.binary_erosion(img, structure=structure, border_value=False)
+    elif radius < 0:
+        out = ndi.binary_dilation(img, structure=structure, border_value=False)
+    return out
+
+
+@converter_function
+def gaussian_smooth(img: NDArray[np.bool_], sigma: float) -> NDArray[np.bool_]:
+    img = ~img
+    dist = ndi.distance_transform_edt(img)
+    blurred_mask = np.exp(-(dist**2) / 2 / sigma**2)
+    return 1 - blurred_mask
+
+
+def soft_otsu(sigma: float = 1.0, radius: float = 1.0, bins=256):
+    return gaussian_smooth(sigma) * dilation(radius) * threshold_otsu(bins)

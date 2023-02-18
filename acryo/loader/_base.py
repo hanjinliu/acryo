@@ -32,10 +32,9 @@ from acryo.alignment import (
 from acryo import _utils
 from acryo._types import nm, pixel
 from acryo.molecules import Molecules
-from acryo.alignment._base import MaskType
 from acryo.loader import _misc
 from acryo.loader._group import LoaderGroup
-from acryo.loader._provider import ImageProvider
+from acryo.loader._input import ImageProvider, ImageConverter
 
 if TYPE_CHECKING:
     from typing_extensions import Self
@@ -45,7 +44,7 @@ if TYPE_CHECKING:
     _ShapeType = Union[pixel, tuple[pixel, ...], None]
 
 TemplateInputType = Union[NDArray[np.float32], ImageProvider]
-MaskInputType = Union[MaskType, ImageProvider]
+MaskInputType = Union[NDArray[np.float32], ImageProvider, ImageConverter, None]
 
 
 class Unset:
@@ -816,7 +815,7 @@ class LoaderBase(ABC):
         elif isinstance(mask, ImageProvider):
             out = mask(self.scale)
             return np.asarray(out, dtype=np.float32)
-        elif callable(mask):
+        elif isinstance(mask, ImageConverter):
             return mask
         raise TypeError(f"Invalid mask type: {type(mask)}")
 
