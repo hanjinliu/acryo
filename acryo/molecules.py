@@ -193,11 +193,15 @@ class Molecules:
         pos = df.select(pos_cols)
         rotvec = df.select(rot_cols)
         cols = pos.columns + rotvec.columns
-        others = df.select([c for c in df.columns if c not in cols])
+        feature_columns = [c for c in df.columns if c not in cols]
+        if len(feature_columns) == 0:
+            features = None
+        else:
+            features = df.select(feature_columns)
         return cls(
             pos.to_numpy(),
             Rotation.from_rotvec(rotvec.to_numpy()),
-            features=others,
+            features=features,
         )
 
     @property

@@ -150,6 +150,7 @@ class LoaderBase(ABC):
         da.delayed.Delayed object
             Delayed tasks that are ready for ``da.compute``.
         """
+        output_shape = self._get_output_shape(output_shape)
         dask_array = self.construct_loading_tasks(output_shape=output_shape)
         delayed_f = delayed(func)
         if var_kwarg is None:
@@ -314,6 +315,7 @@ class LoaderBase(ABC):
         np.ndarray
             Averaged image
         """
+        output_shape = self._get_output_shape(output_shape)
         dask_array = self.construct_dask(output_shape=output_shape)
         return da.compute(da.mean(dask_array, axis=0))[0]
 
@@ -753,14 +755,7 @@ class LoaderBase(ABC):
         ...
 
     def groupby(self, by):
-        return LoaderGroup._from_loader(
-            self,
-            by,
-            order=self.order,
-            scale=self.scale,
-            output_shape=self.output_shape,
-            corner_safe=self.corner_safe,
-        )
+        return LoaderGroup._from_loader(self, by)
 
     def _cache_available(self, shape: tuple[pixel, ...]) -> bool:
         if self._cached_dask_array is None:

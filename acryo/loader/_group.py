@@ -10,7 +10,6 @@ from typing import (
     TypeVar,
     TYPE_CHECKING,
 )
-import weakref
 import numpy as np
 from numpy.typing import NDArray
 import polars as pl
@@ -176,14 +175,18 @@ class LoaderGroup(Generic[_K, _L]):
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
         **align_kwargs,
     ) -> Self[_K, _L]:
-        template = self.average(output_shape=output_shape)
-        out = self.align(
-            template,
-            mask=mask,
-            max_shifts=max_shifts,
-            alignment_model=alignment_model,
-            **align_kwargs,
-        )
+        out: list[tuple[_K, _L]] = []
+        for key, loader in self:
+            with loader.cached(output_shape=output_shape):
+                template = loader.average(output_shape=output_shape)
+                aligned = loader.align(
+                    template,
+                    mask=mask,
+                    max_shifts=max_shifts,
+                    alignment_model=alignment_model,
+                    **align_kwargs,
+                )
+            out.append((key, aligned))
         return out
 
     def align_multi_templates(
@@ -272,7 +275,7 @@ class LoaderGroupByIterator:
         output_shape: tuple[int, ...],
         corner_safe: bool,
     ):
-        self._loader = weakref.ref(loader)
+        self._loader = loader
         self._by = by
         self._order = order
         self._scale = scale
@@ -280,7 +283,7 @@ class LoaderGroupByIterator:
         self._corner_safe = corner_safe
 
     def __iter__(self) -> Iterator[_K, _L]:
-        loader = self._loader()
+        loader = self._loader
         for key, mole in loader.molecules.groupby(self._by):
             _loader = loader.replace(
                 molecules=mole,

@@ -177,7 +177,7 @@ class SubtomogramLoader(LoaderBase):
 
     def construct_loading_tasks(
         self,
-        output_shape: pixel | tuple[pixel, ...] | None = None,
+        output_shape: tuple[pixel, ...] = None,
     ) -> list[da.Array]:
         """
         Construct a list of subtomogram lazy loader.
@@ -193,8 +193,6 @@ class SubtomogramLoader(LoaderBase):
         scale = self.scale
         if isinstance(image, np.ndarray):
             image = da.from_array(image)
-
-        output_shape = self._get_output_shape(output_shape)
 
         if self.corner_safe:
             _prep = _utils.prepare_affine_cornersafe
