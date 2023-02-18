@@ -7,6 +7,7 @@ from typing import (
     Iterator,
     Callable,
     Any,
+    Mapping,
     TypeVar,
     TYPE_CHECKING,
 )
@@ -139,7 +140,7 @@ class LoaderGroup(Generic[_K, _L]):
 
     def align(
         self,
-        template: NDArray[np.float32],
+        template: NDArray[np.float32] | Mapping[_K, NDArray[np.float32]],
         *,
         mask: MaskType = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
@@ -172,13 +173,14 @@ class LoaderGroup(Generic[_K, _L]):
         LoaderGroup
             A loader group instance with updated molecules.
         """
-        model = alignment_model(
-            template=template,
-            mask=mask,
-            **align_kwargs,
-        )
         all_tasks: list[list[Delayed]] = []
+        template_map = _normalize_template(template)
         for key, loader in self:
+            model = alignment_model(
+                template=template_map[key],
+                mask=mask,
+                **align_kwargs,
+            )
             _max_shifts_px = np.asarray(max_shifts) / loader.scale
             tasks = loader.construct_mapping_tasks(
                 model.align,
@@ -231,19 +233,27 @@ class LoaderGroup(Generic[_K, _L]):
         LoaderGroup
             A loader group with updated molecules.
         """
-        out: list[tuple[_K, _L]] = []
-        for key, loader in self:
-            with loader.cached(output_shape=output_shape):
-                template = loader.average(output_shape=output_shape)
-                aligned = loader.align(
-                    template,
-                    mask=mask,
-                    max_shifts=max_shifts,
-                    alignment_model=alignment_model,
-                    **align_kwargs,
-                )
-            out.append((key, aligned))
-        return out
+        # out: list[tuple[_K, _L]] = []
+        # for key, loader in self:
+        #     with loader.cached(output_shape=output_shape):
+        #         template = loader.average(output_shape=output_shape)
+        #         aligned = loader.align(
+        #             template,
+        #             mask=mask,
+        #             max_shifts=max_shifts,
+        #             alignment_model=alignment_model,
+        #             **align_kwargs,
+        #         )
+        #     out.append((key, aligned))
+        # return out
+        avg = self.average(output_shape=output_shape)
+        return self.align(
+            avg,
+            mask=mask,
+            max_shifts=max_shifts,
+            alignment_model=alignment_model,
+            **align_kwargs,
+        )
 
     def align_multi_templates(
         self,
@@ -281,13 +291,14 @@ class LoaderGroup(Generic[_K, _L]):
         LoaderGroup
             A loader group with updated molecules.
         """
-        model = alignment_model(
-            template=list(templates),
-            mask=mask,
-            **align_kwargs,
-        )
         all_tasks: list[list[Delayed]] = []
+        template_map = _normalize_template(templates)
         for key, loader in self:
+            model = alignment_model(
+                template=list(template_map[key]),
+                mask=mask,
+                **align_kwargs,
+            )
             _max_shifts_px = np.asarray(max_shifts) / loader.scale
             tasks = loader.construct_mapping_tasks(
                 model.align,
@@ -383,3 +394,14 @@ class LoaderGroupByIterator:
                 corner_safe=self._corner_safe,
             )
             yield key, _loader
+
+
+_T = TypeVar("_T")
+
+
+def _normalize_template(template: _T | Mapping[_K, _T]) -> Mapping[_K, _T]:
+    if isinstance(template, Mapping):
+        return template
+    from collections import defaultdict
+
+    return defaultdict(lambda: template)

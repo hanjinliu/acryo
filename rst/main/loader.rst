@@ -126,16 +126,11 @@ align the molecules and determine the best template for each molecule.
 Here, input templates must be given as a list of :class:`numpy.ndarray` objects of the
 same shape. ``label_name`` is the name used for the feature colummn of the best template.
 
-Filtering/Grouping Loaders
-==========================
+Filtering Loader
+================
 
-:meth:`filter` and :meth:`groupby` are two methods that are quite similar to the ones
-in :class:`Molecules` or :class:`DataFrame`.
-
-Filtering
----------
-
-:meth:`filter` is a method that returns a new loader object with filtered molecules.
+:meth:`filter` is the method quite similar to that in :class:`Molecules` or :class:`DataFrame`.
+It returns a new :class:`SubtomogramLoader` object with the filtered molecules.
 
 .. code-block:: python
 
@@ -143,13 +138,56 @@ Filtering
     out = loader.filter(pl.col("score") > 0.5)
     assert (out.molecules.features["score"] > 0.5).all()
 
-Grouping
---------
+Grouping Loader
+===============
 
-:meth:`groupby` is a method that returns a generator of (key, loader) pairs.
+:meth:`groupby` is a method that returns a :class:`LoaderGroup` object. An :class:`LoaderGroup`
+object is very similar to those returned by :meth:`groupby` methods of :class:`polars.DataFrame`,
+:class:`Molecules` or :class:`pandas.DataFrame`.
 
 .. code-block:: python
 
     loader = SubtomogramLoader(image, molecules)
     for cluster, ldr in loader.groupby("cluster_id"):
         assert (out.molecules.features["cluster_id"] == cluster).all()
+
+:class:`LoaderGroup` has many methods of the same name as those in :class:`SubtomogramLoader`.
+
+Group wise averaging
+--------------------
+
+:class:`LoaderGroup` supports all the averaging methods.
+
+- :meth:`average`
+- :meth:`average_split`
+
+In :class:`LoaderGroup` version, result is returned as a ``dict``
+of group key and the averages.
+
+
+Group wise alignment
+--------------------
+
+:class:`LoaderGroup` also supports all the alignment methods
+
+- :meth:`align`
+- :meth:`align_no_template`
+- :meth:`align_multi_templates`
+
+In :class:`LoaderGroup` version, result is returned as an updated :class:`LoaderGroup`.
+
+If you want to collect aligned :class:`Molecules` objects, following codes are
+essentially equivalent.
+
+.. code-block:: python
+
+    # call align() for each loader
+    aligned = []
+    for cluster, ldr in loader.groupby("cluster_id"):
+        out = ldr.align(template)
+        aligned.append(out.molecules)
+
+    # call align() of the LoaderGroup object.
+    aligned = []
+    for cluster, ldr in loader.groupby("cluster_id").align(template):
+        aligned.append(out.molecules)

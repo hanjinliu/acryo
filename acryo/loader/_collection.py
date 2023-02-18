@@ -76,6 +76,11 @@ class TomogramCollection(LoaderBase):
         self._molecules = _molecules_new
         return self
 
+    def add_loader(self, loader: SubtomogramLoader):
+        image = loader.image
+        molecules = loader.molecules
+        return self.add_tomogram(image, molecules)
+
     @property
     def molecules(self) -> Molecules:
         """Collect all the molecules from all the loaders"""
