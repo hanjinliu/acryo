@@ -190,10 +190,8 @@ other arguments required to construct a <code class="xref py py-class docutils l
 <section id="molecule-axes">
 <h2><a class="toc-backref" href="#id4">Molecule Axes</a><a class="headerlink" href="#molecule-axes" title="Permalink to this headline"></a></h2>
 <p>The axes of the rotated molecules (<span class="math notranslate nohighlight">\(\vec{X}, \vec{Y}, \vec{Z}\)</span> in Fig. 1)
-can be obtained as 3D vectors in the world coordinates using properties <code class="docutils literal notranslate"><span class="pre">x</span></code>, <code class="docutils literal notranslate"><span class="pre">y</span></code> and</p>
-<blockquote>
-<div><p><code class="docutils literal notranslate"><span class="pre">z</span></code> .</p>
-</div></blockquote>
+can be obtained as 3D vectors in the world coordinates using properties <code class="docutils literal notranslate"><span class="pre">x</span></code>, <code class="docutils literal notranslate"><span class="pre">y</span></code> and
+<code class="docutils literal notranslate"><span class="pre">z</span></code> .</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">mole</span> <span class="o">=</span> <span class="n">Molecules</span><span class="o">.</span><span class="n">from_rotvec</span><span class="p">(</span>
     <span class="p">[[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]],</span>
     <span class="p">[[</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]],</span>  <span class="c1"># 90-degree rotation around z-axis</span>

@@ -102,7 +102,7 @@ Molecule Axes
 
 The axes of the rotated molecules (:math:`\vec{X}, \vec{Y}, \vec{Z}` in Fig. 1)
 can be obtained as 3D vectors in the world coordinates using properties ``x``, ``y`` and
- ``z`` .
+``z`` .
 
 .. code-block:: python
 
