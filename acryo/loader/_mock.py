@@ -21,6 +21,32 @@ if TYPE_CHECKING:
 
 
 class MockLoader(LoaderBase):
+    """
+    A subtomogram loader from a virtual tomogram.
+
+    This loader is for testing purpose only. The tomogram does not actually exist
+    but subtomograms are generated on the fly based on the template image. The
+    true center of the molecules is always at (0, 0, 0) and the true rotation is
+    always the identity rotation. Thus, given molecule positions/rotations will
+    directly be the values to be tested.
+
+    Parameters
+    ----------
+    template : 3D array, ImageProvider
+        The template image.
+    molecules : Molecules
+        The molecules to be loaded. Note that the true center/rotation is always
+        (0, 0, 0) and the identity rotation, respectively.
+    noise : float, optional
+        Standard deviation of the Gaussian noise to be added to the subtomograms
+        projection slices.
+    degrees : array-like, optional
+        The rotation angles in degrees. If not provided, projection/back-projection
+        will not be simulated.
+    central_axis : tuple, default is (0.0, 1.0, 0.0)
+        The central axis of the rotation during tomogram acquisition.
+    """
+
     def __init__(
         self,
         template: NDArray[np.float32] | ImageProvider,
@@ -39,6 +65,11 @@ class MockLoader(LoaderBase):
         self._template = template
         self._noise = noise
         if degrees is None:
+            if noise > 0:
+                # TODO: implement this
+                raise NotImplementedError(
+                    "Noise simulation without degrees is not implemented yet."
+                )
             self._degrees = None
         else:
             self._degrees = np.asarray(degrees, dtype=np.float32)
@@ -76,7 +107,7 @@ class MockLoader(LoaderBase):
                 template, mtx, order=self.order, prefilter=False
             )
             if self._degrees is None:
-                tasks.append(img)  # TODO: noise
+                tasks.append(img)
             else:
                 task = simulate_noise(
                     img,

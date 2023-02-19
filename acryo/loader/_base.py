@@ -413,8 +413,9 @@ class LoaderBase(ABC):
 
         Parameters
         ----------
-        template : np.ndarray, optional
-            Template image.
+        template : 3D array or ImageProvider
+            Template image. If ImageProvider is given, the image will be provided
+            accordingly using the scale of the loader object.
         mask : np.ndarray or callable of np.ndarray to np.ndarray optional
             Mask image. Must in the same shape as the template.
         max_shifts : int or tuple of int, default is (1., 1., 1.)
@@ -537,8 +538,9 @@ class LoaderBase(ABC):
 
         Parameters
         ----------
-        templates: list of ImgArray
-            Template images.
+        templates: list of 3D arrays or ImageProvider
+            Template images. If ImageProvider is given, the image will be provided
+            accordingly using the scale of the loader object.
         mask : np.ndarray, optional
             Mask image. Must in the same shape as the template.
         max_shifts : int or tuple of int, default is (1., 1., 1.)

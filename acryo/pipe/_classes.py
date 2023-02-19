@@ -5,9 +5,7 @@ import inspect
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy import ndimage as ndi
 from acryo._types import nm
-from acryo._reader import REG
 
 
 class ImageProvider:
@@ -37,30 +35,6 @@ class ImageConverter:
         """Function composition"""
         fn = lambda x: self(other(x))
         return other.__class__(fn)
-
-
-class ImageReader(ImageProvider):
-    """
-    Image provider object that provide a resized image from a file.
-
-    Parameters
-    ----------
-    path : path-like
-        Path to the image.
-    original_scale : float, optional
-        If given, this value will be used as the image scale (nm/pixel) instead
-        of the info extracted from the image metadata.
-    """
-
-    def __init__(self, path: str, original_scale: nm | None = None):
-        super().__init__(self.imread)
-        self._path = path
-        self._original_scale = original_scale
-
-    def imread(self, scale: nm) -> NDArray[np.float32]:
-        img = REG.imread_array(self._path)
-        ratio = self._original_scale / scale
-        return ndi.zoom(img, ratio, order=3, prefilter=True, mode="reflect")
 
 
 def _assert_3d_array(out, func):
