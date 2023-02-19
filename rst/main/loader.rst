@@ -206,7 +206,29 @@ It returns a new :class:`SubtomogramLoader` object with the filtered molecules.
 
     loader = SubtomogramLoader(image, molecules)
     out = loader.filter(pl.col("score") > 0.5)
+
+    # all scores are greater than 0.5 after filtering
     assert (out.molecules.features["score"] > 0.5).all()
+
+This method is useful to filter out bad alignment,
+
+.. code-block:: python
+
+    loader.filter(pl.col("score") > 0.5)
+
+choose molecules in certain regions,
+
+.. code-block:: python
+
+    loader.filter((10 < pl.col("x")) & (pl.col("x") < 20))
+
+pick certain isotypes,
+
+.. code-block:: python
+
+    loader.filter(pl.col("cluster_id") == 1)
+
+and so on.
 
 Grouping Loader
 ===============

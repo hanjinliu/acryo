@@ -4,7 +4,7 @@
   <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Molecules &mdash; acryo 0.1.1 documentation</title>
+  <title>Molecules &mdash; acryo 0.2.0 documentation</title>
       <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -33,7 +33,7 @@
             <a href="../index.html" class="icon icon-home"> acryo
           </a>
               <div class="version">
-                0.1.1
+                0.2.0
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
@@ -97,7 +97,7 @@
 </pre></div>
 </div>
 <ol class="arabic simple">
-<li><p><code class="docutils literal notranslate"><span class="pre">pos</span></code> (<cite>numpy.ndarray</cite>) … positions of the molecules.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">pos</span></code> (<cite>numpy.ndarray</cite>) … positions of the molecules <strong>in nanometers</strong>.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">rot</span></code> (<cite>scipy.spatial.transform.Rotation</cite>) … rotation angles of the molecules.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">features</span></code> (<cite>polars.DataFrame</cite>) … scalar features of the molecules.</p></li>
 </ol>
@@ -107,9 +107,9 @@
 <p><span class="caption-text"><strong>Fig. 1</strong> Coordinate system of a molecule.</span><a class="headerlink" href="#id1" title="Permalink to this image"></a></p>
 </figcaption>
 </figure>
-<p>“Position” is a 3D coordinate of the molecules. “Rotation” is a rotation operator that
-converts the molecule axes <span class="math notranslate nohighlight">\(\vec{X}, \vec{Y}, \vec{Z}\)</span> to the world coordinate
-axes <span class="math notranslate nohighlight">\(\vec{x}, \vec{y}, \vec{z}\)</span>.</p>
+<p>“Position” is a 3D coordinate of the molecules <strong>in nanometers</strong>. “Rotation” is a rotation
+operator that converts the molecule axes <span class="math notranslate nohighlight">\(\vec{X}, \vec{Y}, \vec{Z}\)</span> to the world
+coordinate axes <span class="math notranslate nohighlight">\(\vec{x}, \vec{y}, \vec{z}\)</span>.</p>
 <p>Hereafter, “world coordinate” means <span class="math notranslate nohighlight">\(\vec{x}, \vec{y}, \vec{z}\)</span> and “molecule
 coordinate” means <span class="math notranslate nohighlight">\(\vec{X}, \vec{Y}, \vec{Z}\)</span>.</p>
 <div class="admonition note">

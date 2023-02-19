@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo.alignment._utils &mdash; acryo 0.1.1 documentation</title>
+  <title>acryo.alignment._utils &mdash; acryo 0.2.0 documentation</title>
       <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -29,7 +29,7 @@
             <a href="../../../index.html" class="icon icon-home"> acryo
           </a>
               <div class="version">
-                0.1.1
+                0.2.0
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
@@ -73,7 +73,7 @@
   <h1>Source code for acryo.alignment._utils</h1><div class="highlight"><pre>
 <span></span><span class="kn">from</span> <span class="nn">__future__</span> <span class="kn">import</span> <span class="n">annotations</span>
 <span class="kn">import</span> <span class="nn">itertools</span>
-<span class="kn">from</span> <span class="nn">functools</span> <span class="kn">import</span> <span class="n">reduce</span><span class="p">,</span> <span class="n">lru_cache</span>
+<span class="kn">from</span> <span class="nn">functools</span> <span class="kn">import</span> <span class="n">lru_cache</span>
 <span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">Sequence</span>
 <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
 <span class="kn">from</span> <span class="nn">numpy.typing</span> <span class="kn">import</span> <span class="n">NDArray</span>
@@ -82,7 +82,7 @@
 <span class="kn">from</span> <span class="nn">scipy.spatial.transform</span> <span class="kn">import</span> <span class="n">Rotation</span>
 <span class="kn">from</span> <span class="nn">scipy</span> <span class="kn">import</span> <span class="n">ndimage</span> <span class="k">as</span> <span class="n">ndi</span>
 
-<span class="kn">from</span> <span class="nn">acryo._fft</span> <span class="kn">import</span> <span class="n">rfftn</span><span class="p">,</span> <span class="n">irfftn</span><span class="p">,</span> <span class="n">fftn</span><span class="p">,</span> <span class="n">ifftn</span>
+<span class="kn">from</span> <span class="nn">acryo._fft</span> <span class="kn">import</span> <span class="n">ifftn</span>
 <span class="kn">from</span> <span class="nn">acryo._types</span> <span class="kn">import</span> <span class="n">Ranges</span><span class="p">,</span> <span class="n">RangeLike</span><span class="p">,</span> <span class="n">pixel</span>
 <span class="kn">from</span> <span class="nn">acryo.molecules</span> <span class="kn">import</span> <span class="n">from_euler_xyz_coords</span>
 
@@ -171,63 +171,6 @@
 
 <div class="viewcode-block" id="euler_to_quat"><a class="viewcode-back" href="../../../apidoc/acryo.alignment.html#acryo.alignment.euler_to_quat">[docs]</a><span class="k">def</span> <span class="nf">euler_to_quat</span><span class="p">(</span><span class="n">degrees</span><span class="p">):</span>
     <span class="k">return</span> <span class="n">from_euler_xyz_coords</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">degrees</span><span class="p">),</span> <span class="s2">&quot;zyx&quot;</span><span class="p">,</span> <span class="n">degrees</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">as_quat</span><span class="p">()</span></div>
-
-
-<span class="c1"># lowpass filter</span>
-<span class="c1"># Modified from skimage.filters._fft_based</span>
-<span class="k">def</span> <span class="nf">lowpass_filter_ft</span><span class="p">(</span>
-    <span class="n">img</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span> <span class="n">cutoff</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">order</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">2</span>
-<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">]:</span>
-    <span class="k">if</span> <span class="n">cutoff</span> <span class="o">&gt;=</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">img</span><span class="o">.</span><span class="n">ndim</span><span class="p">)</span> <span class="ow">or</span> <span class="n">cutoff</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
-        <span class="k">return</span> <span class="n">fftn</span><span class="p">(</span><span class="n">img</span><span class="p">)</span>
-    <span class="n">weight</span> <span class="o">=</span> <span class="n">_get_ND_butterworth_filter</span><span class="p">(</span>
-        <span class="n">img</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span>
-        <span class="n">cutoff</span><span class="p">,</span>
-        <span class="n">order</span><span class="p">,</span>
-        <span class="n">high_pass</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
-        <span class="n">real</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
-    <span class="p">)</span>
-    <span class="k">return</span> <span class="n">weight</span> <span class="o">*</span> <span class="n">fftn</span><span class="p">(</span><span class="n">img</span><span class="p">)</span>
-
-
-<span class="k">def</span> <span class="nf">lowpass_filter</span><span class="p">(</span>
-    <span class="n">img</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span> <span class="n">cutoff</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">order</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">2</span>
-<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
-    <span class="k">if</span> <span class="n">cutoff</span> <span class="o">&gt;=</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">img</span><span class="o">.</span><span class="n">ndim</span><span class="p">)</span> <span class="ow">or</span> <span class="n">cutoff</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
-        <span class="k">return</span> <span class="n">img</span>
-    <span class="n">weight</span> <span class="o">=</span> <span class="n">_get_ND_butterworth_filter</span><span class="p">(</span>
-        <span class="n">img</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span>
-        <span class="n">cutoff</span><span class="p">,</span>
-        <span class="n">order</span><span class="p">,</span>
-        <span class="n">high_pass</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
-        <span class="n">real</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-    <span class="p">)</span>
-    <span class="n">out</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">=</span> <span class="n">irfftn</span><span class="p">(</span><span class="n">weight</span> <span class="o">*</span> <span class="n">rfftn</span><span class="p">(</span><span class="n">img</span><span class="p">))</span>
-    <span class="k">return</span> <span class="n">out</span><span class="o">.</span><span class="n">real</span>
-
-
-<span class="nd">@lru_cache</span><span class="p">(</span><span class="n">maxsize</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>
-<span class="k">def</span> <span class="nf">_get_ND_butterworth_filter</span><span class="p">(</span>
-    <span class="n">shape</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="o">...</span><span class="p">],</span>
-    <span class="n">cutoff</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
-    <span class="n">order</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
-    <span class="n">high_pass</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
-    <span class="n">real</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
-<span class="p">):</span>
-    <span class="n">ranges</span> <span class="o">=</span> <span class="p">[]</span>
-    <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">shape</span><span class="p">:</span>
-        <span class="n">axis</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="o">-</span><span class="p">(</span><span class="n">d</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">//</span> <span class="mi">2</span><span class="p">,</span> <span class="p">(</span><span class="n">d</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">//</span> <span class="mi">2</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span>
-            <span class="n">d</span> <span class="o">*</span> <span class="n">cutoff</span>
-        <span class="p">)</span>
-        <span class="n">ranges</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">fft</span><span class="o">.</span><span class="n">ifftshift</span><span class="p">(</span><span class="n">axis</span><span class="o">**</span><span class="mi">2</span><span class="p">))</span>
-    <span class="k">if</span> <span class="n">real</span><span class="p">:</span>
-        <span class="n">limit</span> <span class="o">=</span> <span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">//</span> <span class="mi">2</span> <span class="o">+</span> <span class="mi">1</span>
-        <span class="n">ranges</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">ranges</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][:</span><span class="n">limit</span><span class="p">]</span>
-    <span class="n">q2</span> <span class="o">=</span> <span class="n">reduce</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">add</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">meshgrid</span><span class="p">(</span><span class="o">*</span><span class="n">ranges</span><span class="p">,</span> <span class="n">indexing</span><span class="o">=</span><span class="s2">&quot;ij&quot;</span><span class="p">,</span> <span class="n">sparse</span><span class="o">=</span><span class="kc">True</span><span class="p">))</span>
-    <span class="n">wfilt</span> <span class="o">=</span> <span class="mi">1</span> <span class="o">/</span> <span class="p">(</span><span class="mi">1</span> <span class="o">+</span> <span class="n">q2</span><span class="o">**</span><span class="n">order</span><span class="p">)</span>
-    <span class="k">if</span> <span class="n">high_pass</span><span class="p">:</span>
-        <span class="n">wfilt</span> <span class="o">=</span> <span class="mi">1</span> <span class="o">-</span> <span class="n">wfilt</span>
-    <span class="k">return</span> <span class="n">wfilt</span>
 
 
 <span class="c1"># cross correlation</span>

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo.pipe._transform &mdash; acryo 0.1.1 documentation</title>
+  <title>acryo.pipe._transform &mdash; acryo 0.2.0 documentation</title>
       <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -29,7 +29,7 @@
             <a href="../../../index.html" class="icon icon-home"> acryo
           </a>
               <div class="version">
-                0.1.1
+                0.2.0
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
@@ -75,7 +75,8 @@
 <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
 <span class="kn">from</span> <span class="nn">numpy.typing</span> <span class="kn">import</span> <span class="n">NDArray</span>
 <span class="kn">from</span> <span class="nn">scipy</span> <span class="kn">import</span> <span class="n">ndimage</span> <span class="k">as</span> <span class="n">ndi</span>
-<span class="kn">from</span> <span class="nn">._curry</span> <span class="kn">import</span> <span class="n">converter_function</span>
+<span class="kn">from</span> <span class="nn">acryo</span> <span class="kn">import</span> <span class="n">_utils</span>
+<span class="kn">from</span> <span class="nn">acryo.pipe._curry</span> <span class="kn">import</span> <span class="n">converter_function</span>
 
 
 <div class="viewcode-block" id="center_by_mass"><a class="viewcode-back" href="../../../apidoc/acryo.pipe.html#acryo.pipe.center_by_mass">[docs]</a><span class="nd">@converter_function</span>
@@ -91,6 +92,10 @@
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
     <span class="sd">&quot;&quot;&quot;Gaussian filtering an image.&quot;&quot;&quot;</span>
     <span class="k">return</span> <span class="n">ndi</span><span class="o">.</span><span class="n">gaussian_filter</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">sigma</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="n">mode</span><span class="p">,</span> <span class="n">cval</span><span class="o">=</span><span class="n">cval</span><span class="p">)</span></div>
+
+
+<span class="n">lowpass_filter</span> <span class="o">=</span> <span class="n">converter_function</span><span class="p">(</span><span class="n">_utils</span><span class="o">.</span><span class="n">lowpass_filter</span><span class="p">)</span>
+<span class="n">highpass_filter</span> <span class="o">=</span> <span class="n">converter_function</span><span class="p">(</span><span class="n">_utils</span><span class="o">.</span><span class="n">highpass_filter</span><span class="p">)</span>
 </pre></div>
 
            </div>

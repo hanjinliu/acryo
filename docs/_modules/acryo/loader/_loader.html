@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo.loader._loader &mdash; acryo 0.1.1 documentation</title>
+  <title>acryo.loader._loader &mdash; acryo 0.2.0 documentation</title>
       <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -29,7 +29,7 @@
             <a href="../../../index.html" class="icon icon-home"> acryo
           </a>
               <div class="version">
-                0.1.1
+                0.2.0
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
@@ -289,30 +289,7 @@
             <span class="p">)</span>
             <span class="n">tasks</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">da</span><span class="o">.</span><span class="n">from_delayed</span><span class="p">(</span><span class="n">task</span><span class="p">,</span> <span class="n">shape</span><span class="o">=</span><span class="n">output_shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">))</span>
 
-        <span class="k">return</span> <span class="n">tasks</span></div>
-
-<div class="viewcode-block" id="SubtomogramLoader.construct_dask"><a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.SubtomogramLoader.construct_dask">[docs]</a>    <span class="k">def</span> <span class="nf">construct_dask</span><span class="p">(</span>
-        <span class="bp">self</span><span class="p">,</span>
-        <span class="n">output_shape</span><span class="p">:</span> <span class="n">pixel</span> <span class="o">|</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pixel</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">da</span><span class="o">.</span><span class="n">Array</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">        Construct a dask array of subtomograms.</span>
-
-<span class="sd">        This function is always needed before parallel processing. If subtomograms</span>
-<span class="sd">        are cached in a memory-map it will be used instead.</span>
-
-<span class="sd">        Returns</span>
-<span class="sd">        -------</span>
-<span class="sd">        da.Array</span>
-<span class="sd">            An 4-D array which ``arr[i]`` corresponds to the ``i``-th subtomogram.</span>
-<span class="sd">        &quot;&quot;&quot;</span>
-        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache_available</span><span class="p">(</span><span class="n">output_shape</span><span class="p">):</span>
-            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cached_dask_array</span>
-
-        <span class="n">output_shape</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_output_shape</span><span class="p">(</span><span class="n">output_shape</span><span class="p">)</span>
-        <span class="n">tasks</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">construct_loading_tasks</span><span class="p">(</span><span class="n">output_shape</span><span class="o">=</span><span class="n">output_shape</span><span class="p">)</span>
-        <span class="n">out</span> <span class="o">=</span> <span class="n">da</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">out</span></div></div>
+        <span class="k">return</span> <span class="n">tasks</span></div></div>
 
 
 <span class="k">class</span> <span class="nc">ClassificationResult</span><span class="p">(</span><span class="n">NamedTuple</span><span class="p">):</span>

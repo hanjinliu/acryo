@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo.simulator &mdash; acryo 0.1.1 documentation</title>
+  <title>acryo.simulator &mdash; acryo 0.2.0 documentation</title>
       <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -29,7 +29,7 @@
             <a href="../../index.html" class="icon icon-home"> acryo
           </a>
               <div class="version">
-                0.1.1
+                0.2.0
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
@@ -80,9 +80,10 @@
 <span class="kn">from</span> <span class="nn">scipy</span> <span class="kn">import</span> <span class="n">ndimage</span> <span class="k">as</span> <span class="n">ndi</span>
 <span class="kn">from</span> <span class="nn">scipy.spatial.transform</span> <span class="kn">import</span> <span class="n">Rotation</span>
 
+<span class="kn">from</span> <span class="nn">acryo</span> <span class="kn">import</span> <span class="n">_utils</span>
 <span class="kn">from</span> <span class="nn">acryo._types</span> <span class="kn">import</span> <span class="n">nm</span><span class="p">,</span> <span class="n">pixel</span>
 <span class="kn">from</span> <span class="nn">acryo.molecules</span> <span class="kn">import</span> <span class="n">Molecules</span>
-<span class="kn">from</span> <span class="nn">acryo</span> <span class="kn">import</span> <span class="n">_utils</span>
+<span class="kn">from</span> <span class="nn">acryo.pipe._classes</span> <span class="kn">import</span> <span class="n">ImageProvider</span>
 
 <span class="k">if</span> <span class="n">TYPE_CHECKING</span><span class="p">:</span>
     <span class="kn">from</span> <span class="nn">typing_extensions</span> <span class="kn">import</span> <span class="n">Self</span><span class="p">,</span> <span class="n">Literal</span>
@@ -96,7 +97,7 @@
     <span class="sd">&quot;&quot;&quot;A component of tomogram.&quot;&quot;&quot;</span>
 
     <span class="n">molecules</span><span class="p">:</span> <span class="n">Molecules</span>
-    <span class="n">image</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span></div>
+    <span class="n">image</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span> <span class="o">|</span> <span class="n">ImageProvider</span></div>
 
 
 <div class="viewcode-block" id="TomogramSimulator"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.simulator.TomogramSimulator">[docs]</a><span class="k">class</span> <span class="nc">TomogramSimulator</span><span class="p">:</span>
@@ -198,7 +199,7 @@
 <div class="viewcode-block" id="TomogramSimulator.add_molecules"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.simulator.TomogramSimulator.add_molecules">[docs]</a>    <span class="k">def</span> <span class="nf">add_molecules</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">molecules</span><span class="p">:</span> <span class="n">Molecules</span><span class="p">,</span>
-        <span class="n">image</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+        <span class="n">image</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span> <span class="o">|</span> <span class="n">ImageProvider</span><span class="p">,</span>
         <span class="o">*</span><span class="p">,</span>
         <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">overwrite</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
@@ -211,8 +212,8 @@
 <span class="sd">        molecules : Molecules</span>
 <span class="sd">            Molecules object that defines the coordinates and orientations of the</span>
 <span class="sd">            input molecules.</span>
-<span class="sd">        image : np.ndarray</span>
-<span class="sd">            Density image of the input molecules.</span>
+<span class="sd">        image : np.ndarray or ImageProvider</span>
+<span class="sd">            Density image of the input molecules, or an image provider.</span>
 <span class="sd">        name : str, optional</span>
 <span class="sd">            Name of the molecules., by default None</span>
 <span class="sd">        overwrite : bool, default is False</span>
@@ -227,7 +228,14 @@
             <span class="n">name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;component&lt;</span><span class="si">{</span><span class="nb">hex</span><span class="p">(</span><span class="nb">id</span><span class="p">(</span><span class="n">molecules</span><span class="p">))</span><span class="si">}</span><span class="s2">&gt;&quot;</span>
         <span class="k">if</span> <span class="ow">not</span> <span class="n">overwrite</span> <span class="ow">and</span> <span class="n">name</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_components</span><span class="p">:</span>
             <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Component of name </span><span class="si">{</span><span class="n">name</span><span class="si">!r}</span><span class="s2"> already exists.&quot;</span><span class="p">)</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_components</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">Component</span><span class="p">(</span><span class="n">molecules</span><span class="p">,</span> <span class="n">image</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">))</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">image</span><span class="o">.</span><span class="n">dtype</span> <span class="o">!=</span> <span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">:</span>
+                <span class="n">image</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;The second argument must be an array or an ImageProvider, got </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">image</span><span class="p">)</span><span class="si">}</span><span class="s2">.&quot;</span>
+            <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_components</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">Component</span><span class="p">(</span><span class="n">molecules</span><span class="p">,</span> <span class="n">image</span><span class="p">)</span>
         <span class="k">return</span> <span class="bp">self</span></div>
 
 <div class="viewcode-block" id="TomogramSimulator.collect_molecules"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.simulator.TomogramSimulator.collect_molecules">[docs]</a>    <span class="k">def</span> <span class="nf">collect_molecules</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Molecules</span><span class="p">:</span>
@@ -292,17 +300,21 @@
         <span class="sd">&quot;&quot;&quot;Simulate a grayscale tomogram.&quot;&quot;&quot;</span>
         <span class="n">tomogram</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
         <span class="k">for</span> <span class="n">mol</span><span class="p">,</span> <span class="n">image</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_components</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
-            <span class="n">starts</span><span class="p">,</span> <span class="n">stops</span><span class="p">,</span> <span class="n">mtxs</span> <span class="o">=</span> <span class="n">_prep_iterators</span><span class="p">(</span><span class="n">mol</span><span class="p">,</span> <span class="n">image</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_scale</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
+                <span class="n">img</span> <span class="o">=</span> <span class="n">image</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">scale</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">img</span> <span class="o">=</span> <span class="n">image</span>
+            <span class="n">starts</span><span class="p">,</span> <span class="n">stops</span><span class="p">,</span> <span class="n">mtxs</span> <span class="o">=</span> <span class="n">_prep_iterators</span><span class="p">(</span><span class="n">mol</span><span class="p">,</span> <span class="n">img</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_scale</span><span class="p">)</span>
 
             <span class="c1"># prefilter here to avoid repeated computation</span>
             <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">order</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
-                <span class="n">image</span> <span class="o">=</span> <span class="n">ndi</span><span class="o">.</span><span class="n">spline_filter</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">order</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;constant&quot;</span><span class="p">)</span>
+                <span class="n">img</span> <span class="o">=</span> <span class="n">ndi</span><span class="o">.</span><span class="n">spline_filter</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">order</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;constant&quot;</span><span class="p">)</span>
 
             <span class="k">for</span> <span class="n">start</span><span class="p">,</span> <span class="n">stop</span><span class="p">,</span> <span class="n">mtx</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">starts</span><span class="p">,</span> <span class="n">stops</span><span class="p">,</span> <span class="n">mtxs</span><span class="p">):</span>
-                <span class="n">sl_src</span><span class="p">,</span> <span class="n">sl_dst</span> <span class="o">=</span> <span class="n">_prep_slices</span><span class="p">(</span><span class="n">start</span><span class="p">,</span> <span class="n">stop</span><span class="p">,</span> <span class="n">shape</span><span class="p">,</span> <span class="n">image</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
+                <span class="n">sl_src</span><span class="p">,</span> <span class="n">sl_dst</span> <span class="o">=</span> <span class="n">_prep_slices</span><span class="p">(</span><span class="n">start</span><span class="p">,</span> <span class="n">stop</span><span class="p">,</span> <span class="n">shape</span><span class="p">,</span> <span class="n">img</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
 
                 <span class="n">transformed</span> <span class="o">=</span> <span class="n">ndi</span><span class="o">.</span><span class="n">affine_transform</span><span class="p">(</span>
-                    <span class="n">image</span><span class="p">,</span>
+                    <span class="n">img</span><span class="p">,</span>
                     <span class="n">mtx</span><span class="p">,</span>
                     <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;constant&quot;</span><span class="p">,</span>
                     <span class="n">cval</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
@@ -321,23 +333,27 @@
         <span class="sd">&quot;&quot;&quot;Simulate a colored tomogram.&quot;&quot;&quot;</span>
         <span class="n">tomogram</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="mi">3</span><span class="p">,)</span> <span class="o">+</span> <span class="n">shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
         <span class="k">for</span> <span class="n">mol</span><span class="p">,</span> <span class="n">image</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_components</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
+                <span class="n">img</span> <span class="o">=</span> <span class="n">image</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">scale</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">img</span> <span class="o">=</span> <span class="n">image</span>
             <span class="c1"># image slice must be integer so split it into two parts</span>
-            <span class="n">img_min</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">min</span><span class="p">()</span>
-            <span class="n">img_max</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">max</span><span class="p">()</span>
-            <span class="n">starts</span><span class="p">,</span> <span class="n">stops</span><span class="p">,</span> <span class="n">mtxs</span> <span class="o">=</span> <span class="n">_prep_iterators</span><span class="p">(</span><span class="n">mol</span><span class="p">,</span> <span class="n">image</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_scale</span><span class="p">)</span>
+            <span class="n">img_min</span> <span class="o">=</span> <span class="n">img</span><span class="o">.</span><span class="n">min</span><span class="p">()</span>
+            <span class="n">img_max</span> <span class="o">=</span> <span class="n">img</span><span class="o">.</span><span class="n">max</span><span class="p">()</span>
+            <span class="n">starts</span><span class="p">,</span> <span class="n">stops</span><span class="p">,</span> <span class="n">mtxs</span> <span class="o">=</span> <span class="n">_prep_iterators</span><span class="p">(</span><span class="n">mol</span><span class="p">,</span> <span class="n">img</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_scale</span><span class="p">)</span>
 
             <span class="c1"># prefilter here to avoid repeated computation</span>
             <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">order</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
-                <span class="n">image</span> <span class="o">=</span> <span class="n">ndi</span><span class="o">.</span><span class="n">spline_filter</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">order</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;constant&quot;</span><span class="p">)</span>
+                <span class="n">img</span> <span class="o">=</span> <span class="n">ndi</span><span class="o">.</span><span class="n">spline_filter</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">order</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;constant&quot;</span><span class="p">)</span>
 
             <span class="n">feat</span> <span class="o">=</span> <span class="n">mol</span><span class="o">.</span><span class="n">features</span>
             <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="p">(</span><span class="n">start</span><span class="p">,</span> <span class="n">stop</span><span class="p">,</span> <span class="n">mtx</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">starts</span><span class="p">,</span> <span class="n">stops</span><span class="p">,</span> <span class="n">mtxs</span><span class="p">)):</span>
                 <span class="n">_cr</span><span class="p">,</span> <span class="n">_cg</span><span class="p">,</span> <span class="n">_cb</span> <span class="o">=</span> <span class="n">colormap</span><span class="p">(</span><span class="n">feat</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>
-                <span class="n">sl_src</span><span class="p">,</span> <span class="n">sl_dst</span> <span class="o">=</span> <span class="n">_prep_slices</span><span class="p">(</span><span class="n">start</span><span class="p">,</span> <span class="n">stop</span><span class="p">,</span> <span class="n">shape</span><span class="p">,</span> <span class="n">image</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
+                <span class="n">sl_src</span><span class="p">,</span> <span class="n">sl_dst</span> <span class="o">=</span> <span class="n">_prep_slices</span><span class="p">(</span><span class="n">start</span><span class="p">,</span> <span class="n">stop</span><span class="p">,</span> <span class="n">shape</span><span class="p">,</span> <span class="n">img</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
                 <span class="n">sl_dst</span> <span class="o">=</span> <span class="p">(</span><span class="nb">slice</span><span class="p">(</span><span class="kc">None</span><span class="p">),)</span> <span class="o">+</span> <span class="n">sl_dst</span>
 
                 <span class="n">transformed</span> <span class="o">=</span> <span class="n">ndi</span><span class="o">.</span><span class="n">affine_transform</span><span class="p">(</span>
-                    <span class="n">image</span><span class="p">,</span>
+                    <span class="n">img</span><span class="p">,</span>
                     <span class="n">mtx</span><span class="p">,</span>
                     <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;constant&quot;</span><span class="p">,</span>
                     <span class="n">cval</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
@@ -355,8 +371,12 @@
         <span class="sd">&quot;&quot;&quot;Simulate a grayscale tomogram.&quot;&quot;&quot;</span>
         <span class="n">tomogram</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
         <span class="k">for</span> <span class="n">mol</span><span class="p">,</span> <span class="n">image</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_components</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
-            <span class="n">starts</span><span class="p">,</span> <span class="n">stops</span><span class="p">,</span> <span class="n">mtxs</span> <span class="o">=</span> <span class="n">_prep_iterators</span><span class="p">(</span><span class="n">mol</span><span class="p">,</span> <span class="n">image</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_scale</span><span class="p">)</span>
-            <span class="n">zsize</span> <span class="o">=</span> <span class="n">mol</span><span class="o">.</span><span class="n">pos</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">max</span><span class="p">()</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">scale</span> <span class="o">+</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">image</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
+                <span class="n">img</span> <span class="o">=</span> <span class="n">image</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">scale</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">img</span> <span class="o">=</span> <span class="n">image</span>
+            <span class="n">starts</span><span class="p">,</span> <span class="n">stops</span><span class="p">,</span> <span class="n">mtxs</span> <span class="o">=</span> <span class="n">_prep_iterators</span><span class="p">(</span><span class="n">mol</span><span class="p">,</span> <span class="n">img</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_scale</span><span class="p">)</span>
+            <span class="n">zsize</span> <span class="o">=</span> <span class="n">mol</span><span class="o">.</span><span class="n">pos</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">max</span><span class="p">()</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">scale</span> <span class="o">+</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">img</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
             <span class="n">shape3d</span> <span class="o">=</span> <span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span><span class="n">zsize</span><span class="p">)),)</span> <span class="o">+</span> <span class="n">shape</span>
 
             <span class="c1"># reduce z axis</span>
@@ -364,12 +384,12 @@
 
             <span class="c1"># prefilter here to avoid repeated computation</span>
             <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">order</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
-                <span class="n">image</span> <span class="o">=</span> <span class="n">ndi</span><span class="o">.</span><span class="n">spline_filter</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">order</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;constant&quot;</span><span class="p">)</span>
+                <span class="n">img</span> <span class="o">=</span> <span class="n">ndi</span><span class="o">.</span><span class="n">spline_filter</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">order</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;constant&quot;</span><span class="p">)</span>
 
             <span class="k">for</span> <span class="n">start</span><span class="p">,</span> <span class="n">stop</span><span class="p">,</span> <span class="n">mtx</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">starts</span><span class="p">,</span> <span class="n">stops</span><span class="p">,</span> <span class="n">mtxs</span><span class="p">):</span>
-                <span class="n">sl_src</span><span class="p">,</span> <span class="n">sl_dst</span> <span class="o">=</span> <span class="n">_prep_slices</span><span class="p">(</span><span class="n">start</span><span class="p">,</span> <span class="n">stop</span><span class="p">,</span> <span class="n">shape3d</span><span class="p">,</span> <span class="n">image</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
+                <span class="n">sl_src</span><span class="p">,</span> <span class="n">sl_dst</span> <span class="o">=</span> <span class="n">_prep_slices</span><span class="p">(</span><span class="n">start</span><span class="p">,</span> <span class="n">stop</span><span class="p">,</span> <span class="n">shape3d</span><span class="p">,</span> <span class="n">img</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
                 <span class="n">transformed</span> <span class="o">=</span> <span class="n">ndi</span><span class="o">.</span><span class="n">affine_transform</span><span class="p">(</span>
-                    <span class="n">image</span><span class="p">,</span>
+                    <span class="n">img</span><span class="p">,</span>
                     <span class="n">mtx</span><span class="p">,</span>
                     <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;constant&quot;</span><span class="p">,</span>
                     <span class="n">cval</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>

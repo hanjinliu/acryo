@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Index &mdash; acryo 0.1.1 documentation</title>
+  <title>Index &mdash; acryo 0.2.0 documentation</title>
       <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -29,7 +29,7 @@
             <a href="index.html" class="icon icon-home"> acryo
           </a>
               <div class="version">
-                0.1.1
+                0.2.0
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
@@ -172,10 +172,10 @@
         <li><a href="apidoc/acryo.testing.html#module-acryo.testing.core">module</a>
 </li>
       </ul></li>
-      <li><a href="apidoc/acryo.loader.html#acryo.loader.TomogramCollection.add_loader">add_loader() (acryo.loader.TomogramCollection method)</a>
+      <li><a href="apidoc/acryo.html#acryo.BatchLoader.add_loader">add_loader() (acryo.BatchLoader method)</a>
 
       <ul>
-        <li><a href="apidoc/acryo.html#acryo.TomogramCollection.add_loader">(acryo.TomogramCollection method)</a>
+        <li><a href="apidoc/acryo.loader.html#acryo.loader.BatchLoader.add_loader">(acryo.loader.BatchLoader method)</a>
 </li>
       </ul></li>
       <li><a href="apidoc/acryo.html#acryo.simulator.TomogramSimulator.add_molecules">add_molecules() (acryo.simulator.TomogramSimulator method)</a>
@@ -184,10 +184,10 @@
         <li><a href="apidoc/acryo.html#acryo.TomogramSimulator.add_molecules">(acryo.TomogramSimulator method)</a>
 </li>
       </ul></li>
-      <li><a href="apidoc/acryo.loader.html#acryo.loader.TomogramCollection.add_tomogram">add_tomogram() (acryo.loader.TomogramCollection method)</a>
+      <li><a href="apidoc/acryo.html#acryo.BatchLoader.add_tomogram">add_tomogram() (acryo.BatchLoader method)</a>
 
       <ul>
-        <li><a href="apidoc/acryo.html#acryo.TomogramCollection.add_tomogram">(acryo.TomogramCollection method)</a>
+        <li><a href="apidoc/acryo.loader.html#acryo.loader.BatchLoader.add_tomogram">(acryo.loader.BatchLoader method)</a>
 </li>
       </ul></li>
       <li><a href="apidoc/acryo.alignment.html#acryo.alignment.AlignmentResult.affine_matrix">affine_matrix() (acryo.alignment.AlignmentResult method)</a>
@@ -216,14 +216,20 @@
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="apidoc/acryo.alignment.html#acryo.alignment.BaseAlignmentModel">BaseAlignmentModel (class in acryo.alignment)</a>
 </li>
+      <li><a href="apidoc/acryo.html#acryo.BatchLoader">BatchLoader (class in acryo)</a>
+
+      <ul>
+        <li><a href="apidoc/acryo.loader.html#acryo.loader.BatchLoader">(class in acryo.loader)</a>
+</li>
+      </ul></li>
+  </ul></td>
+  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="apidoc/acryo.loader.html#acryo.loader.SubtomogramLoader.binning">binning() (acryo.loader.SubtomogramLoader method)</a>
 
       <ul>
         <li><a href="apidoc/acryo.html#acryo.SubtomogramLoader.binning">(acryo.SubtomogramLoader method)</a>
 </li>
       </ul></li>
-  </ul></td>
-  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="apidoc/acryo.testing.html#acryo.testing.blobs">blobs() (in module acryo.testing)</a>
 </li>
   </ul></td>
@@ -266,28 +272,22 @@
         <li><a href="apidoc/acryo.html#acryo.molecules.Molecules.concat_with">(acryo.molecules.Molecules method)</a>
 </li>
       </ul></li>
-      <li><a href="apidoc/acryo.loader.html#acryo.loader.SubtomogramLoader.construct_dask">construct_dask() (acryo.loader.SubtomogramLoader method)</a>
+      <li><a href="apidoc/acryo.html#acryo.BatchLoader.construct_loading_tasks">construct_loading_tasks() (acryo.BatchLoader method)</a>
 
       <ul>
-        <li><a href="apidoc/acryo.loader.html#acryo.loader.TomogramCollection.construct_dask">(acryo.loader.TomogramCollection method)</a>
+        <li><a href="apidoc/acryo.loader.html#acryo.loader.BatchLoader.construct_loading_tasks">(acryo.loader.BatchLoader method)</a>
 </li>
-        <li><a href="apidoc/acryo.html#acryo.SubtomogramLoader.construct_dask">(acryo.SubtomogramLoader method)</a>
+        <li><a href="apidoc/acryo.loader.html#acryo.loader.MockLoader.construct_loading_tasks">(acryo.loader.MockLoader method)</a>
 </li>
-        <li><a href="apidoc/acryo.html#acryo.TomogramCollection.construct_dask">(acryo.TomogramCollection method)</a>
+        <li><a href="apidoc/acryo.loader.html#acryo.loader.SubtomogramLoader.construct_loading_tasks">(acryo.loader.SubtomogramLoader method)</a>
+</li>
+        <li><a href="apidoc/acryo.html#acryo.MockLoader.construct_loading_tasks">(acryo.MockLoader method)</a>
+</li>
+        <li><a href="apidoc/acryo.html#acryo.SubtomogramLoader.construct_loading_tasks">(acryo.SubtomogramLoader method)</a>
 </li>
       </ul></li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="apidoc/acryo.loader.html#acryo.loader.SubtomogramLoader.construct_loading_tasks">construct_loading_tasks() (acryo.loader.SubtomogramLoader method)</a>
-
-      <ul>
-        <li><a href="apidoc/acryo.loader.html#acryo.loader.TomogramCollection.construct_loading_tasks">(acryo.loader.TomogramCollection method)</a>
-</li>
-        <li><a href="apidoc/acryo.html#acryo.SubtomogramLoader.construct_loading_tasks">(acryo.SubtomogramLoader method)</a>
-</li>
-        <li><a href="apidoc/acryo.html#acryo.TomogramCollection.construct_loading_tasks">(acryo.TomogramCollection method)</a>
-</li>
-      </ul></li>
       <li><a href="apidoc/acryo.pipe.html#acryo.pipe.converter_function">converter_function() (in module acryo.pipe)</a>
 </li>
       <li><a href="apidoc/acryo.html#acryo.Molecules.copy">copy() (acryo.Molecules method)</a>
@@ -390,10 +390,10 @@
       </ul></li>
       <li><a href="apidoc/acryo.html#acryo.molecules.from_euler_xyz_coords">from_euler_xyz_coords() (in module acryo.molecules)</a>
 </li>
-      <li><a href="apidoc/acryo.loader.html#acryo.loader.TomogramCollection.from_loaders">from_loaders() (acryo.loader.TomogramCollection class method)</a>
+      <li><a href="apidoc/acryo.html#acryo.BatchLoader.from_loaders">from_loaders() (acryo.BatchLoader class method)</a>
 
       <ul>
-        <li><a href="apidoc/acryo.html#acryo.TomogramCollection.from_loaders">(acryo.TomogramCollection class method)</a>
+        <li><a href="apidoc/acryo.loader.html#acryo.loader.BatchLoader.from_loaders">(acryo.loader.BatchLoader class method)</a>
 </li>
       </ul></li>
       <li><a href="apidoc/acryo.html#acryo.Molecules.from_matrix">from_matrix() (acryo.Molecules class method)</a>
@@ -470,25 +470,17 @@
         <li><a href="apidoc/acryo.html#acryo.SubtomogramLoader.image">(acryo.SubtomogramLoader property)</a>
 </li>
       </ul></li>
-      <li><a href="apidoc/acryo.loader.html#acryo.loader.ImageConverter">ImageConverter (class in acryo.loader)</a>
-</li>
-      <li><a href="apidoc/acryo.loader.html#acryo.loader.ImageProvider">ImageProvider (class in acryo.loader)</a>
-</li>
-      <li><a href="apidoc/acryo.loader.html#acryo.loader.ImageReader">ImageReader (class in acryo.loader)</a>
-</li>
-      <li><a href="apidoc/acryo.loader.html#acryo.loader.TomogramCollection.images">images (acryo.loader.TomogramCollection property)</a>
+      <li><a href="apidoc/acryo.html#acryo.BatchLoader.images">images (acryo.BatchLoader property)</a>
 
       <ul>
-        <li><a href="apidoc/acryo.html#acryo.TomogramCollection.images">(acryo.TomogramCollection property)</a>
+        <li><a href="apidoc/acryo.loader.html#acryo.loader.BatchLoader.images">(acryo.loader.BatchLoader property)</a>
 </li>
       </ul></li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="apidoc/acryo.loader.html#acryo.loader.ImageReader.imread">imread() (acryo.loader.ImageReader method)</a>
+      <li><a href="apidoc/acryo.loader.html#acryo.loader.SubtomogramLoader.imread">imread() (acryo.loader.SubtomogramLoader class method)</a>
 
       <ul>
-        <li><a href="apidoc/acryo.loader.html#acryo.loader.SubtomogramLoader.imread">(acryo.loader.SubtomogramLoader class method)</a>
-</li>
         <li><a href="apidoc/acryo.html#acryo.SubtomogramLoader.imread">(acryo.SubtomogramLoader class method)</a>
 </li>
         <li><a href="apidoc/acryo.html#acryo.imread">(in module acryo)</a>
@@ -532,10 +524,10 @@
         <li><a href="apidoc/acryo.html#acryo.molecules.Molecules.linear_transform">(acryo.molecules.Molecules method)</a>
 </li>
       </ul></li>
-      <li><a href="apidoc/acryo.loader.html#acryo.loader.TomogramCollection.loaders">loaders (acryo.loader.TomogramCollection property)</a>
+      <li><a href="apidoc/acryo.html#acryo.BatchLoader.loaders">loaders (acryo.BatchLoader property)</a>
 
       <ul>
-        <li><a href="apidoc/acryo.html#acryo.TomogramCollection.loaders">(acryo.TomogramCollection property)</a>
+        <li><a href="apidoc/acryo.loader.html#acryo.loader.BatchLoader.loaders">(acryo.loader.BatchLoader property)</a>
 </li>
       </ul></li>
   </ul></td>
@@ -552,6 +544,12 @@
 
       <ul>
         <li><a href="apidoc/acryo.html#acryo.molecules.Molecules.matrix">(acryo.molecules.Molecules method)</a>
+</li>
+      </ul></li>
+      <li><a href="apidoc/acryo.html#acryo.MockLoader">MockLoader (class in acryo)</a>
+
+      <ul>
+        <li><a href="apidoc/acryo.loader.html#acryo.loader.MockLoader">(class in acryo.loader)</a>
 </li>
       </ul></li>
       <li>
@@ -583,16 +581,20 @@
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="apidoc/acryo.html#acryo.molecules.MoleculeGroup">MoleculeGroup (class in acryo.molecules)</a>
 </li>
-      <li><a href="apidoc/acryo.loader.html#acryo.loader.SubtomogramLoader.molecules">molecules (acryo.loader.SubtomogramLoader property)</a>
+      <li><a href="apidoc/acryo.html#acryo.BatchLoader.molecules">molecules (acryo.BatchLoader property)</a>
 
       <ul>
-        <li><a href="apidoc/acryo.loader.html#acryo.loader.TomogramCollection.molecules">(acryo.loader.TomogramCollection property)</a>
+        <li><a href="apidoc/acryo.loader.html#acryo.loader.BatchLoader.molecules">(acryo.loader.BatchLoader property)</a>
+</li>
+        <li><a href="apidoc/acryo.loader.html#acryo.loader.MockLoader.molecules">(acryo.loader.MockLoader property)</a>
+</li>
+        <li><a href="apidoc/acryo.loader.html#acryo.loader.SubtomogramLoader.molecules">(acryo.loader.SubtomogramLoader property)</a>
+</li>
+        <li><a href="apidoc/acryo.html#acryo.MockLoader.molecules">(acryo.MockLoader property)</a>
 </li>
         <li><a href="apidoc/acryo.html#acryo.simulator.Component.molecules">(acryo.simulator.Component attribute)</a>
 </li>
         <li><a href="apidoc/acryo.html#acryo.SubtomogramLoader.molecules">(acryo.SubtomogramLoader property)</a>
-</li>
-        <li><a href="apidoc/acryo.html#acryo.TomogramCollection.molecules">(acryo.TomogramCollection property)</a>
 </li>
       </ul></li>
       <li><a href="apidoc/acryo.html#acryo.Molecules">Molecules (class in acryo)</a>
@@ -717,16 +719,20 @@
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="apidoc/acryo.pipe.html#acryo.pipe.reader">reader() (in module acryo.pipe)</a>
 </li>
-      <li><a href="apidoc/acryo.loader.html#acryo.loader.SubtomogramLoader.replace">replace() (acryo.loader.SubtomogramLoader method)</a>
+      <li><a href="apidoc/acryo.html#acryo.BatchLoader.replace">replace() (acryo.BatchLoader method)</a>
 
       <ul>
-        <li><a href="apidoc/acryo.loader.html#acryo.loader.TomogramCollection.replace">(acryo.loader.TomogramCollection method)</a>
+        <li><a href="apidoc/acryo.loader.html#acryo.loader.BatchLoader.replace">(acryo.loader.BatchLoader method)</a>
+</li>
+        <li><a href="apidoc/acryo.loader.html#acryo.loader.MockLoader.replace">(acryo.loader.MockLoader method)</a>
+</li>
+        <li><a href="apidoc/acryo.loader.html#acryo.loader.SubtomogramLoader.replace">(acryo.loader.SubtomogramLoader method)</a>
+</li>
+        <li><a href="apidoc/acryo.html#acryo.MockLoader.replace">(acryo.MockLoader method)</a>
 </li>
         <li><a href="apidoc/acryo.html#acryo.simulator.TomogramSimulator.replace">(acryo.simulator.TomogramSimulator method)</a>
 </li>
         <li><a href="apidoc/acryo.html#acryo.SubtomogramLoader.replace">(acryo.SubtomogramLoader method)</a>
-</li>
-        <li><a href="apidoc/acryo.html#acryo.TomogramCollection.replace">(acryo.TomogramCollection method)</a>
 </li>
         <li><a href="apidoc/acryo.html#acryo.TomogramSimulator.replace">(acryo.TomogramSimulator method)</a>
 </li>
@@ -745,14 +751,14 @@
         <li><a href="apidoc/acryo.html#acryo.molecules.Molecules.rotate_by_euler_angle">(acryo.molecules.Molecules method)</a>
 </li>
       </ul></li>
+  </ul></td>
+  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="apidoc/acryo.html#acryo.Molecules.rotate_by_matrix">rotate_by_matrix() (acryo.Molecules method)</a>
 
       <ul>
         <li><a href="apidoc/acryo.html#acryo.molecules.Molecules.rotate_by_matrix">(acryo.molecules.Molecules method)</a>
 </li>
       </ul></li>
-  </ul></td>
-  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="apidoc/acryo.html#acryo.Molecules.rotate_by_quaternion">rotate_by_quaternion() (acryo.Molecules method)</a>
 
       <ul>
@@ -879,12 +885,6 @@
 
       <ul>
         <li><a href="apidoc/acryo.html#acryo.molecules.Molecules.to_dataframe">(acryo.molecules.Molecules method)</a>
-</li>
-      </ul></li>
-      <li><a href="apidoc/acryo.html#acryo.TomogramCollection">TomogramCollection (class in acryo)</a>
-
-      <ul>
-        <li><a href="apidoc/acryo.loader.html#acryo.loader.TomogramCollection">(class in acryo.loader)</a>
 </li>
       </ul></li>
       <li><a href="apidoc/acryo.testing.html#acryo.testing.TomogramGenerator">TomogramGenerator (class in acryo.testing)</a>
