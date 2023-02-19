@@ -32,6 +32,7 @@ git clone git+https://github.com/hanjinliu/acryo.git
 ### Code Snippet
 
 ```Python
+import polars as pl
 from acryo import SubtomogramLoader, Molecules  # acryo objects
 from acryo.pipe import soft_otsu  # data input pipelines
 
