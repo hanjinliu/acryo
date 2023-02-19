@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ._base import LoaderBase, Unset
-from typing import TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING, Iterable, Sequence
 import numpy as np
 from numpy.typing import NDArray
 from dask import array as da, delayed
@@ -26,7 +26,7 @@ class MockLoader(LoaderBase):
         template: NDArray[np.float32] | ImageProvider,
         molecules: Molecules,
         noise: float = 0.0,
-        degrees: Iterable[float] | None = None,
+        degrees: Sequence[float] | None = None,
         central_axis: tuple[float, float, float] = (0.0, 1.0, 0.0),
         order: int = 3,
         scale: nm = 1.0,
@@ -41,7 +41,7 @@ class MockLoader(LoaderBase):
         if degrees is None:
             self._degrees = None
         else:
-            self._degrees = np.fromiter(degrees, dtype=np.float32)
+            self._degrees = np.asarray(degrees, dtype=np.float32)
         self._molecules = molecules
         self._central_axis = np.array(central_axis, dtype=np.float32)
 
@@ -75,13 +75,17 @@ class MockLoader(LoaderBase):
             img = _utils.delayed_affine(
                 template, mtx, order=self.order, prefilter=False
             )
-            task = simulate_noise(
-                img,
-                self._central_axis,
-                self._degrees,
-                self._noise,
-            )
-            tasks.append(task)
+            if self._degrees is None:
+                tasks.append(img)  # TODO: noise
+            else:
+                task = simulate_noise(
+                    img,
+                    self._central_axis,
+                    self._degrees,
+                    self._noise,
+                    seed=i,
+                )
+                tasks.append(task)
         return tasks
 
     def replace(
@@ -106,7 +110,7 @@ class MockLoader(LoaderBase):
             self._template,
             molecules=molecules,
             noise=self._noise,
-            tilt_range=self._degrees,
+            degrees=self._degrees,
             output_shape=output_shape,
             order=order,
             scale=scale,
