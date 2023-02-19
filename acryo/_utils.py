@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from typing import Sequence, TYPE_CHECKING
-from functools import lru_cache
+from functools import lru_cache, reduce
 
 import numpy as np
 from numpy.typing import NDArray
@@ -10,7 +10,7 @@ from dask import array as da
 from dask.delayed import delayed
 from scipy import ndimage as ndi
 from scipy.spatial.transform import Rotation
-from acryo._fft import fftn
+from acryo._fft import fftn, rfftn, irfftn
 
 if TYPE_CHECKING:
     from acryo._types import degree
@@ -303,3 +303,88 @@ def _get_indices(shape: tuple[int, ...]) -> NDArray[np.float32]:
         # Note that the shifts in indices must resemble the shifts in fftshift.
         ind -= np.ceil(s / 2)
     return np.fft.fftshift(np.stack(list(inds), axis=-1), axes=(0, 1, 2))
+
+
+# lowpass filter
+# Modified from skimage.filters._fft_based
+def lowpass_filter_ft(
+    img: NDArray[np.float32], cutoff: float, order: int = 2
+) -> NDArray[np.complex64]:
+    """Apply a low-pass filter and return the result in Fourier space."""
+    if cutoff >= 0.5 * np.sqrt(img.ndim) or cutoff <= 0:
+        return fftn(img)
+    weight = _get_ND_butterworth_filter(
+        img.shape,
+        cutoff,
+        order,
+        real=False,
+    )
+    return weight * fftn(img)
+
+
+def lowpass_filter(
+    img: NDArray[np.float32], cutoff: float, order: int = 2
+) -> NDArray[np.float32]:
+    """Apply a low-pass filter and return the result in real space."""
+    if cutoff >= 0.5 * np.sqrt(img.ndim) or cutoff <= 0:
+        return img
+    weight = _get_ND_butterworth_filter(
+        img.shape,
+        cutoff,
+        order,
+        real=True,
+    )
+    out = irfftn(weight * rfftn(img))
+    return out.real
+
+
+def highpass_filter_ft(
+    img: NDArray[np.float32], cutoff: float, order: int = 2
+) -> NDArray[np.complex64]:
+    """Apply a high-pass filter and return the result in Fourier space."""
+    if cutoff >= 0.5 * np.sqrt(img.ndim) or cutoff <= 0:
+        return np.zeros_like(img)
+    weight = 1 - _get_ND_butterworth_filter(
+        img.shape,
+        cutoff,
+        order,
+        real=False,
+    )
+    return weight * fftn(img)
+
+
+def highpass_filter(
+    img: NDArray[np.float32], cutoff: float, order: int = 2
+) -> NDArray[np.float32]:
+    """Apply a high-pass filter and return the result in real space."""
+    if cutoff >= 0.5 * np.sqrt(img.ndim) or cutoff <= 0:
+        return np.zeros_like(img)
+    weight = 1 - _get_ND_butterworth_filter(
+        img.shape,
+        cutoff,
+        order,
+        real=True,
+    )
+    out = irfftn(weight * rfftn(img))
+    return out.real
+
+
+@lru_cache(maxsize=4)
+def _get_ND_butterworth_filter(
+    shape: tuple[int, ...],
+    cutoff: float,
+    order: int,
+    real: bool,
+) -> NDArray[np.float32]:
+    ranges = []
+    for d in shape:
+        axis = np.arange(-(d - 1) // 2, (d - 1) // 2 + 1, dtype=np.float32) / (
+            d * cutoff
+        )
+        ranges.append(np.fft.ifftshift(axis**2))
+    if real:
+        limit = shape[-1] // 2 + 1
+        ranges[-1] = ranges[-1][:limit]
+    q2 = reduce(np.add, np.meshgrid(*ranges, indexing="ij", sparse=True))
+    wfilt = 1 / (1 + q2**order)
+    return wfilt

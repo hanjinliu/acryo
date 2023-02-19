@@ -2,7 +2,8 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 from scipy import ndimage as ndi
-from ._curry import converter_function
+from acryo import _utils
+from acryo.pipe._curry import converter_function
 
 
 @converter_function
@@ -18,3 +19,7 @@ def gaussian_filter(
 ) -> NDArray[np.float32]:
     """Gaussian filtering an image."""
     return ndi.gaussian_filter(img, sigma, mode=mode, cval=cval)
+
+
+lowpass_filter = converter_function(_utils.lowpass_filter)
+highpass_filter = converter_function(_utils.highpass_filter)

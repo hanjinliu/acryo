@@ -218,29 +218,6 @@ class SubtomogramLoader(LoaderBase):
 
         return tasks
 
-    def construct_dask(
-        self,
-        output_shape: pixel | tuple[pixel, ...] | None = None,
-    ) -> da.Array:
-        """
-        Construct a dask array of subtomograms.
-
-        This function is always needed before parallel processing. If subtomograms
-        are cached in a memory-map it will be used instead.
-
-        Returns
-        -------
-        da.Array
-            An 4-D array which ``arr[i]`` corresponds to the ``i``-th subtomogram.
-        """
-        if self._cache_available(output_shape):
-            return self._cached_dask_array
-
-        output_shape = self._get_output_shape(output_shape)
-        tasks = self.construct_loading_tasks(output_shape=output_shape)
-        out = da.stack(tasks, axis=0)
-        return out
-
 
 class ClassificationResult(NamedTuple):
     """Tuple of classification results."""

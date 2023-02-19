@@ -228,20 +228,20 @@ Loading from Collection of Tomograms
 Cryo-ET image analysis is usually performed on a collection of tomograms. Data management
 becomes very complicated in this case.
 
-:mod:`acryo` provides a :class:`TomogramCollection` class for this purpose. :class:`TomogramCollection`
+:mod:`acryo` provides a :class:`BatchLoader` class for this purpose. :class:`BatchLoader`
 shares the same interface with :class:`SubtomogramLoader`. It is constructed using the same parameters.
 
 .. code-block:: python
 
     def __init__(self, order=3, scale=1.0, output_shape=Unset(), corner_safe=False): ...
 
-:class:`TomogramCollection` can be constructed from a list of :class:`SubtomogramLoader` objects.
+:class:`BatchLoader` can be constructed from a list of :class:`SubtomogramLoader` objects.
 
 .. code-block:: python
 
-    from acryo import Molecules, imread, TomogramCollection
+    from acryo import Molecules, imread, BatchLoader
 
-    collection = TomogramCollection.from_loaders(
+    collection = BatchLoader.from_loaders(
         [
             imread("path/to/image-0.mrc", Molecules.from_csv("path/to/molecules-0.csv")),
             imread("path/to/image-1.mrc", Molecules.from_csv("path/to/molecules-1.csv")),

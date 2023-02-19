@@ -12,9 +12,9 @@ from scipy import ndimage as ndi
 from scipy.spatial.transform import Rotation
 from dask import array as da, delayed
 
-from acryo.alignment._utils import lowpass_filter_ft, normalize_rotations
+from acryo.alignment._utils import normalize_rotations
 from acryo._types import Ranges, subpixel, degree
-from acryo._utils import compose_matrices, missing_wedge_mask
+from acryo._utils import compose_matrices, missing_wedge_mask, lowpass_filter_ft
 from acryo._fft import ifftn
 
 if TYPE_CHECKING:
