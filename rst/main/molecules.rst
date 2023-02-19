@@ -8,7 +8,7 @@ A :class:`Molecules` is an array of 3D molecules with three components.
 
     def __init__(self, pos, rot=None, features=None): ...
 
-1. ``pos`` (`numpy.ndarray`) ... positions of the molecules.
+1. ``pos`` (`numpy.ndarray`) ... positions of the molecules **in nanometers**.
 2. ``rot`` (`scipy.spatial.transform.Rotation`) ... rotation angles of the molecules.
 3. ``features`` (`polars.DataFrame`) ... scalar features of the molecules.
 
@@ -17,9 +17,9 @@ A :class:`Molecules` is an array of 3D molecules with three components.
 
     **Fig. 1** Coordinate system of a molecule.
 
-"Position" is a 3D coordinate of the molecules. "Rotation" is a rotation operator that
-converts the molecule axes :math:`\vec{X}, \vec{Y}, \vec{Z}` to the world coordinate
-axes :math:`\vec{x}, \vec{y}, \vec{z}`.
+"Position" is a 3D coordinate of the molecules **in nanometers**. "Rotation" is a rotation
+operator that converts the molecule axes :math:`\vec{X}, \vec{Y}, \vec{Z}` to the world
+coordinate axes :math:`\vec{x}, \vec{y}, \vec{z}`.
 
 Hereafter, "world coordinate" means :math:`\vec{x}, \vec{y}, \vec{z}` and "molecule
 coordinate" means :math:`\vec{X}, \vec{Y}, \vec{Z}`.

@@ -23,11 +23,11 @@ if TYPE_CHECKING:
 IMAGE_ID_LABEL = "image"
 
 
-class TomogramCollection(LoaderBase):
+class BatchLoader(LoaderBase):
     """
     Collection of tomograms and their molecules.
 
-    A `TomogramCollection` is similar to a list of `SubtomogramLoader` objects, but with
+    A `BatchLoader` is similar to a list of `SubtomogramLoader` objects, but with
     better consistency in loader parameters and more convenient access to the molecules.
     This class is useful for processing many tomograms at once, especially when you want
     to get the average of all the molecules available.
@@ -150,15 +150,9 @@ class TomogramCollection(LoaderBase):
             start=[],
         )
 
-    def construct_dask(self, output_shape: _ShapeType = None) -> da.Array:
-        dask_arrays: list[da.Array] = []
-        for loader in self.loaders:
-            dask_arrays.append(loader.construct_dask(output_shape=output_shape))
-        return da.concatenate(dask_arrays, axis=0)
-
 
 class LoaderAccessor:
-    def __init__(self, collection: TomogramCollection):
+    def __init__(self, collection: BatchLoader):
         self._collection = weakref.ref(collection)
 
     def __getitem__(self, idx: int) -> SubtomogramLoader:

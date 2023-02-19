@@ -1,12 +1,12 @@
 from functools import lru_cache
 import numpy as np
-from acryo import TomogramCollection, Molecules
+from acryo import BatchLoader, Molecules
 from scipy.spatial.transform import Rotation
 import polars as pl
 
 
 def test_replace():
-    collection = TomogramCollection()
+    collection = BatchLoader()
     assert collection.replace(order=1).order == 1
     assert collection.replace(order=1).corner_safe == collection.corner_safe
     assert collection.replace(output_shape=(1, 2, 3)).output_shape == (1, 2, 3)
@@ -15,7 +15,7 @@ def test_replace():
 
 @lru_cache(maxsize=1)
 def _get_collection():
-    collection = TomogramCollection()
+    collection = BatchLoader()
     img0 = np.zeros((10, 10, 10))
     img1 = np.ones((10, 10, 10))
     collection.add_tomogram(
@@ -56,7 +56,7 @@ def test_iter_loader():
 
 
 def test_filter():
-    collection = TomogramCollection()
+    collection = BatchLoader()
     img0 = np.zeros((10, 10, 10))
     img1 = np.ones((10, 10, 10))
     collection.add_tomogram(

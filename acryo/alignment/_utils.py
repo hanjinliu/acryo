@@ -1,6 +1,6 @@
 from __future__ import annotations
 import itertools
-from functools import reduce, lru_cache
+from functools import lru_cache
 from typing import Callable, Sequence
 import numpy as np
 from numpy.typing import NDArray
@@ -9,7 +9,7 @@ from scipy.signal import fftconvolve
 from scipy.spatial.transform import Rotation
 from scipy import ndimage as ndi
 
-from acryo._fft import rfftn, irfftn, fftn, ifftn
+from acryo._fft import ifftn
 from acryo._types import Ranges, RangeLike, pixel
 from acryo.molecules import from_euler_xyz_coords
 
@@ -98,63 +98,6 @@ def rotate(
 
 def euler_to_quat(degrees):
     return from_euler_xyz_coords(np.array(degrees), "zyx", degrees=True).as_quat()
-
-
-# lowpass filter
-# Modified from skimage.filters._fft_based
-def lowpass_filter_ft(
-    img: NDArray[np.float32], cutoff: float, order: int = 2
-) -> NDArray[np.complex64]:
-    if cutoff >= 0.5 * np.sqrt(img.ndim) or cutoff <= 0:
-        return fftn(img)
-    weight = _get_ND_butterworth_filter(
-        img.shape,
-        cutoff,
-        order,
-        high_pass=False,
-        real=False,
-    )
-    return weight * fftn(img)
-
-
-def lowpass_filter(
-    img: NDArray[np.float32], cutoff: float, order: int = 2
-) -> NDArray[np.float32]:
-    if cutoff >= 0.5 * np.sqrt(img.ndim) or cutoff <= 0:
-        return img
-    weight = _get_ND_butterworth_filter(
-        img.shape,
-        cutoff,
-        order,
-        high_pass=False,
-        real=True,
-    )
-    out: np.ndarray = irfftn(weight * rfftn(img))
-    return out.real
-
-
-@lru_cache(maxsize=4)
-def _get_ND_butterworth_filter(
-    shape: tuple[int, ...],
-    cutoff: float,
-    order: int,
-    high_pass: bool,
-    real: bool,
-):
-    ranges = []
-    for d in shape:
-        axis = np.arange(-(d - 1) // 2, (d - 1) // 2 + 1, dtype=np.float32) / (
-            d * cutoff
-        )
-        ranges.append(np.fft.ifftshift(axis**2))
-    if real:
-        limit = shape[-1] // 2 + 1
-        ranges[-1] = ranges[-1][:limit]
-    q2 = reduce(np.add, np.meshgrid(*ranges, indexing="ij", sparse=True))
-    wfilt = 1 / (1 + q2**order)
-    if high_pass:
-        wfilt = 1 - wfilt
-    return wfilt
 
 
 # cross correlation

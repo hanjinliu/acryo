@@ -1,7 +1,9 @@
 from ._loader import SubtomogramLoader
-from ._collection import TomogramCollection
+from ._batch import BatchLoader
+from ._mock import MockLoader
 
 __all__ = [
-    "TomogramCollection",
+    "BatchLoader",
     "SubtomogramLoader",
+    "MockLoader",
 ]

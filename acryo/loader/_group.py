@@ -30,8 +30,12 @@ if TYPE_CHECKING:
     from typing_extensions import Self
     from dask.delayed import Delayed
     from numpy.typing import NDArray
-    from acryo.loader._base import LoaderBase, _ShapeType
-    from acryo.alignment._base import MaskType
+    from acryo.loader._base import (
+        LoaderBase,
+        _ShapeType,
+        TemplateInputType,
+        MaskInputType,
+    )
 
 _K = TypeVar("_K", bound=Hashable)
 _L = TypeVar("_L", bound="LoaderBase")
@@ -145,9 +149,9 @@ class LoaderGroup(Generic[_K, _L]):
 
     def align(
         self,
-        template: NDArray[np.float32] | Mapping[_K, NDArray[np.float32]],
+        template: TemplateInputType | Mapping[_K, TemplateInputType],
         *,
-        mask: MaskType = None,
+        mask: MaskInputType = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
         alignment_model: type[BaseAlignmentModel] | AlignmentFactory = ZNCCAlignment,
         **align_kwargs,
@@ -161,7 +165,7 @@ class LoaderGroup(Generic[_K, _L]):
 
         Parameters
         ----------
-        template : np.ndarray, optional
+        template : 3D array or ImageProvider or mapping
             Template image.
         mask : np.ndarray or callable of np.ndarray to np.ndarray optional
             Mask image. Must in the same shape as the template.
@@ -207,7 +211,7 @@ class LoaderGroup(Generic[_K, _L]):
     def align_no_template(
         self,
         *,
-        mask: MaskType = None,
+        mask: MaskInputType = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
         output_shape: _ShapeType = None,
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
@@ -249,9 +253,9 @@ class LoaderGroup(Generic[_K, _L]):
 
     def align_multi_templates(
         self,
-        templates: list[NDArray[np.float32]],
+        templates: list[TemplateInputType] | Mapping[_K, list[TemplateInputType]],
         *,
-        mask: MaskType = None,
+        mask: MaskInputType = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
         label_name: str = "labels",
@@ -266,8 +270,9 @@ class LoaderGroup(Generic[_K, _L]):
 
         Parameters
         ----------
-        templates: list of ImgArray
-            Template images.
+        templates: list of 3D arrays or ImageProvider or mapping
+            Template images. If ImageProvider is given, the image will be provided
+            accordingly using the scale of the loader object.
         mask : np.ndarray, optional
             Mask image. Must in the same shape as the template.
         max_shifts : int or tuple of int, default is (1., 1., 1.)
