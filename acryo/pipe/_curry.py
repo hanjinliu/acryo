@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable, TypeVar
+from typing import Callable, TypeVar, Any
 from typing_extensions import ParamSpec, Concatenate
 import inspect
 import numpy as np
@@ -27,44 +27,42 @@ def provider_function(
     """
 
     def inner(*args, **kwargs):
-        return ImageProvider(lambda scale: fn(scale, *args, **kwargs))
+        _fn = _assert_1_arg(fn)
+        return ImageProvider(lambda scale: _fn(scale, *args, **kwargs))
 
-    _update_wrapper(inner, fn)
+    _update_wrapper(inner, fn, npop=1)
     return inner
 
 
 def converter_function(
-    fn: Callable[Concatenate[np.ndarray, _P], _R]
+    fn: Callable[Concatenate[np.ndarray, float, _P], _R]
 ) -> Callable[_P, ImageConverter]:
     """
     Convert a function into a curried function that returns a image converter.
+
+    Input function must accept `fn(img, scale)`.
 
     Examples
     --------
     >>> from scipy import ndimage as ndi
     >>> @converter_function
-    ... def gaussian_filter(img, sigma):
-    ...     return ndi.gaussian_filter(img, sigma)
+    ... def gaussian_filter(img, scale, sigma):
+    ...     return ndi.gaussian_filter(img, sigma / scale)
     >>> converter = gaussian_filter(1.5)
     >>> converter(arr)  # return a Gaussian filtered `arr`
 
     """
 
     def inner(*args, **kwargs):
-        return ImageConverter(lambda img: fn(img, *args, **kwargs))
+        _fn = _assert_2_args(fn)
+        return ImageConverter(lambda img, scale: _fn(img, scale, *args, **kwargs))
 
-    _update_wrapper(inner, fn)
+    _update_wrapper(inner, fn, npop=2)
     return inner
 
 
-def _update_wrapper(f, wrapped):
-    for name in ("__module__", "__name__", "__qualname__", "__doc__"):
-        try:
-            value = getattr(wrapped, name)
-        except AttributeError:
-            pass
-        else:
-            setattr(f, name, value)
+def _update_wrapper(f, wrapped, npop: int):
+    _update_attr(f, wrapped)
     annot = getattr(wrapped, "__annotations__", {}).copy()
     if len(annot) == 0:
         return f
@@ -73,6 +71,46 @@ def _update_wrapper(f, wrapped):
     except Exception:
         pass
     else:
-        first = args.args[0]
-        annot.pop(first)
+        for i in range(npop):
+            name = args.args[i]
+            annot.pop(name, None)
     return f
+
+
+def _assert_1_arg(func: Callable) -> Callable[[Any], Any]:
+    nargs = sum(
+        1
+        for p in inspect.signature(func).parameters.values()
+        if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+    )
+    if nargs == 0:
+        out = lambda x: func()
+        _update_attr(out, func)
+    else:
+        return func
+
+
+def _assert_2_args(func: Callable) -> Callable[[Any, Any], Any]:
+    nargs = sum(
+        1
+        for p in inspect.signature(func).parameters.values()
+        if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+    )
+    if nargs == 0:
+        out = lambda x0, x1: func()
+    elif nargs == 1:
+        out = lambda x0, x1: func(x0)
+    else:
+        return func
+    _update_attr(out, func)
+    return out
+
+
+def _update_attr(f, wrapped):
+    for name in ("__module__", "__name__", "__qualname__", "__doc__"):
+        try:
+            value = getattr(wrapped, name)
+        except AttributeError:
+            pass
+        else:
+            setattr(f, name, value)

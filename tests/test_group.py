@@ -51,5 +51,5 @@ def test_apply():
 
 def test_fsc():
     group = _get_group()
-    group.fsc()
+    group.fsc(dfreq=0.2)
     group.fsc(n_set=3, dfreq=0.2)

@@ -4,10 +4,13 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy import ndimage as ndi
 from acryo.pipe._curry import converter_function
+from acryo._types import nm
 
 
 @converter_function
-def threshold_otsu(img: NDArray[np.float32], bins: int = 256) -> NDArray[np.bool_]:
+def threshold_otsu(
+    img: NDArray[np.float32], scale: nm, bins: int = 256
+) -> NDArray[np.bool_]:
     """
     Pipe operation that binarize an image using Otsu's method.
 
@@ -40,7 +43,7 @@ def threshold_otsu(img: NDArray[np.float32], bins: int = 256) -> NDArray[np.bool
 
 
 @converter_function
-def dilation(img: NDArray[np.bool_], radius: float) -> NDArray[np.bool_]:
+def dilation(img: NDArray[np.bool_], scale: nm, radius: float) -> NDArray[np.bool_]:
     """
     Pipe operation that dilate (or erode) a binary image using a circular structure.
 
@@ -51,18 +54,22 @@ def dilation(img: NDArray[np.bool_], radius: float) -> NDArray[np.bool_]:
     """
     if radius == 0:
         return img
-    r = abs(radius)
-    zz, yy, xx = np.indices((2 * r + 1, 2 * r + 1, 2 * r + 1))
+    radius_px = radius / scale
+    r = abs(radius_px)
+    rceil = int(np.ceil(2 * r + 1))
+    zz, yy, xx = np.indices((rceil,) * 3)
     structure = (xx - r) ** 2 + (yy - r) ** 2 + (zz - r) ** 2 <= r**2
-    if radius < 0:
+    if radius_px < 0:
         out = ndi.binary_erosion(img, structure=structure, border_value=False)
-    elif radius > 0:
+    elif radius_px > 0:
         out = ndi.binary_dilation(img, structure=structure, border_value=False)
     return out
 
 
 @converter_function
-def gaussian_smooth(img: NDArray[np.bool_], sigma: float) -> NDArray[np.bool_]:
+def gaussian_smooth(
+    img: NDArray[np.bool_], scale: nm, sigma: float
+) -> NDArray[np.bool_]:
     """
     Pipe operation that smooth a binary image using a Gaussian kernel.
 
@@ -73,11 +80,11 @@ def gaussian_smooth(img: NDArray[np.bool_], sigma: float) -> NDArray[np.bool_]:
     """
     img = ~img
     dist = ndi.distance_transform_edt(img)
-    blurred_mask = np.exp(-(dist**2) / 2 / sigma**2)
+    blurred_mask = np.exp(-(dist**2) / 2 / (sigma / scale) ** 2)
     return blurred_mask
 
 
-def soft_otsu(sigma: float = 1.0, radius: float = 1.0, bins=256):
+def soft_otsu(sigma: float = 1.0, radius: float = 1.0, bins: int = 256):
     """
     Pipe operation of soft Otsu thresholding.
 

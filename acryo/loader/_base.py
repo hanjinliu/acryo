@@ -852,7 +852,7 @@ class LoaderBase(ABC):
             out = mask(self.scale)
             return np.asarray(out, dtype=np.float32)
         elif isinstance(mask, ImageConverter):
-            return mask
+            return mask.with_scale(self.scale)
         raise TypeError(f"Invalid mask type: {type(mask)}")
 
 
