@@ -834,6 +834,15 @@ class Molecules:
         df = self.to_dataframe()
         return self.__class__.from_dataframe(df.tail(n))
 
+    def sort(
+        self,
+        by: str | pl.Expr | Sequence[str | pl.Expr],
+        *,
+        reverse: bool = False,
+    ) -> Self:
+        df = self.to_dataframe()
+        return self.__class__.from_dataframe(df.sort(by=by, reverse=reverse))
+
 
 _K = TypeVar("_K", bound=Hashable)
 
@@ -848,6 +857,11 @@ class MoleculeGroup(Generic[_K]):
         for key, df in self._group:
             mole = Molecules.from_dataframe(df)
             yield key, mole
+
+    @property
+    def features(self) -> GroupBy:
+        """Return the groupby object."""
+        return self._group
 
 
 def _is_boolean_array(a: Any) -> TypeGuard[NDArray[np.bool_]]:

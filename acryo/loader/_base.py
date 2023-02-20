@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from typing_extensions import Self
     from dask.delayed import Delayed
     from acryo.classification import PcaClassifier
+    from acryo.alignment._base import MaskType
 
     _ShapeType = Union[pixel, tuple[pixel, ...], None]
 
@@ -439,8 +440,8 @@ class LoaderBase(ABC):
         _max_shifts_px = np.asarray(max_shifts) / self.scale
 
         model = alignment_model(
-            template=self._get_template_image(template),
-            mask=self._get_mask_image(mask),
+            template=self.normalize_template(template),
+            mask=self.normalize_mask(mask),
             **align_kwargs,
         )
         tasks = self.construct_mapping_tasks(
@@ -517,7 +518,7 @@ class LoaderBase(ABC):
             template = self.average(output_shape=output_shape)
             out = self.align(
                 template,
-                mask=self._get_mask_image(mask),
+                mask=self.normalize_mask(mask),
                 max_shifts=max_shifts,
                 alignment_model=alignment_model,
                 **align_kwargs,
@@ -565,8 +566,8 @@ class LoaderBase(ABC):
         _max_shifts_px = np.asarray(max_shifts) / self.scale
 
         model = alignment_model(
-            template=[self._get_template_image(t) for t in templates],
-            mask=self._get_mask_image(mask),
+            template=[self.normalize_template(t) for t in templates],
+            mask=self.normalize_mask(mask),
             **align_kwargs,
         )
         tasks = self.construct_mapping_tasks(
@@ -757,8 +758,8 @@ class LoaderBase(ABC):
         from acryo.classification import PcaClassifier
 
         if template is not None:
-            template = self._get_template_image(template)
-        mask = self._get_mask_image(mask)
+            template = self.normalize_template(template)
+        mask = self.normalize_mask(mask)
         if isinstance(mask, np.ndarray):
             shape = mask.shape
         elif isinstance(template, np.ndarray):
@@ -837,7 +838,8 @@ class LoaderBase(ABC):
             _output_shape = _misc.normalize_shape(output_shape, ndim=3)
         return _output_shape
 
-    def _get_template_image(self, template: TemplateInputType) -> NDArray[np.float32]:
+    def normalize_template(self, template: TemplateInputType) -> NDArray[np.float32]:
+        """Resolve any template input type to a 3D array."""
         if isinstance(template, np.ndarray):
             return template
         elif isinstance(template, ImageProvider):
@@ -845,7 +847,8 @@ class LoaderBase(ABC):
             return np.asarray(out, dtype=np.float32)
         raise TypeError(f"Invalid template type: {type(template)}")
 
-    def _get_mask_image(self, mask: MaskInputType) -> NDArray[np.float32]:
+    def normalize_mask(self, mask: MaskInputType) -> MaskType:
+        """Resolve any mask input type to a 3D array."""
         if isinstance(mask, (np.ndarray, type(None))):
             return mask
         elif isinstance(mask, ImageProvider):
@@ -854,6 +857,36 @@ class LoaderBase(ABC):
         elif isinstance(mask, ImageConverter):
             return mask.with_scale(self.scale)
         raise TypeError(f"Invalid mask type: {type(mask)}")
+
+    @overload
+    def normalize_input(
+        self,
+        template: None = None,
+        mask: MaskInputType = None,
+    ) -> tuple[None, NDArray[np.float32] | None]:
+        ...
+
+    @overload
+    def normalize_input(
+        self,
+        template: TemplateInputType,
+        mask: MaskInputType = None,
+    ) -> tuple[NDArray[np.float32], NDArray[np.float32] | None]:
+        ...
+
+    def normalize_input(self, template=None, mask=None):
+        """Resolve any template and mask input types to 3D arrays."""
+        if template is not None:
+            _template = self.normalize_template(template)
+            _mask = self.normalize_mask(mask)
+            if callable(_mask):
+                _mask = _mask(_template)
+            return _template, _mask
+        else:
+            _mask = self.normalize_mask(mask)
+            if callable(mask):
+                raise TypeError("Cannot determine mask array without template.")
+            return None, _mask
 
 
 class ClassificationResult(NamedTuple):
