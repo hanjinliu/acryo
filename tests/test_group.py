@@ -44,6 +44,12 @@ def test_align_multi_templates():
     out = group.align_multi_templates([template1, template2])
 
 
-def test_agg():
+def test_apply():
     group = _get_group()
-    group.agg([np.mean, np.std])
+    group.apply([np.mean, np.std])
+
+
+def test_fsc():
+    group = _get_group()
+    group.fsc()
+    group.fsc(n_set=3, dfreq=0.2)

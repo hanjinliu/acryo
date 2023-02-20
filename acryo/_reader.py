@@ -57,27 +57,27 @@ def register(*ext: str) -> Callable[[_L], _L]:
     return REG.register(*ext)
 
 
-# TODO: check scale unit and uncomment this
-# @READER.register(".tif", ".tiff")
-# def open_tif(path: str):
-#     try:
-#         from tifffile import TiffFile
-#     except ImportError as e:
-#         ext = os.path.splitext(path)[1]
-#         e.msg = (
-#             f"No module named tifffile. To read {ext[1:]} files, please\n"
-#             "$ pip install tifffile"
-#         )
-#         raise e
+# TODO: check scale unit
+@REG.register(".tif", ".tiff")
+def open_tif(path: str):
+    try:
+        from tifffile import TiffFile
+    except ImportError as e:
+        ext = os.path.splitext(path)[1]
+        e.msg = (
+            f"No module named tifffile. To read {ext[1:]} files, please\n"
+            "$ pip install tifffile"
+        )
+        raise e
 
-#     with TiffFile(path) as tif:
-#         pagetag = tif.series[0].pages[0].tags  # type: ignore
+    with TiffFile(path) as tif:
+        pagetag = tif.series[0].pages[0].tags  # type: ignore
 
-#         tags = {v.name: v.value for v in pagetag.values()}
-#         scale = tags["XResolution"][1]
+        tags = {v.name: v.value for v in pagetag.values()}
+        scale = tags["XResolution"][1]
 
-#         img: np.memmap = tif.asarray(out="memmap")  # type: ignore
-#     return img, scale
+        img: np.memmap = tif.asarray(out="memmap")  # type: ignore
+    return img, scale
 
 
 @REG.register(".mrc", ".rec", ".map")

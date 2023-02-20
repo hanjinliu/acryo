@@ -5,8 +5,6 @@ from typing import (
     Hashable,
     Iterable,
     Iterator,
-    Callable,
-    Any,
     Mapping,
     TypeVar,
     TYPE_CHECKING,
@@ -24,6 +22,7 @@ from acryo.alignment import (
 )
 
 from acryo._types import nm
+from acryo import _utils
 from acryo.loader import _misc
 
 if TYPE_CHECKING:
@@ -35,6 +34,7 @@ if TYPE_CHECKING:
         _ShapeType,
         TemplateInputType,
         MaskInputType,
+        AggFunction,
     )
 
 _K = TypeVar("_K", bound=Hashable)
@@ -140,8 +140,8 @@ class LoaderGroup(Generic[_K, _L]):
 
         computed = da.compute(all_tasks)[0]
         out: dict[_K, NDArray[np.float32]] = {}
-        for key, loader in self:
-            stack = np.stack(computed, axis=0)
+        for (key, loader), stack in zip(self, computed):
+            stack = np.stack(stack, axis=0)
             if squeeze and n_set == 1:
                 stack = stack[0]
             out[key] = stack
@@ -324,12 +324,29 @@ class LoaderGroup(Generic[_K, _L]):
             out.append((key, new))
         return self.__class__(out)
 
-    def agg(
+    def apply(
         self,
-        funcs: list[Callable[[NDArray[np.float32]], Any]],
+        funcs: AggFunction | list[AggFunction],
         schema: list[str] | None = None,
-    ) -> pl.DataFrame:
+    ) -> dict[_K, pl.DataFrame]:
+        """
+        Apply functions to subtomograms for each group.
+
+        Parameters
+        ----------
+        funcs : callable or list of callable
+            Functions that take a subtomogram as input and return a scalar.
+        schema : list[str], optional
+            DataFrame schema.
+
+        Returns
+        -------
+        dict of pl.DataFrame
+            Result tables for each group.
+        """
         all_tasks: list[list[Delayed]] = []
+        if not hasattr(funcs, "__iter__"):
+            funcs = [funcs]
         if schema is None:
             schema = [fn.__name__ for fn in funcs]
         if len(set(schema)) != len(schema):
@@ -348,6 +365,63 @@ class LoaderGroup(Generic[_K, _L]):
         out: dict[_K, pl.DataFrame] = {}
         for key, result in zip(keys, all_results):
             out[key] = pl.DataFrame(np.array(result), schema=schema)
+        return out
+
+    def fsc(
+        self,
+        mask: TemplateInputType = None,
+        seed: int | None = 0,
+        n_set: int = 1,
+        dfreq: float = 0.05,
+    ) -> dict[_K, pl.DataFrame]:
+        """
+        Calculate Fourier shell correlation for each group.
+
+        Parameters
+        ----------
+        mask : np.ndarray, optional
+            Mask image
+        seed : random seed, default is 0
+            Random seed used to split subtomograms.
+        n_set : int, default is 1
+            Number of split set of averaged images.
+        dfreq : float, default is 0.05
+            Frequency sampling width.
+
+        Returns
+        -------
+        pl.DataFrame
+            A data frame with FSC results.
+        """
+        if mask is None:
+            _mask = 1.0
+            output_shape = None
+        elif isinstance(mask, np.ndarray):
+            output_shape = mask.shape
+
+        if n_set <= 0:
+            raise ValueError("'n_set' must be positive.")
+
+        imgs = self.average_split(
+            n_set=n_set,
+            seed=seed,
+            squeeze=False,
+            output_shape=output_shape,
+        )
+        out: dict[_K, pl.DataFrame] = {}
+        for key, img in imgs.items():
+            fsc_all: dict[str, np.ndarray] = {}
+            freq = np.zeros(0, dtype=np.float32)
+            for i in range(n_set):
+                img0, img1 = img[i]
+                freq, fsc = _utils.fourier_shell_correlation(
+                    img0 * _mask, img1 * _mask, dfreq=dfreq
+                )
+                fsc_all[f"FSC-{i}"] = fsc
+
+            fsc_dict: dict[str, NDArray[np.float32]] = {"freq": freq}
+            fsc_dict.update(fsc_all)
+            out[key] = pl.DataFrame(fsc_dict)
         return out
 
     def count(self) -> dict[_K, int]:

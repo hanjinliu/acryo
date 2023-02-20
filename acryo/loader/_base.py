@@ -45,6 +45,7 @@ if TYPE_CHECKING:
 
 TemplateInputType = Union[NDArray[np.float32], ImageProvider]
 MaskInputType = Union[NDArray[np.float32], ImageProvider, ImageConverter, None]
+AggFunction = Callable[[NDArray[np.float32]], Any]
 
 
 class Unset:
@@ -300,7 +301,7 @@ class LoaderBase(ABC):
             return tasks[idx].compute()
         elif isinstance(idx, slice):
             return da.stack(tasks[idx], axis=0).compute()
-        elif isinstance(idx, Iterable):
+        elif hasattr(idx, "__iter__"):
             return da.stack([tasks[i] for i in idx], axis=0).compute()
         else:
             raise TypeError(f"Invalid index type: {type(idx)}")
@@ -612,27 +613,29 @@ class LoaderBase(ABC):
 
         return self.replace(molecules=mole_aligned, output_shape=shape)
 
-    def agg(
+    def apply(
         self,
-        funcs: list[Callable[[NDArray[np.float32]], Any]],
+        funcs: AggFunction | list[AggFunction],
         schema: list[str] | None = None,
     ) -> pl.DataFrame:
         """
-        Aggregation of subtomograms using a list of functions.
+        Apply functions to subtomograms.
 
         Parameters
         ----------
-        funcs : list of callable
-            Functions that take a subtomogram as input and return an aggregated result.
+        funcs : callable or list of callable
+            Functions that take a subtomogram as input and return a scalar.
         schema : list[str], optional
             DataFrame schema.
 
         Returns
         -------
         pl.DataFrame
-            Aggregated results.
+            Result table.
         """
         all_tasks: list[list[Delayed]] = []
+        if not hasattr(funcs, "__iter__"):
+            funcs = [funcs]
         if schema is None:
             schema = [fn.__name__ for fn in funcs]
         if len(set(schema)) != len(schema):
@@ -645,7 +648,7 @@ class LoaderBase(ABC):
 
     def fsc(
         self,
-        mask: NDArray[np.float32] | None = None,
+        mask: TemplateInputType = None,
         seed: int | None = 0,
         n_set: int = 1,
         dfreq: float = 0.05,
