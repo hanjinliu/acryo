@@ -793,6 +793,14 @@ class LoaderBase(ABC):
         new = self.replace(molecules=mole)
         return ClassificationResult(new, clf)
 
+    def head(self, n: int = 10) -> Self:
+        """Return a new loader with the first n molecules."""
+        return self.replace(molecules=self.molecules.head(n))
+
+    def tail(self, n: int = 10) -> Self:
+        """Return a new loader with the last n molecules."""
+        return self.replace(molecules=self.molecules.tail(n))
+
     def filter(
         self,
         predicate: pl.Expr | str | pl.Series | list[bool] | np.ndarray,

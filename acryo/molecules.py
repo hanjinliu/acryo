@@ -824,6 +824,16 @@ class Molecules:
         df_filt = df.filter(predicate)
         return self.__class__.from_dataframe(df_filt)
 
+    def head(self, n: int = 10) -> Self:
+        """Return the first n molecules."""
+        df = self.to_dataframe()
+        return self.__class__.from_dataframe(df.head(n))
+
+    def tail(self, n: int = 10) -> Self:
+        """Return the last n molecules."""
+        df = self.to_dataframe()
+        return self.__class__.from_dataframe(df.tail(n))
+
 
 _K = TypeVar("_K", bound=Hashable)
 
