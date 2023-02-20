@@ -276,6 +276,10 @@ class LoaderBase(ABC):
             del self._cached_dask_array
             self._cached_dask_array = old_cache
 
+    def asnumpy(self, output_shape: _ShapeType = None) -> NDArray[np.float32]:
+        """Load all the subtomograms as a 4D numpy array."""
+        return self.construct_dask(output_shape=output_shape).compute()
+
     def load(
         self,
         idx: SupportsIndex | slice | Iterable[SupportsIndex],
