@@ -4,10 +4,9 @@ from ._transform import (
     gaussian_filter,
     lowpass_filter,
     highpass_filter,
-    resize,
 )
 from ._curry import provider_function, converter_function
-from ._imread import reader
+from ._imread import from_file, from_gaussian, from_array
 
 __all__ = [
     "gaussian_smooth",
@@ -18,8 +17,9 @@ __all__ = [
     "gaussian_filter",
     "lowpass_filter",
     "highpass_filter",
-    "resize",
-    "reader",
+    "from_file",
+    "from_gaussian",
+    "from_array",
     "provider_function",
     "converter_function",
 ]

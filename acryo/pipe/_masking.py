@@ -106,4 +106,4 @@ def soft_otsu(sigma: float = 1.0, radius: float = 1.0, bins: int = 256):
     bins : int, default is 256
         Number of bins to build histogram.
     """
-    return gaussian_smooth(sigma) * dilation(radius) * threshold_otsu(bins)
+    return gaussian_smooth(sigma) @ dilation(radius) @ threshold_otsu(bins)
