@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from typing_extensions import Self
     from numpy.typing import NDArray
     from acryo.classification import PcaClassifier
+    from dask.delayed import Delayed
 
 
 class SubtomogramLoader(LoaderBase):
@@ -198,7 +199,7 @@ class SubtomogramLoader(LoaderBase):
             _prep = _utils.prepare_affine_cornersafe
         else:
             _prep = _utils.prepare_affine
-        tasks = []
+        tasks: list[Delayed] = []
         for i in range(len(self)):
             subvol, mtx = _prep(
                 image,
@@ -206,15 +207,19 @@ class SubtomogramLoader(LoaderBase):
                 output_shape=output_shape,
                 rot=self.molecules.rotator[i],
             )
-            task = _utils.rotated_crop(
-                subvol,
-                mtx,
+            task = da.from_delayed(
+                _utils.rotated_crop(
+                    subvol,
+                    mtx,
+                    shape=output_shape,
+                    order=self.order,
+                    mode="constant",
+                    cval=np.mean,
+                ),
                 shape=output_shape,
-                order=self.order,
-                mode="constant",
-                cval=np.mean,
+                dtype=np.float32,
             )
-            tasks.append(da.from_delayed(task, shape=output_shape, dtype=np.float32))
+            tasks.append(task)
 
         return tasks
 

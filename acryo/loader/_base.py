@@ -121,10 +121,11 @@ class LoaderBase(ABC):
         da.Array
             An 4-D array which ``arr[i]`` corresponds to the ``i``-th subtomogram.
         """
+        output_shape = self._get_output_shape(output_shape)
+
         if self._cache_available(output_shape):
             return self._cached_dask_array
 
-        output_shape = self._get_output_shape(output_shape)
         tasks = self.construct_loading_tasks(output_shape=output_shape)
         out = da.stack(tasks, axis=0)
         return out
@@ -344,8 +345,9 @@ class LoaderBase(ABC):
             Averaged image
         """
         output_shape = self._get_output_shape(output_shape)
-        dask_array = self.construct_dask(output_shape=output_shape)
-        return da.compute(da.mean(dask_array, axis=0))[0]
+        dsk = self.construct_dask(output_shape=output_shape)
+        dsk = dsk.rechunk(("auto",) + output_shape)
+        return da.compute(da.mean(dsk, axis=0))[0]
 
     def average_split(
         self,
@@ -382,14 +384,14 @@ class LoaderBase(ABC):
         rng = np.random.default_rng(seed=seed)
 
         tasks: list[da.Array] = []
-        dask_array = self.construct_dask(output_shape=output_shape)
-        nmole = dask_array.shape[0]
+        dsk = self.construct_dask(output_shape=output_shape)
+        nmole = dsk.shape[0]
         for _ in range(n_set):
             ind0, ind1 = _misc.random_splitter(rng, nmole)
             _stack = da.stack(
                 [
-                    da.mean(dask_array[ind0], axis=0),
-                    da.mean(dask_array[ind1], axis=0),
+                    da.mean(dsk[ind0].rechunk(("auto",) + output_shape), axis=0),
+                    da.mean(dsk[ind1].rechunk(("auto",) + output_shape), axis=0),
                 ],
                 axis=0,
             )
@@ -772,7 +774,6 @@ class LoaderBase(ABC):
         with self.cached(shape):
             if template is None:
                 template = self.average(shape)
-
             model = ZNCCAlignment(template, mask, cutoff=cutoff, tilt_range=tilt_range)
             tasks: list[da.Array] = []
             for task in self.iter_mapping_tasks(
@@ -782,7 +783,9 @@ class LoaderBase(ABC):
             ):
                 tasks.append(da.from_delayed(task, shape=shape, dtype=np.float32))
 
-            stack = da.stack(tasks, axis=0)
+            # PCA requires aggregation along the first axis.
+            # Rechunk to improve performance.
+            stack = da.stack(tasks, axis=0).rechunk(("auto",) + shape)
 
             clf = PcaClassifier(
                 stack,

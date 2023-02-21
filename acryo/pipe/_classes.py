@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable
+from typing import Callable, overload
 
 import numpy as np
 from numpy.typing import NDArray
@@ -40,7 +40,15 @@ class ImageConverter(_Pipeline):
         _assert_3d_array(out, self._func)
         return out
 
-    def __mul__(self, other: ImageProvider | ImageConverter):
+    @overload
+    def __mul__(self, other: ImageProvider) -> ImageProvider:
+        ...
+
+    @overload
+    def __mul__(self, other: ImageConverter) -> ImageConverter:
+        ...
+
+    def __mul__(self, other):
         """Function composition"""
         if isinstance(other, ImageProvider):
             fn = lambda scale: self(other(scale), scale)

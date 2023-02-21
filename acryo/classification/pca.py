@@ -60,7 +60,8 @@ class PcaClassifier:
 
     def run(self) -> Self:
         """Run PCA and k-means clustering."""
-        self._pca.fit(self._image_flat(mask=True))
+        _flat_image = self._image_flat(mask=True)
+        self._pca.fit(_flat_image)
         self._labels = self._kmeans.fit_predict(self.get_transform())
         return self
 
@@ -82,7 +83,8 @@ class PcaClassifier:
             _input = self._image * self._mask
         else:
             _input = self._image
-        return _input.reshape(self._n_image, -1)
+        _flat_images = _input.reshape(self._n_image, -1)
+        return _flat_images
 
     def get_transform(self, labels: Iterable[int] | None = None) -> NDArray[np.float32]:
         """
