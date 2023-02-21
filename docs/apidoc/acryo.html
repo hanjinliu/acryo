@@ -43,6 +43,7 @@
               <ul>
 <li class="toctree-l1"><a class="reference internal" href="../main/molecules.html">Molecules</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../main/loader.html">Subtomogram Loader</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../main/caching.html">Cache Subtomograms</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../main/pipe.html">Piping Images to the Loader</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../main/alignment.html">Alignment Model</a></li>
 </ul>
@@ -114,6 +115,12 @@
 <em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">acryo.molecules.</span></span><span class="sig-name descname"><span class="pre">MoleculeGroup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">group</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">GroupBy</span><span class="p"><span class="pre">[</span></span><span class="pre">pl.DataFrame</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/molecules.html#MoleculeGroup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.molecules.MoleculeGroup" title="Permalink to this definition"></a></dt>
 <dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Generic</span></code>[<code class="xref py py-obj docutils literal notranslate"><span class="pre">acryo.molecules._K</span></code>]</p>
 <p>A groupby-like object for molecules.</p>
+<dl class="py property">
+<dt class="sig sig-object py" id="acryo.molecules.MoleculeGroup.features">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">features</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">GroupBy</span></em><a class="headerlink" href="#acryo.molecules.MoleculeGroup.features" title="Permalink to this definition"></a></dt>
+<dd><p>Return the groupby object.</p>
+</dd></dl>
+
 </dd></dl>
 
 <dl class="py class">
@@ -185,6 +192,12 @@ property.</p>
 <dt class="sig sig-object py" id="acryo.molecules.Molecules.copy">
 <span class="sig-name descname"><span class="pre">copy</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="reference internal" href="../_modules/acryo/molecules.html#Molecules.copy"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.molecules.Molecules.copy" title="Permalink to this definition"></a></dt>
 <dd><p>Make a copy of the object.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="acryo.molecules.Molecules.drop_features">
+<span class="sig-name descname"><span class="pre">drop_features</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">expr</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pl.Expr</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">pl.Expr</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="reference internal" href="../_modules/acryo/molecules.html#Molecules.drop_features"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.molecules.Molecules.drop_features" title="Permalink to this definition"></a></dt>
+<dd><p>Return a new instance with updated features.</p>
 </dd></dl>
 
 <dl class="py method">
@@ -266,6 +279,12 @@ angles are in degrees if this flag is True, else they are in radians.</p></li>
 </dd></dl>
 
 <dl class="py method">
+<dt class="sig sig-object py" id="acryo.molecules.Molecules.from_random">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_random</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pos</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">np.ndarray</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">seed</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">features</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pl.DataFrame</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="reference internal" href="../_modules/acryo/molecules.html#Molecules.from_random"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.molecules.Molecules.from_random" title="Permalink to this definition"></a></dt>
+<dd><p>Create randomly oriented molecules from given positions.</p>
+</dd></dl>
+
+<dl class="py method">
 <dt class="sig sig-object py" id="acryo.molecules.Molecules.from_rotvec">
 <em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_rotvec</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pos</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">np.ndarray</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">vec</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ArrayLike</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">features</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pl.DataFrame</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="reference internal" href="../_modules/acryo/molecules.html#Molecules.from_rotvec"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.molecules.Molecules.from_rotvec" title="Permalink to this definition"></a></dt>
 <dd><p>Create molecules from rotation vectors.</p>
@@ -277,6 +296,12 @@ angles are in degrees if this flag is True, else they are in radians.</p></li>
 <dt class="sig sig-object py">
 <span class="sig-name descname"><span class="pre">groupby</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">by</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">pl.Expr</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#acryo.molecules.MoleculeGroup" title="acryo.molecules.MoleculeGroup"><span class="pre">acryo.molecules.MoleculeGroup</span></a><span class="p"><span class="pre">[</span></span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span></dt>
 <dd><p>Group molecules into sub-groups.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="acryo.molecules.Molecules.head">
+<span class="sig-name descname"><span class="pre">head</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">n</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">10</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="reference internal" href="../_modules/acryo/molecules.html#Molecules.head"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.molecules.Molecules.head" title="Permalink to this definition"></a></dt>
+<dd><p>Return the first n molecules.</p>
 </dd></dl>
 
 <dl class="py method">
@@ -452,6 +477,26 @@ instance.</p></li>
 </dl>
 </dd></dl>
 
+<dl class="py method">
+<dt class="sig sig-object py" id="acryo.molecules.Molecules.rotate_random">
+<span class="sig-name descname"><span class="pre">rotate_random</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">copy</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">seed</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="reference internal" href="../_modules/acryo/molecules.html#Molecules.rotate_random"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.molecules.Molecules.rotate_random" title="Permalink to this definition"></a></dt>
+<dd><p>Rotate molecules randomly.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>copy</strong> (<em>bool</em><em>, </em><em>default is True</em>) – If true, create a new instance, otherwise overwrite the existing instance.</p></li>
+<li><p><strong>seed</strong> (<em>int</em><em>, </em><em>default is None</em>) – Random seed to generate randomized rotators.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>Instance with updated orientation.</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p><a class="reference internal" href="#acryo.molecules.Molecules" title="acryo.molecules.Molecules">Molecules</a></p>
+</dd>
+</dl>
+</dd></dl>
+
 <dl class="py property">
 <dt class="sig sig-object py" id="acryo.molecules.Molecules.rotator">
 <em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">rotator</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">scipy.spatial.transform._rotation.Rotation</span></em><a class="headerlink" href="#acryo.molecules.Molecules.rotator" title="Permalink to this definition"></a></dt>
@@ -474,6 +519,11 @@ that belong to the object.</p>
 </dd></dl>
 
 <dl class="py method">
+<dt class="sig sig-object py" id="acryo.molecules.Molecules.sort">
+<span class="sig-name descname"><span class="pre">sort</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">by</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">pl.Expr</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">pl.Expr</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">reverse</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="reference internal" href="../_modules/acryo/molecules.html#Molecules.sort"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.molecules.Molecules.sort" title="Permalink to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
 <dt class="sig sig-object py" id="acryo.molecules.Molecules.subset">
 <span class="sig-name descname"><span class="pre">subset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">spec</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">slice</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">NDArray</span><span class="p"><span class="pre">[</span></span><span class="pre">np.bool_</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">NDArray</span><span class="p"><span class="pre">[</span></span><span class="pre">np.integer</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="reference internal" href="../_modules/acryo/molecules.html#Molecules.subset"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.molecules.Molecules.subset" title="Permalink to this definition"></a></dt>
 <dd><p>Create a subset of molecules by slicing.</p>
@@ -494,6 +544,12 @@ molecules will be used.</p>
 <dd class="field-odd"><p><a class="reference internal" href="#acryo.molecules.Molecules" title="acryo.molecules.Molecules">Molecules</a></p>
 </dd>
 </dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="acryo.molecules.Molecules.tail">
+<span class="sig-name descname"><span class="pre">tail</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">n</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">10</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="reference internal" href="../_modules/acryo/molecules.html#Molecules.tail"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.molecules.Molecules.tail" title="Permalink to this definition"></a></dt>
+<dd><p>Return the last n molecules.</p>
 </dd></dl>
 
 <dl class="py method">
@@ -585,6 +641,12 @@ instance.</p></li>
 <dd class="field-odd"><p><a class="reference internal" href="#acryo.molecules.Molecules" title="acryo.molecules.Molecules">Molecules</a></p>
 </dd>
 </dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="acryo.molecules.Molecules.with_features">
+<span class="sig-name descname"><span class="pre">with_features</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">exprs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="reference internal" href="../_modules/acryo/molecules.html#Molecules.with_features"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.molecules.Molecules.with_features" title="Permalink to this definition"></a></dt>
+<dd><p>Return a new instance with updated features.</p>
 </dd></dl>
 
 <dl class="py property">
@@ -955,6 +1017,12 @@ property.</p>
 </dd></dl>
 
 <dl class="py method">
+<dt class="sig sig-object py" id="acryo.Molecules.drop_features">
+<span class="sig-name descname"><span class="pre">drop_features</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">expr</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pl.Expr</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">pl.Expr</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="reference internal" href="../_modules/acryo/molecules.html#Molecules.drop_features"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.Molecules.drop_features" title="Permalink to this definition"></a></dt>
+<dd><p>Return a new instance with updated features.</p>
+</dd></dl>
+
+<dl class="py method">
 <dt class="sig sig-object py" id="acryo.Molecules.empty">
 <em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">empty</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">feature_labels</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Iterable</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">()</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/molecules.html#Molecules.empty"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.Molecules.empty" title="Permalink to this definition"></a></dt>
 <dd></dd></dl>
@@ -1033,6 +1101,12 @@ angles are in degrees if this flag is True, else they are in radians.</p></li>
 </dd></dl>
 
 <dl class="py method">
+<dt class="sig sig-object py" id="acryo.Molecules.from_random">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_random</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pos</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">np.ndarray</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">seed</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">features</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pl.DataFrame</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="reference internal" href="../_modules/acryo/molecules.html#Molecules.from_random"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.Molecules.from_random" title="Permalink to this definition"></a></dt>
+<dd><p>Create randomly oriented molecules from given positions.</p>
+</dd></dl>
+
+<dl class="py method">
 <dt class="sig sig-object py" id="acryo.Molecules.from_rotvec">
 <em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_rotvec</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pos</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">np.ndarray</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">vec</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ArrayLike</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">features</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pl.DataFrame</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="reference internal" href="../_modules/acryo/molecules.html#Molecules.from_rotvec"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.Molecules.from_rotvec" title="Permalink to this definition"></a></dt>
 <dd><p>Create molecules from rotation vectors.</p>
@@ -1044,6 +1118,12 @@ angles are in degrees if this flag is True, else they are in radians.</p></li>
 <dt class="sig sig-object py">
 <span class="sig-name descname"><span class="pre">groupby</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">by</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">pl.Expr</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#acryo.molecules.MoleculeGroup" title="acryo.molecules.MoleculeGroup"><span class="pre">acryo.molecules.MoleculeGroup</span></a><span class="p"><span class="pre">[</span></span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span></dt>
 <dd><p>Group molecules into sub-groups.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="acryo.Molecules.head">
+<span class="sig-name descname"><span class="pre">head</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">n</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">10</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="reference internal" href="../_modules/acryo/molecules.html#Molecules.head"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.Molecules.head" title="Permalink to this definition"></a></dt>
+<dd><p>Return the first n molecules.</p>
 </dd></dl>
 
 <dl class="py method">
@@ -1219,6 +1299,26 @@ instance.</p></li>
 </dl>
 </dd></dl>
 
+<dl class="py method">
+<dt class="sig sig-object py" id="acryo.Molecules.rotate_random">
+<span class="sig-name descname"><span class="pre">rotate_random</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">copy</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">seed</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="reference internal" href="../_modules/acryo/molecules.html#Molecules.rotate_random"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.Molecules.rotate_random" title="Permalink to this definition"></a></dt>
+<dd><p>Rotate molecules randomly.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>copy</strong> (<em>bool</em><em>, </em><em>default is True</em>) – If true, create a new instance, otherwise overwrite the existing instance.</p></li>
+<li><p><strong>seed</strong> (<em>int</em><em>, </em><em>default is None</em>) – Random seed to generate randomized rotators.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>Instance with updated orientation.</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p><a class="reference internal" href="#acryo.Molecules" title="acryo.Molecules">Molecules</a></p>
+</dd>
+</dl>
+</dd></dl>
+
 <dl class="py property">
 <dt class="sig sig-object py" id="acryo.Molecules.rotator">
 <em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">rotator</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">scipy.spatial.transform._rotation.Rotation</span></em><a class="headerlink" href="#acryo.Molecules.rotator" title="Permalink to this definition"></a></dt>
@@ -1241,6 +1341,11 @@ that belong to the object.</p>
 </dd></dl>
 
 <dl class="py method">
+<dt class="sig sig-object py" id="acryo.Molecules.sort">
+<span class="sig-name descname"><span class="pre">sort</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">by</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">pl.Expr</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">pl.Expr</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">reverse</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="reference internal" href="../_modules/acryo/molecules.html#Molecules.sort"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.Molecules.sort" title="Permalink to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
 <dt class="sig sig-object py" id="acryo.Molecules.subset">
 <span class="sig-name descname"><span class="pre">subset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">spec</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">slice</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">NDArray</span><span class="p"><span class="pre">[</span></span><span class="pre">np.bool_</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">NDArray</span><span class="p"><span class="pre">[</span></span><span class="pre">np.integer</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="reference internal" href="../_modules/acryo/molecules.html#Molecules.subset"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.Molecules.subset" title="Permalink to this definition"></a></dt>
 <dd><p>Create a subset of molecules by slicing.</p>
@@ -1261,6 +1366,12 @@ molecules will be used.</p>
 <dd class="field-odd"><p><a class="reference internal" href="#acryo.Molecules" title="acryo.Molecules">Molecules</a></p>
 </dd>
 </dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="acryo.Molecules.tail">
+<span class="sig-name descname"><span class="pre">tail</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">n</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">10</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="reference internal" href="../_modules/acryo/molecules.html#Molecules.tail"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.Molecules.tail" title="Permalink to this definition"></a></dt>
+<dd><p>Return the last n molecules.</p>
 </dd></dl>
 
 <dl class="py method">
@@ -1352,6 +1463,12 @@ instance.</p></li>
 <dd class="field-odd"><p><a class="reference internal" href="#acryo.Molecules" title="acryo.Molecules">Molecules</a></p>
 </dd>
 </dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="acryo.Molecules.with_features">
+<span class="sig-name descname"><span class="pre">with_features</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">exprs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="reference internal" href="../_modules/acryo/molecules.html#Molecules.with_features"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.Molecules.with_features" title="Permalink to this definition"></a></dt>
+<dd><p>Return a new instance with updated features.</p>
 </dd></dl>
 
 <dl class="py property">

@@ -42,6 +42,7 @@
               <ul>
 <li class="toctree-l1"><a class="reference internal" href="../../../main/molecules.html">Molecules</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../main/loader.html">Subtomogram Loader</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../main/caching.html">Cache Subtomograms</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../main/pipe.html">Piping Images to the Loader</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../main/alignment.html">Alignment Model</a></li>
 </ul>
@@ -133,7 +134,8 @@
 
 <div class="viewcode-block" id="PcaClassifier.run"><a class="viewcode-back" href="../../../apidoc/acryo.classification.html#acryo.classification.pca.PcaClassifier.run">[docs]</a>    <span class="k">def</span> <span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
         <span class="sd">&quot;&quot;&quot;Run PCA and k-means clustering.&quot;&quot;&quot;</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_pca</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_image_flat</span><span class="p">(</span><span class="n">mask</span><span class="o">=</span><span class="kc">True</span><span class="p">))</span>
+        <span class="n">_flat_image</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_image_flat</span><span class="p">(</span><span class="n">mask</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pca</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">_flat_image</span><span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_labels</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_kmeans</span><span class="o">.</span><span class="n">fit_predict</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">get_transform</span><span class="p">())</span>
         <span class="k">return</span> <span class="bp">self</span></div>
 
@@ -155,7 +157,8 @@
             <span class="n">_input</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_image</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mask</span>
         <span class="k">else</span><span class="p">:</span>
             <span class="n">_input</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_image</span>
-        <span class="k">return</span> <span class="n">_input</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_n_image</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">_flat_images</span> <span class="o">=</span> <span class="n">_input</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_n_image</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">_flat_images</span>
 
 <div class="viewcode-block" id="PcaClassifier.get_transform"><a class="viewcode-back" href="../../../apidoc/acryo.classification.html#acryo.classification.pca.PcaClassifier.get_transform">[docs]</a>    <span class="k">def</span> <span class="nf">get_transform</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">labels</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
         <span class="sd">&quot;&quot;&quot;</span>

@@ -42,6 +42,7 @@
               <ul>
 <li class="toctree-l1"><a class="reference internal" href="../../../main/molecules.html">Molecules</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../main/loader.html">Subtomogram Loader</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../main/caching.html">Cache Subtomograms</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../main/pipe.html">Piping Images to the Loader</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../main/alignment.html">Alignment Model</a></li>
 </ul>
@@ -73,13 +74,15 @@
   <h1>Source code for acryo.pipe._imread</h1><div class="highlight"><pre>
 <span></span><span class="kn">from</span> <span class="nn">__future__</span> <span class="kn">import</span> <span class="n">annotations</span>
 
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
 <span class="kn">from</span> <span class="nn">scipy</span> <span class="kn">import</span> <span class="n">ndimage</span> <span class="k">as</span> <span class="n">ndi</span>
 <span class="kn">from</span> <span class="nn">acryo.pipe._curry</span> <span class="kn">import</span> <span class="n">provider_function</span>
 <span class="kn">from</span> <span class="nn">acryo._reader</span> <span class="kn">import</span> <span class="n">REG</span>
+<span class="kn">from</span> <span class="nn">acryo._types</span> <span class="kn">import</span> <span class="n">nm</span>
 
 
-<div class="viewcode-block" id="reader"><a class="viewcode-back" href="../../../apidoc/acryo.pipe.html#acryo.pipe.reader">[docs]</a><span class="nd">@provider_function</span>
-<span class="k">def</span> <span class="nf">reader</span><span class="p">(</span><span class="n">scale</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">path</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">original_scale</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">tol</span><span class="o">=</span><span class="mf">0.01</span><span class="p">):</span>
+<div class="viewcode-block" id="from_file"><a class="viewcode-back" href="../../../apidoc/acryo.pipe.html#acryo.pipe.from_file">[docs]</a><span class="nd">@provider_function</span>
+<span class="k">def</span> <span class="nf">from_file</span><span class="p">(</span><span class="n">scale</span><span class="p">:</span> <span class="n">nm</span><span class="p">,</span> <span class="n">path</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">original_scale</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">tol</span><span class="o">=</span><span class="mf">0.01</span><span class="p">):</span>
     <span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    An image provider function with rescaling.</span>
 
@@ -87,8 +90,8 @@
 <span class="sd">    Will be used for the template images or the mask images.</span>
 
 <span class="sd">    &gt;&gt;&gt; loader.align(</span>
-<span class="sd">    ...     template=reader(&quot;path/to/template.mrc&quot;),</span>
-<span class="sd">    ...     mask=reader(&quot;path/to/mask.mrc&quot;),</span>
+<span class="sd">    ...     template=from_file(&quot;path/to/template.mrc&quot;),</span>
+<span class="sd">    ...     mask=from_file(&quot;path/to/mask.mrc&quot;),</span>
 <span class="sd">    ... )</span>
 
 <span class="sd">    Parameters</span>
@@ -111,6 +114,89 @@
     <span class="k">if</span> <span class="nb">abs</span><span class="p">(</span><span class="n">ratio</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">&lt;</span> <span class="n">tol</span><span class="p">:</span>
         <span class="k">return</span> <span class="n">img</span>
     <span class="k">return</span> <span class="n">ndi</span><span class="o">.</span><span class="n">zoom</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">ratio</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">prefilter</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;reflect&quot;</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="from_gaussian"><a class="viewcode-back" href="../../../apidoc/acryo.pipe.html#acryo.pipe.from_gaussian">[docs]</a><span class="nd">@provider_function</span>
+<span class="k">def</span> <span class="nf">from_gaussian</span><span class="p">(</span>
+    <span class="n">scale</span><span class="p">:</span> <span class="n">nm</span><span class="p">,</span>
+    <span class="n">shape</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">nm</span><span class="p">,</span> <span class="n">nm</span><span class="p">,</span> <span class="n">nm</span><span class="p">],</span>
+    <span class="n">sigma</span><span class="p">:</span> <span class="n">nm</span> <span class="o">|</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">nm</span><span class="p">,</span> <span class="n">nm</span><span class="p">,</span> <span class="n">nm</span><span class="p">]</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">,</span>
+    <span class="n">shift</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">nm</span><span class="p">,</span> <span class="n">nm</span><span class="p">,</span> <span class="n">nm</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">),</span>
+<span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    An image provider function by a Gaussian function.</span>
+
+<span class="sd">    This function will provide a Gaussian particle with given shape, sigma and shift from</span>
+<span class="sd">    the center.</span>
+
+<span class="sd">    &gt;&gt;&gt; loader.align(</span>
+<span class="sd">    ...     template=from_gaussian(shape=(4.8, 4.8, 4.8), sigma=1.2),</span>
+<span class="sd">    ...     mask=from_file(&quot;path/to/mask.mrc&quot;),</span>
+<span class="sd">    ... )</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    shape : float or tuple of float</span>
+<span class="sd">        Shape of the output image in nm.</span>
+<span class="sd">    sigma : float or tuple of float</span>
+<span class="sd">        Standard deviation of the Gaussian particle in nm.</span>
+<span class="sd">    shift : tuple of float, optional</span>
+<span class="sd">        Shift of the Gaussian particle from the center in nm.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">isscalar</span><span class="p">(</span><span class="n">sigma</span><span class="p">):</span>
+        <span class="n">sigma</span> <span class="o">=</span> <span class="p">(</span><span class="n">sigma</span><span class="p">,)</span> <span class="o">*</span> <span class="mi">3</span>
+    <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">isscalar</span><span class="p">(</span><span class="n">shape</span><span class="p">):</span>
+        <span class="n">shape</span> <span class="o">=</span> <span class="p">(</span><span class="n">shape</span><span class="p">,)</span> <span class="o">*</span> <span class="mi">3</span>
+    <span class="n">sigma_px</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">sigma</span><span class="p">)</span> <span class="o">/</span> <span class="n">scale</span>
+    <span class="n">shape_subpix</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">shape</span><span class="p">)</span> <span class="o">/</span> <span class="n">scale</span>
+    <span class="n">center_subpix</span> <span class="o">=</span> <span class="n">shape_subpix</span> <span class="o">+</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">shift</span><span class="p">)</span> <span class="o">/</span> <span class="n">scale</span>
+    <span class="n">shape_px</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">shape_subpix</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">))</span>
+
+    <span class="n">crds</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">indices</span><span class="p">(</span><span class="n">shape_px</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span>
+        <span class="o">-</span><span class="mf">0.5</span>
+        <span class="o">*</span> <span class="nb">sum</span><span class="p">((</span><span class="n">xx</span> <span class="o">-</span> <span class="n">c</span><span class="p">)</span> <span class="o">/</span> <span class="n">sg</span> <span class="k">for</span> <span class="n">xx</span><span class="p">,</span> <span class="n">c</span><span class="p">,</span> <span class="n">sg</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">crds</span><span class="p">,</span> <span class="n">center_subpix</span><span class="p">,</span> <span class="n">sigma_px</span><span class="p">))</span> <span class="o">**</span> <span class="mi">2</span>
+    <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="from_array"><a class="viewcode-back" href="../../../apidoc/acryo.pipe.html#acryo.pipe.from_array">[docs]</a><span class="nd">@provider_function</span>
+<span class="k">def</span> <span class="nf">from_array</span><span class="p">(</span>
+    <span class="n">scale</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">img</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">original_scale</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">,</span> <span class="n">tol</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.01</span>
+<span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    An image provider function using existing image array.</span>
+
+<span class="sd">    This function will provide a subtomogram loader with a resized image from an array.</span>
+<span class="sd">    Will be used for the template images or the mask images.</span>
+
+<span class="sd">    &gt;&gt;&gt; loader.align(</span>
+<span class="sd">    ...     template=from_array(img, original_scale=0.28),</span>
+<span class="sd">    ...     mask=from_file(&quot;path/to/mask.mrc&quot;),</span>
+<span class="sd">    ... )</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    img : np.ndarray</span>
+<span class="sd">        Input image array. Must be 3D.</span>
+<span class="sd">    original_scale : float, optional</span>
+<span class="sd">        If given, this value will be used as the image scale (nm/pixel) instead</span>
+<span class="sd">        of the scale extracted from the image metadata.</span>
+<span class="sd">    tol : float</span>
+<span class="sd">        Tolerance of the scale difference. If the relative difference is smaller than</span>
+<span class="sd">        this, the image will not be resized.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">original_scale</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">original_scale</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;original_scale must be positive&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">img</span><span class="o">.</span><span class="n">ndim</span> <span class="o">!=</span> <span class="mi">3</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;img must be 3D&quot;</span><span class="p">)</span>
+    <span class="n">ratio</span> <span class="o">=</span> <span class="n">original_scale</span> <span class="o">/</span> <span class="n">scale</span>
+    <span class="k">if</span> <span class="nb">abs</span><span class="p">(</span><span class="n">ratio</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">&lt;</span> <span class="n">tol</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">img</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">ndi</span><span class="o">.</span><span class="n">zoom</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">ratio</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">prefilter</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;reflect&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">out</span><span class="o">.</span><span class="n">dtype</span> <span class="o">==</span> <span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">:</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span></div>
 </pre></div>
 
            </div>

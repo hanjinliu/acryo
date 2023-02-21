@@ -42,6 +42,7 @@
               <ul>
 <li class="toctree-l1"><a class="reference internal" href="../../../main/molecules.html">Molecules</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../main/loader.html">Subtomogram Loader</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../main/caching.html">Cache Subtomograms</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../main/pipe.html">Piping Images to the Loader</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../main/alignment.html">Alignment Model</a></li>
 </ul>
@@ -92,6 +93,7 @@
     <span class="kn">from</span> <span class="nn">typing_extensions</span> <span class="kn">import</span> <span class="n">Self</span>
     <span class="kn">from</span> <span class="nn">numpy.typing</span> <span class="kn">import</span> <span class="n">NDArray</span>
     <span class="kn">from</span> <span class="nn">acryo.classification</span> <span class="kn">import</span> <span class="n">PcaClassifier</span>
+    <span class="kn">from</span> <span class="nn">dask.delayed</span> <span class="kn">import</span> <span class="n">Delayed</span>
 
 
 <div class="viewcode-block" id="SubtomogramLoader"><a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.SubtomogramLoader">[docs]</a><span class="k">class</span> <span class="nc">SubtomogramLoader</span><span class="p">(</span><span class="n">LoaderBase</span><span class="p">):</span>
@@ -260,8 +262,8 @@
 <span class="sd">        list of Delayed object</span>
 <span class="sd">            Each object returns a subtomogram on execution by ``da.compute``.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
-        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache_available</span><span class="p">(</span><span class="n">output_shape</span><span class="p">):</span>
-            <span class="k">return</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_cached_dask_array</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">))]</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">cached</span> <span class="o">:=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_cached_array</span><span class="p">(</span><span class="n">output_shape</span><span class="p">))</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">[</span><span class="n">cached</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">))]</span>
         <span class="n">image</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">image</span>
         <span class="n">scale</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">scale</span>
         <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">):</span>
@@ -271,7 +273,7 @@
             <span class="n">_prep</span> <span class="o">=</span> <span class="n">_utils</span><span class="o">.</span><span class="n">prepare_affine_cornersafe</span>
         <span class="k">else</span><span class="p">:</span>
             <span class="n">_prep</span> <span class="o">=</span> <span class="n">_utils</span><span class="o">.</span><span class="n">prepare_affine</span>
-        <span class="n">tasks</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">tasks</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">Delayed</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
         <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">)):</span>
             <span class="n">subvol</span><span class="p">,</span> <span class="n">mtx</span> <span class="o">=</span> <span class="n">_prep</span><span class="p">(</span>
                 <span class="n">image</span><span class="p">,</span>
@@ -279,15 +281,19 @@
                 <span class="n">output_shape</span><span class="o">=</span><span class="n">output_shape</span><span class="p">,</span>
                 <span class="n">rot</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">molecules</span><span class="o">.</span><span class="n">rotator</span><span class="p">[</span><span class="n">i</span><span class="p">],</span>
             <span class="p">)</span>
-            <span class="n">task</span> <span class="o">=</span> <span class="n">_utils</span><span class="o">.</span><span class="n">rotated_crop</span><span class="p">(</span>
-                <span class="n">subvol</span><span class="p">,</span>
-                <span class="n">mtx</span><span class="p">,</span>
+            <span class="n">task</span> <span class="o">=</span> <span class="n">da</span><span class="o">.</span><span class="n">from_delayed</span><span class="p">(</span>
+                <span class="n">_utils</span><span class="o">.</span><span class="n">rotated_crop</span><span class="p">(</span>
+                    <span class="n">subvol</span><span class="p">,</span>
+                    <span class="n">mtx</span><span class="p">,</span>
+                    <span class="n">shape</span><span class="o">=</span><span class="n">output_shape</span><span class="p">,</span>
+                    <span class="n">order</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">order</span><span class="p">,</span>
+                    <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;constant&quot;</span><span class="p">,</span>
+                    <span class="n">cval</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">,</span>
+                <span class="p">),</span>
                 <span class="n">shape</span><span class="o">=</span><span class="n">output_shape</span><span class="p">,</span>
-                <span class="n">order</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">order</span><span class="p">,</span>
-                <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;constant&quot;</span><span class="p">,</span>
-                <span class="n">cval</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">,</span>
+                <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span>
             <span class="p">)</span>
-            <span class="n">tasks</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">da</span><span class="o">.</span><span class="n">from_delayed</span><span class="p">(</span><span class="n">task</span><span class="p">,</span> <span class="n">shape</span><span class="o">=</span><span class="n">output_shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">))</span>
+            <span class="n">tasks</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">task</span><span class="p">)</span>
 
         <span class="k">return</span> <span class="n">tasks</span></div></div>
 

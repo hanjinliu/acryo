@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cache Subtomograms &mdash; acryo 0.2.0 documentation</title>
+      <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="../_static/css/theme.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+
+        <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
+        <script src="../_static/jquery.js"></script>
+        <script src="../_static/underscore.js"></script>
+        <script src="../_static/doctools.js"></script>
+        <script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+        <script>mermaid.initialize({startOnLoad:true});</script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Piping Images to the Loader" href="pipe.html" />
+    <link rel="prev" title="Subtomogram Loader" href="loader.html" />
+</head>
+
+<body class="wy-body-for-nav">
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+            <a href="../index.html" class="icon icon-home"> acryo
+          </a>
+              <div class="version">
+                0.2.0
+              </div>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="molecules.html">Molecules</a></li>
+<li class="toctree-l1"><a class="reference internal" href="loader.html">Subtomogram Loader</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Cache Subtomograms</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#create-cache-of-loading-tasks">Create Cache of Loading Tasks</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#cache-inheritance">Cache Inheritance</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="pipe.html">Piping Images to the Loader</a></li>
+<li class="toctree-l1"><a class="reference internal" href="alignment.html">Alignment Model</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">acryo</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home"></a> &raquo;</li>
+      <li>Cache Subtomograms</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/main/caching.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+
+  <section id="cache-subtomograms">
+<h1>Cache Subtomograms<a class="headerlink" href="#cache-subtomograms" title="Permalink to this headline"></a></h1>
+<p>Loading subtomograms from a tomogram is a computationally expensive operation; The proper
+regions of the tomogram must be read from disk, and will be shifted/rotated to the proper
+position/orientation.</p>
+<p>Nevertheless, sometimes you’ll have to load subtomograms from the same places many times.
+A typical example is when you want to create a template image by subtomogram averaging,
+and use the template to align molecules.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">acryo</span> <span class="kn">import</span> <span class="n">SubtomogramLoader</span><span class="p">,</span> <span class="n">Molecules</span>
+<span class="n">loader</span> <span class="o">=</span> <span class="n">SubtomogramLoader</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span>
+    <span class="s2">&quot;/path/to/tomogram.mrc&quot;</span><span class="p">,</span>
+    <span class="n">molecules</span><span class="o">=</span><span class="n">Molecules</span><span class="o">.</span><span class="n">from_csv</span><span class="p">(</span><span class="s2">&quot;/path/to/molecules.csv&quot;</span><span class="p">),</span>
+    <span class="n">output_shape</span><span class="o">=</span><span class="p">(</span><span class="mi">50</span><span class="p">,</span> <span class="mi">50</span><span class="p">,</span> <span class="mi">50</span><span class="p">),</span>
+<span class="p">)</span>
+
+<span class="n">template</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">average</span><span class="p">()</span>  <span class="c1"># create template</span>
+<span class="n">aligned</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">align</span><span class="p">(</span><span class="n">template</span><span class="p">)</span>  <span class="c1"># align molecules to template</span>
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Of course, this simple example is what <code class="xref py py-meth docutils literal notranslate"><span class="pre">align_no_template()</span></code> does in more efficient
+way.</p>
+</div>
+<p>In this example, same set of subtomograms is loaded twice.</p>
+<section id="create-cache-of-loading-tasks">
+<h2>Create Cache of Loading Tasks<a class="headerlink" href="#create-cache-of-loading-tasks" title="Permalink to this headline"></a></h2>
+<p>Subtomogram loaders have <code class="xref py py-meth docutils literal notranslate"><span class="pre">cached()</span></code> context manager. Within this context, subtomograms
+of the given shape will temporarily be saved in a file, and will be loaded from there if
+possible.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">with</span> <span class="n">loader</span><span class="o">.</span><span class="n">cached</span><span class="p">():</span>  <span class="c1"># take a while to create cache</span>
+    <span class="n">template</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">average</span><span class="p">()</span>  <span class="c1"># much faster</span>
+    <span class="n">aligned</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">align</span><span class="p">(</span><span class="n">template</span><span class="p">)</span>  <span class="c1"># much faster</span>
+</pre></div>
+</div>
+</section>
+<section id="cache-inheritance">
+<h2>Cache Inheritance<a class="headerlink" href="#cache-inheritance" title="Permalink to this headline"></a></h2>
+<p><code class="xref py py-meth docutils literal notranslate"><span class="pre">filter()</span></code> and <code class="xref py py-meth docutils literal notranslate"><span class="pre">groupby()</span></code> inherits the cache of the parent loader. For instance,
+if you want to create a template from the well-aligned molecules, you can do the following:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">with</span> <span class="n">loader</span><span class="o">.</span><span class="n">cached</span><span class="p">():</span>  <span class="c1"># take a while to create cache</span>
+    <span class="n">loader_filt</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&quot;score&quot;</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mf">0.7</span><span class="p">)</span>
+    <span class="n">template</span> <span class="o">=</span> <span class="n">loader_filt</span><span class="o">.</span><span class="n">average</span><span class="p">()</span>  <span class="c1"># much faster</span>
+    <span class="n">aligned</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">align</span><span class="p">(</span><span class="n">template</span><span class="p">)</span>  <span class="c1"># much faster</span>
+</pre></div>
+</div>
+<p>Here, <code class="docutils literal notranslate"><span class="pre">loader_filt.average()</span></code> requires a subset of subtomograms that are already cached by
+<code class="docutils literal notranslate"><span class="pre">loader.cached()</span></code>, which is also available from <code class="docutils literal notranslate"><span class="pre">loader_filt.average()</span></code>.</p>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="loader.html" class="btn btn-neutral float-left" title="Subtomogram Loader" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="pipe.html" class="btn btn-neutral float-right" title="Piping Images to the Loader" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2023, Hanjin Liu.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+
+</body>
+</html>

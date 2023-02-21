@@ -73,6 +73,7 @@ other arguments required to construct a :class:`scipy.spatial.transform.Rotation
 - :meth:`Molecules.from_rotvec` ... construction using rotation vector.
 - :meth:`Molecules.from_quat` ... construction using quaternions.
 - :meth:`Molecules.from_matrix` ... construction using rotation matrix.
+- :meth:`Molecules.from_random` ... construction using random rotations.
 
 .. code-block:: python
 
