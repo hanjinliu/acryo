@@ -222,6 +222,9 @@ class Molecules:
                 df = pl.DataFrame(value)
             else:
                 df = value
+            if df.shape == (0, 0):
+                self._features = None
+                return None
             if len(df) != self.pos.shape[0]:
                 raise ValueError(
                     f"Length mismatch. There are {self.pos.shape[0]} molecules but "
@@ -842,6 +845,22 @@ class Molecules:
     ) -> Self:
         df = self.to_dataframe()
         return self.__class__.from_dataframe(df.sort(by=by, reverse=reverse))
+
+    def with_features(self, exprs) -> Self:
+        """Return a new instance with updated features."""
+        return self.__class__(
+            self.pos,
+            self.rotator,
+            features=self.features.with_columns(exprs),
+        )
+
+    def drop_features(self, expr: pl.Expr | Sequence[pl.Expr]) -> Self:
+        """Return a new instance with updated features."""
+        return self.__class__(
+            self.pos,
+            self.rotator,
+            features=self.features.drop(expr),
+        )
 
 
 _K = TypeVar("_K", bound=Hashable)

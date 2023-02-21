@@ -73,6 +73,8 @@ class LoaderBase(ABC):
             order, output_shape, scale, corner_safe, ndim
         )
 
+    _CACHE = CACHE
+
     @abstractproperty
     def molecules(self) -> Molecules:
         """All the molecules"""
@@ -796,7 +798,14 @@ class LoaderBase(ABC):
         predicate: pl.Expr | str | pl.Series | list[bool] | np.ndarray,
     ) -> Self:
         """Return a new loader with filtered molecules."""
-        return self.replace(molecules=self.molecules.filter(predicate))
+        out = self.replace(molecules=self.molecules.filter(predicate))
+        if (cached := self._get_cached_array(shape=None)) is not None:
+            if isinstance(predicate, (str, pl.Expr)):
+                sl = self.molecules.features.select(predicate).to_numpy().ravel()
+            else:
+                sl = np.asarray(predicate)
+            CACHE.cache_array(cached[sl], id(out))
+        return out
 
     @overload
     def groupby(self, by: str | pl.Expr) -> LoaderGroup[str, Self]:
@@ -807,6 +816,14 @@ class LoaderBase(ABC):
         ...
 
     def groupby(self, by):
+        """
+        Group loader by given feature column(s).
+
+        >>> for key, loader in loader.groupby("score"):
+        ...     print(key, loader)
+        """
+        if not isinstance(by, (str, pl.Expr)):
+            by = tuple(by)
         return LoaderGroup._from_loader(self, by)
 
     def _get_output_shape(self, output_shape: _ShapeType) -> tuple[pixel, ...]:
