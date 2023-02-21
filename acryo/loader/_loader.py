@@ -188,8 +188,8 @@ class SubtomogramLoader(LoaderBase):
         list of Delayed object
             Each object returns a subtomogram on execution by ``da.compute``.
         """
-        if self._cache_available(output_shape):
-            return [self._cached_dask_array[i] for i in range(len(self))]
+        if (cached := self._get_cached_array(output_shape)) is not None:
+            return [cached[i] for i in range(len(self))]
         image = self.image
         scale = self.scale
         if isinstance(image, np.ndarray):

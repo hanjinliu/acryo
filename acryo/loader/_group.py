@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import (
     Generic,
-    Hashable,
     Iterable,
     Iterator,
     Mapping,
     TypeVar,
     TYPE_CHECKING,
+    Union,
 )
 import numpy as np
 from numpy.typing import NDArray
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
         AggFunction,
     )
 
-_K = TypeVar("_K", bound=Hashable)
+_K = TypeVar("_K", bound=Union[str, tuple[str, ...]])
 _L = TypeVar("_L", bound="LoaderBase")
 
 
@@ -457,14 +457,22 @@ class LoaderGroupByIterator:
 
     def __iter__(self) -> Iterator[_K, _L]:
         loader = self._loader
-        for key, mole in loader.molecules.groupby(self._by):
+        cached = loader._get_cached_array(shape=None)
+        index_col_name = "__index"
+        if index_col_name in loader.molecules.features:
+            index_col_name += "_"
+        index = pl.Series(index_col_name, np.arange(loader.count()))
+        for key, mole in loader.molecules.with_features(index).groupby(self._by):
             _loader = loader.replace(
-                molecules=mole,
+                molecules=mole.drop_features(index_col_name),
                 order=self._order,
                 scale=self._scale,
                 output_shape=self._output_shape,
                 corner_safe=self._corner_safe,
             )
+            if cached is not None:
+                sl = mole.features[index_col_name].to_numpy()
+                loader._CACHE.cache_array(cached[sl], id(_loader))
             yield key, _loader
 
 

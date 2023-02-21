@@ -14,7 +14,7 @@ def test_replace():
 
 
 @lru_cache(maxsize=1)
-def _get_collection():
+def _get_batch_loader():
     collection = BatchLoader()
     img0 = np.zeros((10, 10, 10))
     img1 = np.ones((10, 10, 10))
@@ -37,20 +37,20 @@ def _get_collection():
 
 
 def test_add_tomograms():
-    collection = _get_collection()
+    collection = _get_batch_loader()
 
     assert list(collection.images.keys()) == [0, 1]
     assert len(collection.molecules) == 6
 
 
 def test_get_loader():
-    collection = _get_collection()
+    collection = _get_batch_loader()
     assert collection.loaders[0].image.mean() == 0
     assert collection.loaders[1].image.mean() == 1
 
 
 def test_iter_loader():
-    collection = _get_collection()
+    collection = _get_batch_loader()
     for _ in collection.loaders:
         pass
 
@@ -83,17 +83,17 @@ def test_filter():
 
 
 def test_averaging():
-    collection = _get_collection()
+    collection = _get_batch_loader()
     collection.average((3, 3, 3))
 
 
 def test_alignment():
-    collection = _get_collection()
+    collection = _get_batch_loader()
     out = collection.align(np.ones((3, 3, 3), dtype=np.float32))
     assert len(out.molecules) == 6
 
 
 def test_align_no_template():
-    collection = _get_collection()
+    collection = _get_batch_loader()
     out = collection.replace(output_shape=(3, 3, 3)).align_no_template()
     assert len(out.molecules) == 6

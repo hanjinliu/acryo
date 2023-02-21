@@ -14,7 +14,6 @@ from typing import (
     Union,
     overload,
 )
-import tempfile
 import numpy as np
 from numpy.typing import NDArray
 from dask import array as da
@@ -34,6 +33,7 @@ from acryo._types import nm, pixel
 from acryo.molecules import Molecules
 from acryo.loader import _misc
 from acryo.loader._group import LoaderGroup
+from acryo.loader._cache import SubtomogramCache
 from acryo.pipe._classes import ImageProvider, ImageConverter
 
 if TYPE_CHECKING:
@@ -57,6 +57,9 @@ class Unset:
         return "Unset"
 
 
+CACHE = SubtomogramCache()
+
+
 class LoaderBase(ABC):
     def __init__(
         self,
@@ -69,7 +72,8 @@ class LoaderBase(ABC):
         self._order, self._output_shape, self._scale, self._corner_safe = check_input(
             order, output_shape, scale, corner_safe, ndim
         )
-        self._cached_dask_array: da.Array | None = None
+
+    _CACHE = CACHE
 
     @abstractproperty
     def molecules(self) -> Molecules:
@@ -106,6 +110,9 @@ class LoaderBase(ABC):
     ) -> list[da.Array]:
         ...
 
+    def _get_cached_array(self, shape: tuple[int, int, int]) -> da.Array | None:
+        return CACHE.get_cache(id(self), shape)
+
     def construct_dask(
         self,
         output_shape: pixel | tuple[pixel, ...] | None = None,
@@ -123,8 +130,8 @@ class LoaderBase(ABC):
         """
         output_shape = self._get_output_shape(output_shape)
 
-        if self._cache_available(output_shape):
-            return self._cached_dask_array
+        if (cached := self._get_cached_array(output_shape)) is not None:
+            return cached
 
         tasks = self.construct_loading_tasks(output_shape=output_shape)
         out = da.stack(tasks, axis=0)
@@ -223,7 +230,7 @@ class LoaderBase(ABC):
             )
         )
 
-    def create_cache(self, output_shape: _ShapeType = None) -> da.Array:
+    def _create_cache(self, output_shape: _ShapeType = None) -> da.Array:
         """
         Create cached stack of subtomograms.
 
@@ -239,28 +246,10 @@ class LoaderBase(ABC):
             A lazy-loading array that uses the memory-mapped array.
         """
         output_shape = self._get_output_shape(output_shape)
-        if self._cache_available(output_shape):
-            # cache is already available
-            return self._cached_dask_array
-        dask_array = self.construct_dask(output_shape=output_shape)
-        shape = dask_array.shape
-        with tempfile.NamedTemporaryFile() as ntf:
-            mmap = np.memmap(ntf, dtype=np.float32, mode="w+", shape=shape)
-
-        da.store(dask_array, mmap, compute=True)
-
-        darr = da.from_array(
-            mmap,
-            chunks=("auto",) + self.output_shape,  # type: ignore
-            meta=np.array([], dtype=np.float32),
-        )
-        self._cached_dask_array = darr
-        return darr
-
-    def clear_cache(self):
-        del self._cached_dask_array
-        self._cached_dask_array = None
-        return None
+        if (cached := self._get_cached_array(output_shape)) is not None:
+            return cached
+        dsk = self.construct_dask(output_shape=output_shape)
+        return CACHE.cache_array(dsk, id(self))
 
     @contextmanager
     def cached(self, output_shape: _ShapeType = None) -> ContextManager[da.Array]:
@@ -270,13 +259,8 @@ class LoaderBase(ABC):
         Subtomograms are cached in a temporary memory-map file. Within this context
         loading subtomograms of given output shape will be faster.
         """
-        old_cache = self._cached_dask_array
-        arr = self.create_cache(output_shape=output_shape)
-        try:
-            yield arr
-        finally:
-            del self._cached_dask_array
-            self._cached_dask_array = old_cache
+        with CACHE.temporal():
+            yield self._create_cache(output_shape=output_shape)
 
     def asnumpy(self, output_shape: _ShapeType = None) -> NDArray[np.float32]:
         """Load all the subtomograms as a 4D numpy array."""
@@ -814,7 +798,14 @@ class LoaderBase(ABC):
         predicate: pl.Expr | str | pl.Series | list[bool] | np.ndarray,
     ) -> Self:
         """Return a new loader with filtered molecules."""
-        return self.replace(molecules=self.molecules.filter(predicate))
+        out = self.replace(molecules=self.molecules.filter(predicate))
+        if (cached := self._get_cached_array(shape=None)) is not None:
+            if isinstance(predicate, (str, pl.Expr)):
+                sl = self.molecules.features.select(predicate).to_numpy().ravel()
+            else:
+                sl = np.asarray(predicate)
+            CACHE.cache_array(cached[sl], id(out))
+        return out
 
     @overload
     def groupby(self, by: str | pl.Expr) -> LoaderGroup[str, Self]:
@@ -825,12 +816,15 @@ class LoaderBase(ABC):
         ...
 
     def groupby(self, by):
-        return LoaderGroup._from_loader(self, by)
+        """
+        Group loader by given feature column(s).
 
-    def _cache_available(self, shape: tuple[pixel, ...]) -> bool:
-        if self._cached_dask_array is None:
-            return False
-        return self._cached_dask_array.shape[1:] == shape
+        >>> for key, loader in loader.groupby("score"):
+        ...     print(key, loader)
+        """
+        if not isinstance(by, (str, pl.Expr)):
+            by = tuple(by)
+        return LoaderGroup._from_loader(self, by)
 
     def _get_output_shape(self, output_shape: _ShapeType) -> tuple[pixel, ...]:
         if output_shape is None:
