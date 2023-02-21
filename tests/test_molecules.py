@@ -191,3 +191,8 @@ def test_io():
         mol.to_csv(path)
         mol0 = Molecules.from_csv(path)
         assert_allclose(mol.to_dataframe(), mol0.to_dataframe())
+
+
+def test_random():
+    mol = Molecules.from_random(np.zeros((4, 3)), seed=0)
+    assert len(mol) == 4

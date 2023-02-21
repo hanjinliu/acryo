@@ -204,6 +204,17 @@ class Molecules:
             features=features,
         )
 
+    @classmethod
+    def from_random(
+        cls,
+        pos: np.ndarray,
+        seed: int | None = None,
+        features: pl.DataFrame | None = None,
+    ) -> Self:
+        """Create randomly oriented molecules from given positions."""
+        rot = Rotation.random(len(pos), random_state=seed)
+        return cls(pos, rot, features=features)
+
     @property
     def features(self) -> pl.DataFrame:
         """Molecules features."""
@@ -757,6 +768,25 @@ class Molecules:
             self._rotator = rot
             out = self
         return out
+
+    def rotate_random(self, copy: bool = True, seed: int | None = None) -> Self:
+        """
+        Rotate molecules randomly.
+
+        Parameters
+        ----------
+        copy : bool, default is True
+            If true, create a new instance, otherwise overwrite the existing instance.
+        seed : int, default is None
+            Random seed to generate randomized rotators.
+
+        Returns
+        -------
+        Molecules
+            Instance with updated orientation.
+        """
+        rotator = Rotation.random(len(self), random_state=seed)
+        return self.rotate_by(rotator, copy=copy)
 
     def linear_transform(
         self,

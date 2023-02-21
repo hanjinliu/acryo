@@ -61,6 +61,8 @@ CACHE = SubtomogramCache()
 
 
 class LoaderBase(ABC):
+    """The base class for subtomogram loaders."""
+
     def __init__(
         self,
         order: int = 3,
