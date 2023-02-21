@@ -5,7 +5,8 @@ from functools import lru_cache
 
 @lru_cache(maxsize=1)
 def _get_group():
-    img = np.zeros((30, 30, 35), dtype=np.float32)
+    rng = np.random.default_rng()
+    img = rng.normal(0, 1, size=(30, 30, 35)).astype(np.float32)
     mole = Molecules(
         pos=[[15, 15, 10 + i] for i in range(15)], features={"x": np.arange(15) % 3}
     )
@@ -51,5 +52,5 @@ def test_apply():
 
 def test_fsc():
     group = _get_group()
-    group.fsc(dfreq=0.2)
-    group.fsc(n_set=3, dfreq=0.2)
+    group.fsc(dfreq=0.1)
+    group.fsc(n_set=3, dfreq=0.1)

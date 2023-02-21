@@ -129,7 +129,6 @@ def fourier_shell_correlation(
     cov = f0.real * f1.real + f0.imag * f1.imag
     pw0 = f0.real**2 + f0.imag**2
     pw1 = f1.real**2 + f1.imag**2
-
     out = radial_sum(cov) / np.sqrt(radial_sum(pw0) * radial_sum(pw1))
     freq = (np.arange(len(out)) + 0.5) * dfreq
     return freq, out
