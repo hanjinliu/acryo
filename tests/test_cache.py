@@ -11,7 +11,7 @@ def _get_loader():
         da.zeros((10, 10, 10)),
         Molecules(
             pos=np.zeros((4, 3)),
-            features={"a": [0, 1, 0, 1]},
+            features={"a": [0, 1, 0, 0]},
         ),
         output_shape=(5, 5, 5),
     )
