@@ -911,6 +911,8 @@ def check_input(
     # check output_shape
     if isinstance(output_shape, Unset):
         _output_shape = output_shape
+    elif isinstance(output_shape, None):
+        _output_shape = Unset()
     else:
         _output_shape = _misc.normalize_shape(output_shape, ndim=ndim)
 
