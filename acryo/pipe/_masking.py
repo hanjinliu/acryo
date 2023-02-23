@@ -43,33 +43,33 @@ def threshold_otsu(
 
 
 @converter_function
-def dilation(img: NDArray[np.bool_], scale: nm, radius: float) -> NDArray[np.bool_]:
+def dilation(img: NDArray[np.bool_], scale: nm, radius: nm) -> NDArray[np.bool_]:
     """
     Pipe operation that dilate (or erode) a binary image using a circular structure.
 
     Parameters
     ----------
     radius : float
-        Radius of the structure element. If negative, erosion is applied.
+        Radius of the structure element in nanometer. If negative, erosion is applied.
     """
-    if radius == 0:
+    radius_px = abs(radius / scale)
+    if radius_px < 1:
         return img
-    radius_px = radius / scale
-    r = abs(radius_px)
-    rceil = int(np.ceil(2 * r + 1))
-    zz, yy, xx = np.indices((rceil,) * 3)
+    r = int(np.ceil(radius_px))
+    size = 2 * r + 1
+    zz, yy, xx = np.indices((size,) * 3)
     structure = (xx - r) ** 2 + (yy - r) ** 2 + (zz - r) ** 2 <= r**2
-    if radius_px < 0:
+    if radius < 0:
         out = ndi.binary_erosion(img, structure=structure, border_value=False)
-    elif radius_px > 0:
+    elif radius > 0:
         out = ndi.binary_dilation(img, structure=structure, border_value=False)
     return out
 
 
 @converter_function
 def gaussian_smooth(
-    img: NDArray[np.bool_], scale: nm, sigma: float
-) -> NDArray[np.bool_]:
+    img: NDArray[np.bool_], scale: nm, sigma: nm
+) -> NDArray[np.float32]:
     """
     Pipe operation that smooth a binary image using a Gaussian kernel.
 
@@ -78,13 +78,15 @@ def gaussian_smooth(
     sigma : float
         Standard deviation of the Gaussian kernel.
     """
+    if sigma == 0:
+        return img.astype(np.float32)
     img = ~img
     dist = ndi.distance_transform_edt(img)
-    blurred_mask = np.exp(-(dist**2) / 2 / (sigma / scale) ** 2)
+    blurred_mask = np.exp(-(dist**2) / 2 / (sigma / scale) ** 2, dtype=np.float32)
     return blurred_mask
 
 
-def soft_otsu(sigma: float = 1.0, radius: float = 1.0, bins: int = 256):
+def soft_otsu(sigma: nm = 1.0, radius: nm = 1.0, bins: int = 256):
     """
     Pipe operation of soft Otsu thresholding.
 
@@ -106,4 +108,5 @@ def soft_otsu(sigma: float = 1.0, radius: float = 1.0, bins: int = 256):
     bins : int, default is 256
         Number of bins to build histogram.
     """
-    return gaussian_smooth(sigma) @ dilation(radius) @ threshold_otsu(bins)
+    out = gaussian_smooth(sigma) @ dilation(radius) @ threshold_otsu(bins)
+    return out.with_name(f"soft_otsu({sigma=:.2f}, {radius=:.2f}, {bins=})")

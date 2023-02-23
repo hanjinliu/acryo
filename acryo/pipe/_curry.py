@@ -28,7 +28,9 @@ def provider_function(
 
     def inner(*args, **kwargs):
         _fn = _assert_1_arg(fn)
-        return ImageProvider(lambda scale: _fn(scale, *args, **kwargs))
+        return ImageProvider(lambda scale: _fn(scale, *args, **kwargs)).with_name(
+            _format_args(fn, *args, **kwargs)
+        )
 
     _update_wrapper(inner, fn, npop=1)
     return inner
@@ -55,7 +57,9 @@ def converter_function(
 
     def inner(*args, **kwargs):
         _fn = _assert_2_args(fn)
-        return ImageConverter(lambda img, scale: _fn(img, scale, *args, **kwargs))
+        return ImageConverter(
+            lambda img, scale: _fn(img, scale, *args, **kwargs)
+        ).with_name(_format_args(fn, *args, **kwargs))
 
     _update_wrapper(inner, fn, npop=2)
     return inner
@@ -114,3 +118,21 @@ def _update_attr(f, wrapped):
             pass
         else:
             setattr(f, name, value)
+
+
+# formatter
+def _format(arg: Any) -> str:
+    if isinstance(arg, (float, complex)):
+        return format(arg, ".2f")
+    elif hasattr(arg, "__array__"):
+        return "..."
+    else:
+        return repr(arg)
+
+
+def _format_args(fn: Callable, *args, **kwargs):
+    _args = [_format(arg) for arg in args]
+    _kwargs = [f"{k}={_format(v)}" for k, v in kwargs.items()]
+
+    s = ", ".join(_args + _kwargs)
+    return f"{fn.__name__}({s})"

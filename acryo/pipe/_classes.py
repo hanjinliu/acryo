@@ -11,9 +11,14 @@ from acryo._types import nm
 class _Pipeline:
     def __init__(self, fn: Callable):
         self._func = fn
+        self.__name__ = getattr(fn, "__name__", repr(fn))
+
+    def with_name(self, name: str) -> Self:
+        self.__name__ = name
+        return self
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self._func.__name__})"
+        return f"{self.__class__.__name__}<{self.__name__}>"
 
     def __radd__(self, other) -> Self:
         return self + other
@@ -32,7 +37,7 @@ class ImageProvider(_Pipeline):
     """Function that provides an image at a given scale."""
 
     def __init__(self, provider: Callable[[nm], NDArray[np.float32]]):
-        self._func = provider
+        super().__init__(provider)
 
     def __call__(self, scale: nm) -> NDArray[np.float32]:
         out = self._func(scale)
@@ -41,58 +46,80 @@ class ImageProvider(_Pipeline):
 
     def __add__(self, other) -> ImageProvider:
         if isinstance(other, ImageProvider):
-            return self.__class__(lambda scale: self(scale) + other(scale))
+            return self.__class__(lambda scale: self(scale) + other(scale)).with_name(
+                f"({self.__name__} + {other.__name__})"
+            )
         return self.__class__(lambda scale: self(scale) + other)
 
     def __sub__(self, other) -> ImageProvider:
         if isinstance(other, ImageProvider):
-            return self.__class__(lambda scale: self(scale) - other(scale))
+            return self.__class__(lambda scale: self(scale) - other(scale)).with_name(
+                f"({self.__name__} - {other.__name__})"
+            )
         return self.__class__(lambda scale: self(scale) - other)
 
     def __mul__(self, other) -> ImageProvider:
         if isinstance(other, ImageProvider):
-            return self.__class__(lambda scale: self(scale) * other(scale))
+            return self.__class__(lambda scale: self(scale) * other(scale)).with_name(
+                f"{self.__name__} * {other.__name__}"
+            )
         return self.__class__(lambda scale: self(scale) * other)
 
     def __truediv__(self, other) -> ImageProvider:
         if np.isscalar(other) and other == 0:
             raise ZeroDivisionError("Cannot divide by zero.")
         if isinstance(other, ImageProvider):
-            return self.__class__(lambda scale: self(scale) / other(scale))
+            return self.__class__(lambda scale: self(scale) / other(scale)).with_name(
+                f"{self.__name__} / {other.__name__}"
+            )
         return self.__class__(lambda scale: self(scale) / other)
 
     def __eq__(self, other) -> ImageProvider:
         if isinstance(other, ImageProvider):
-            return self.__class__(lambda scale: self(scale) == other(scale))
+            return self.__class__(lambda scale: self(scale) == other(scale)).with_name(
+                f"{self.__name__} == {other.__name__}"
+            )
         return self.__class__(lambda scale: self(scale) == other)
 
     def __ne__(self, other) -> ImageProvider:
         if isinstance(other, ImageProvider):
-            return self.__class__(lambda scale: self(scale) != other(scale))
+            return self.__class__(lambda scale: self(scale) != other(scale)).with_name(
+                f"{self.__name__} != {other.__name__}"
+            )
         return self.__class__(lambda scale: self(scale) != other)
 
     def __lt__(self, other) -> ImageProvider:
         if isinstance(other, ImageProvider):
-            return self.__class__(lambda scale: self(scale) < other(scale))
+            return self.__class__(lambda scale: self(scale) < other(scale)).with_name(
+                f"{self.__name__} < {other.__name__}"
+            )
         return self.__class__(lambda scale: self(scale) < other)
 
     def __le__(self, other) -> ImageProvider:
         if isinstance(other, ImageProvider):
-            return self.__class__(lambda scale: self(scale) <= other(scale))
+            return self.__class__(lambda scale: self(scale) <= other(scale)).with_name(
+                f"{self.__name__} <= {other.__name__}"
+            )
         return self.__class__(lambda scale: self(scale) <= other)
 
     def __gt__(self, other) -> ImageProvider:
         if isinstance(other, ImageProvider):
-            return self.__class__(lambda scale: self(scale) > other(scale))
+            return self.__class__(lambda scale: self(scale) > other(scale)).with_name(
+                f"{self.__name__} > {other.__name__}"
+            )
         return self.__class__(lambda scale: self(scale) > other)
 
     def __ge__(self, other) -> ImageProvider:
         if isinstance(other, ImageProvider):
-            return self.__class__(lambda scale: self(scale) >= other(scale))
+            return self.__class__(lambda scale: self(scale) >= other(scale)).with_name(
+                f"{self.__name__} >= {other.__name__}"
+            )
         return self.__class__(lambda scale: self(scale) >= other)
 
     def __neg__(self) -> ImageProvider:
-        return self.__class__(lambda scale: -self(scale))
+        return self.__class__(lambda scale: -self(scale)).with_name(
+            f"(-{self.__name__})"
+        )
 
 
 class ImageConverter(_Pipeline):
@@ -101,7 +128,7 @@ class ImageConverter(_Pipeline):
     def __init__(
         self, converter: Callable[[NDArray[np.float32], nm], NDArray[np.float32]]
     ):
-        self._func = converter
+        super().__init__(converter)
 
     def __call__(self, image: NDArray[np.float32], scale: nm) -> NDArray[np.float32]:
         out = self._func(image, scale)
@@ -124,7 +151,7 @@ class ImageConverter(_Pipeline):
             fn = lambda x, scale: self(other(x, scale), scale)
         else:
             raise TypeError("Cannot compose with a non-pipeline object.")
-        return other.__class__(fn)
+        return other.__class__(fn).with_name(f"{self.__name__}○{other.__name__}")
 
     __matmul__ = compose
 
@@ -141,74 +168,114 @@ class ImageConverter(_Pipeline):
 
     def __add__(self, other) -> ImageConverter:
         if isinstance(other, ImageConverter):
-            return self.__class__(lambda x, scale: self(x, scale) + other(x, scale))
+            return self.__class__(
+                lambda x, scale: self(x, scale) + other(x, scale)
+            ).with_name(f"({self.__name__} + {other.__name__})")
         elif isinstance(other, ImageProvider):
-            return self.__class__(lambda x, scale: self(x, scale) + other(scale))
+            return self.__class__(
+                lambda x, scale: self(x, scale) + other(scale)
+            ).with_name(f"({self.__name__} + {other.__name__})")
         return self.__class__(lambda x, scale: self(x, scale) + other)
 
     def __sub__(self, other) -> ImageConverter:
         if isinstance(other, ImageConverter):
-            return self.__class__(lambda x, scale: self(x, scale) - other(x, scale))
+            return self.__class__(
+                lambda x, scale: self(x, scale) - other(x, scale)
+            ).with_name(f"({self.__name__} - {other.__name__})")
         elif isinstance(other, ImageProvider):
-            return self.__class__(lambda x, scale: self(x, scale) - other(scale))
+            return self.__class__(
+                lambda x, scale: self(x, scale) - other(scale)
+            ).with_name(f"({self.__name__} - {other.__name__})")
         return self.__class__(lambda x, scale: self(x, scale) - other)
 
     def __mul__(self, other) -> ImageConverter:
         if isinstance(other, ImageConverter):
-            return self.__class__(lambda x, scale: self(x, scale) * other(x, scale))
+            return self.__class__(
+                lambda x, scale: self(x, scale) * other(x, scale)
+            ).with_name(f"({self.__name__} * {other.__name__})")
         elif isinstance(other, ImageProvider):
-            return self.__class__(lambda x, scale: self(x, scale) * other(scale))
+            return self.__class__(
+                lambda x, scale: self(x, scale) * other(scale)
+            ).with_name(f"({self.__name__} * {other.__name__})")
         return self.__class__(lambda x, scale: self(x, scale) * other)
 
     def __truediv__(self, other) -> ImageConverter:
         if np.isscalar(other) and other == 0:
             raise ZeroDivisionError("Cannot divide by zero.")
         if isinstance(other, ImageConverter):
-            return self.__class__(lambda x, scale: self(x, scale) / other(x, scale))
+            return self.__class__(
+                lambda x, scale: self(x, scale) / other(x, scale)
+            ).with_name(f"({self.__name__} / {other.__name__})")
         elif isinstance(other, ImageProvider):
-            return self.__class__(lambda x, scale: self(x, scale) / other(scale))
+            return self.__class__(
+                lambda x, scale: self(x, scale) / other(scale)
+            ).with_name(f"({self.__name__} / {other.__name__})")
         return self.__class__(lambda x, scale: self(x, scale) / other)
 
     def __eq__(self, other) -> ImageConverter:
         if isinstance(other, ImageConverter):
-            return self.__class__(lambda x, scale: self(x, scale) == other(x, scale))
+            return self.__class__(
+                lambda x, scale: self(x, scale) == other(x, scale)
+            ).with_name(f"({self.__name__} == {other.__name__})")
         elif isinstance(other, ImageProvider):
-            return self.__class__(lambda x, scale: self(x, scale) == other(scale))
+            return self.__class__(
+                lambda x, scale: self(x, scale) == other(scale)
+            ).with_name(f"({self.__name__} == {other.__name__})")
         return self.__class__(lambda x, scale: self(x, scale) == other)
 
     def __ne__(self, other) -> ImageConverter:
         if isinstance(other, ImageConverter):
-            return self.__class__(lambda x, scale: self(x, scale) != other(x, scale))
+            return self.__class__(
+                lambda x, scale: self(x, scale) != other(x, scale)
+            ).with_name(f"({self.__name__} != {other.__name__})")
         elif isinstance(other, ImageProvider):
-            return self.__class__(lambda x, scale: self(x, scale) != other(scale))
+            return self.__class__(
+                lambda x, scale: self(x, scale) != other(scale)
+            ).with_name(f"({self.__name__} != {other.__name__})")
         return self.__class__(lambda x, scale: self(x, scale) != other)
 
     def __gt__(self, other) -> ImageConverter:
         if isinstance(other, ImageConverter):
-            return self.__class__(lambda x, scale: self(x, scale) > other(x, scale))
+            return self.__class__(
+                lambda x, scale: self(x, scale) > other(x, scale)
+            ).with_name(f"({self.__name__} > {other.__name__})")
         elif isinstance(other, ImageProvider):
-            return self.__class__(lambda x, scale: self(x, scale) > other(scale))
+            return self.__class__(
+                lambda x, scale: self(x, scale) > other(scale)
+            ).with_name(f"({self.__name__} > {other.__name__})")
         return self.__class__(lambda x, scale: self(x, scale) > other)
 
     def __ge__(self, other) -> ImageConverter:
         if isinstance(other, ImageConverter):
-            return self.__class__(lambda x, scale: self(x, scale) >= other(x, scale))
+            return self.__class__(
+                lambda x, scale: self(x, scale) >= other(x, scale)
+            ).with_name(f"({self.__name__} >= {other.__name__})")
         elif isinstance(other, ImageProvider):
-            return self.__class__(lambda x, scale: self(x, scale) >= other(scale))
+            return self.__class__(
+                lambda x, scale: self(x, scale) >= other(scale)
+            ).with_name(f"({self.__name__} >= {other.__name__})")
         return self.__class__(lambda x, scale: self(x, scale) >= other)
 
     def __lt__(self, other) -> ImageConverter:
         if isinstance(other, ImageConverter):
-            return self.__class__(lambda x, scale: self(x, scale) < other(x, scale))
+            return self.__class__(
+                lambda x, scale: self(x, scale) < other(x, scale)
+            ).with_name(f"({self.__name__} < {other.__name__})")
         elif isinstance(other, ImageProvider):
-            return self.__class__(lambda x, scale: self(x, scale) < other(scale))
+            return self.__class__(
+                lambda x, scale: self(x, scale) < other(scale)
+            ).with_name(f"({self.__name__} < {other.__name__})")
         return self.__class__(lambda x, scale: self(x, scale) < other)
 
     def __le__(self, other) -> ImageConverter:
         if isinstance(other, ImageConverter):
-            return self.__class__(lambda x, scale: self(x, scale) <= other(x, scale))
+            return self.__class__(
+                lambda x, scale: self(x, scale) <= other(x, scale)
+            ).with_name(f"({self.__name__} <= {other.__name__})")
         elif isinstance(other, ImageProvider):
-            return self.__class__(lambda x, scale: self(x, scale) <= other(scale))
+            return self.__class__(
+                lambda x, scale: self(x, scale) <= other(scale)
+            ).with_name(f"({self.__name__} <= {other.__name__})")
         return self.__class__(lambda x, scale: self(x, scale) <= other)
 
     def __neg__(self) -> ImageConverter:
