@@ -867,12 +867,27 @@ class Molecules:
         df = self.to_dataframe()
         return self.__class__.from_dataframe(df.tail(n))
 
+    def sample(self, n: int = 10, seed: int | None = None) -> Self:
+        """Return n randomly sampled molecules."""
+        df = self.to_dataframe()
+        return self.__class__.from_dataframe(df.sample(n, seed=seed))
+
     def sort(
         self,
         by: str | pl.Expr | Sequence[str | pl.Expr],
         *,
         reverse: bool = False,
     ) -> Self:
+        """
+        Return a new instance with sorted molecules and features.
+
+        Parameters
+        ----------
+        by : str or Expr or sequence of them
+            Column name or expression to sort by.
+        reverse : bool, default is False
+            If true, sort in descending order.
+        """
         df = self.to_dataframe()
         return self.__class__.from_dataframe(df.sort(by=by, reverse=reverse))
 

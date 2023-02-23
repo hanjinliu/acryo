@@ -435,6 +435,18 @@ class LoaderGroup(Generic[_K, _L]):
         """Filter the molecules in each group."""
         return self.__class__((key, loader.filter(predicate)) for key, loader in self)
 
+    def head(self, n: int = 10) -> Self[_K, _L]:
+        """Get the first n molecules in each group."""
+        return self.__class__((key, loader.head(n)) for key, loader in self)
+
+    def tail(self, n: int = 10) -> Self[_K, _L]:
+        """Get the last n molecules in each group."""
+        return self.__class__((key, loader.tail(n)) for key, loader in self)
+
+    def sample(self, n: int = 10, seed: int | None = None) -> Self[_K, _L]:
+        """Get n random molecules in each group."""
+        return self.__class__((key, loader.sample(n, seed)) for key, loader in self)
+
 
 class LoaderGroupByIterator:
     """Iterator for the loader groupby."""

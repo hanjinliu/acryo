@@ -54,3 +54,21 @@ def test_fsc():
     group = _get_group()
     group.fsc(dfreq=0.1)
     group.fsc(n_set=3, dfreq=0.1)
+
+
+def test_head():
+    group = _get_group()
+    for key, ldr in group.head(2):
+        assert ldr.count() == 2
+
+
+def test_tail():
+    group = _get_group()
+    for key, ldr in group.tail(2):
+        assert ldr.count() == 2
+
+
+def test_sample():
+    group = _get_group()
+    for key, ldr in group.sample(2):
+        assert ldr.count() == 2

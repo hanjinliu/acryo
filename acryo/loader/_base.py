@@ -795,6 +795,10 @@ class LoaderBase(ABC):
         """Return a new loader with the last n molecules."""
         return self.replace(molecules=self.molecules.tail(n))
 
+    def sample(self, n: int = 10, seed: int | None = None) -> Self:
+        """Return a new loader with randomly sampled molecules."""
+        return self.replace(molecules=self.molecules.sample(n, seed))
+
     def filter(
         self,
         predicate: pl.Expr | str | pl.Series | list[bool] | np.ndarray,
