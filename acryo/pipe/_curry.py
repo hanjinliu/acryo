@@ -5,13 +5,14 @@ from typing_extensions import ParamSpec, Concatenate
 import inspect
 import numpy as np
 from acryo.pipe._classes import ImageProvider, ImageConverter
+from acryo._types import nm
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
 
 def provider_function(
-    fn: Callable[Concatenate[float, _P], _R]
+    fn: Callable[Concatenate[nm | float, _P], _R]
 ) -> Callable[_P, ImageProvider]:
     """
     Convert a function into a curried function that returns a image provider.
@@ -37,7 +38,7 @@ def provider_function(
 
 
 def converter_function(
-    fn: Callable[Concatenate[np.ndarray, float, _P], _R]
+    fn: Callable[Concatenate[np.ndarray, nm | float, _P], _R]
 ) -> Callable[_P, ImageConverter]:
     """
     Convert a function into a curried function that returns a image converter.

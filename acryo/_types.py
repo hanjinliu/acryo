@@ -4,7 +4,7 @@ RangeLike = tuple[float, float]
 Ranges = tuple[RangeLike, RangeLike, RangeLike]
 
 # type alias
-nm: TypeAlias = float  # nm is just an example. Can be angstrom or others.
+nm: TypeAlias = float
 degree: TypeAlias = float
 pixel: TypeAlias = int
 subpixel: TypeAlias = float

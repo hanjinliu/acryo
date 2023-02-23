@@ -88,7 +88,7 @@ def from_gaussian(
 
 @provider_function
 def from_array(
-    scale: float, img: np.ndarray, original_scale: float = 1.0, tol: float = 0.01
+    scale: nm, img: np.ndarray, original_scale: float = 1.0, tol: float = 0.01
 ):
     """
     An image provider function using existing image array.
@@ -123,3 +123,42 @@ def from_array(
     if not out.dtype == np.float32:
         out = out.astype(np.float32)
     return out
+
+
+@provider_function
+def from_atoms(
+    scale: nm,
+    atoms: np.ndarray,
+    weights: np.ndarray | None = None,
+    center: tuple[nm, nm, nm] | None = None,
+):
+    """
+    An image provider function using a point cloud.
+
+    Given an array of atoms, such as data extracted from a PDB file, this function
+    can generate a 3D image of the atoms by simply building a histogram.
+
+    Parameters
+    ----------
+    atoms : (N, 3) array
+        Atoms coordinates in nanometer.
+    weights : np.ndarray, optional
+        weights of the atoms.
+    center : tuple of float, optional
+        Coordinates of the image center. If not given, the geometric center of the atoms
+        will be used.
+    """
+    if atoms.ndim != 2 or atoms.shape[1] != 3:
+        raise ValueError("atoms must be a 2D array with shape (n, 3)")
+    if center is None:
+        center = np.mean(atoms, axis=0)
+    center = np.asarray(center)[np.newaxis]
+    coords = (atoms - center) / scale
+    rmax = np.max(np.sqrt(np.sum(coords**2, axis=1)))  # the furthest in pixels
+    size = int(np.ceil(rmax * 2))
+    lims = (-size / 2, size / 2)
+
+    counts, _ = np.histogramdd(
+        coords, bins=(size,) * 3, range=(lims,) * 3, weights=weights
+    )
+    return counts
