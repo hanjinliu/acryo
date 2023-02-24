@@ -190,7 +190,7 @@ def test_io():
         path = root / "test.csv"
         mol.to_csv(path)
         mol0 = Molecules.from_csv(path)
-        assert_allclose(mol.to_dataframe(), mol0.to_dataframe())
+        assert_allclose(mol.to_dataframe(), mol0.to_dataframe(), rtol=1e-6, atol=1e-4)
 
 
 def test_random():

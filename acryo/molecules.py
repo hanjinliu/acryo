@@ -255,7 +255,7 @@ class Molecules:
             df = df.with_columns(list(self._features))
         return df
 
-    def to_csv(self, save_path: PathLike) -> None:
+    def to_csv(self, save_path: PathLike, float_precision: int | None = 4) -> None:
         """
         Save molecules as a csv file.
 
@@ -263,8 +263,13 @@ class Molecules:
         ----------
         save_path : PathLike
             Save path.
+        float_precision : int, default is 4
+            Float precision, by default 4.
         """
-        return self.to_dataframe().write_csv(str(save_path))
+        return self.to_dataframe().write_csv(
+            str(save_path),
+            float_precision=float_precision,
+        )
 
     def __len__(self) -> int:
         """Return the number of molecules."""
