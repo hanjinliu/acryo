@@ -364,7 +364,7 @@ class LoaderBase(ABC):
         Returns
         -------
         np.ndarray
-            Averaged image
+            Averaged images. The shape of the array is (n_set, 2, *output_shape).
         """
         output_shape = self._get_output_shape(output_shape)
         rng = np.random.default_rng(seed=seed)
@@ -651,21 +651,58 @@ class LoaderBase(ABC):
 
         Parameters
         ----------
-        mask : np.ndarray, optional
+        mask : np.ndarray or ImageProvider, optional
             Mask image
         seed : random seed, default is 0
             Random seed used to split subtomograms.
         n_set : int, default is 1
             Number of split set of averaged images.
-        dfreq : float, default is 0.05
-            Frequency sampling width.
+        dfreq : float, optional
+            Frequency sampling width. Automatically determined if not provided.
 
         Returns
         -------
         pl.DataFrame
             A data frame with FSC results.
-        """
 
+        See Also
+        --------
+        fsc_with_average
+        """
+        return self.fsc_with_average(mask, seed, n_set, dfreq)[0]
+
+    def fsc_with_average(
+        self,
+        mask: TemplateInputType = None,
+        seed: int | None = 0,
+        n_set: int = 1,
+        dfreq: float | None = None,
+    ) -> tuple[pl.DataFrame, NDArray[np.float32]]:
+        """
+        Calculate Fourier shell correlation and the resulting averaged image.
+
+        Parameters
+        ----------
+        mask : np.ndarray or ImageProvider, optional
+            Mask image
+        seed : random seed, default is 0
+            Random seed used to split subtomograms.
+        n_set : int, default is 1
+            Number of split set of averaged images.
+        dfreq : float, optional
+            Frequency sampling width. Automatically determined if not provided.
+
+        Returns
+        -------
+        pl.DataFrame and 3D array
+            A data frame with FSC results and the average image. Data frame has
+            columns "freq", "FSC-0", ..., "FSC-{n-1}" where n is the number of
+            split.
+
+        See Also
+        --------
+        fsc
+        """
         if mask is None:
             _mask = 1.0
             output_shape = self.output_shape
@@ -679,13 +716,15 @@ class LoaderBase(ABC):
 
         if n_set <= 0:
             raise ValueError("'n_set' must be positive.")
-
+        if dfreq is None:
+            dfreq = 1.5 / min(output_shape)
         img = self.average_split(
             n_set=n_set,
             seed=seed,
             squeeze=False,
             output_shape=output_shape,
         )
+        img[:] -= img.mean()  # normalize to minimize the sharp mask edge effect
         fsc_all: dict[str, np.ndarray] = {}
         freq = np.zeros(0, dtype=np.float32)
         for i in range(n_set):
@@ -697,7 +736,7 @@ class LoaderBase(ABC):
 
         out: dict[str, NDArray[np.float32]] = {"freq": freq}
         out.update(fsc_all)
-        return pl.DataFrame(out)
+        return pl.DataFrame(out), np.mean(img[0], axis=0)
 
     def classify(
         self,
@@ -786,6 +825,29 @@ class LoaderBase(ABC):
         mole.features = mole.features.with_columns(pl.Series(label_name, clf._labels))
         new = self.replace(molecules=mole)
         return ClassificationResult(new, clf)
+
+    def reshape(
+        self,
+        template: TemplateInputType | None = None,
+        mask: MaskInputType = None,
+        shape: tuple[int, int, int] | None = None,
+    ) -> Self:
+        """Return a new loader with appropriate output shape."""
+        shapes: set[tuple[int, int, int]] = set()
+        if template is not None:
+            shapes.add(self.normalize_template(template).shape)
+        if mask is not None:
+            if isinstance(mask, np.ndarray):
+                shapes.add(mask.shape)
+            elif isinstance(mask, ImageProvider):
+                shapes.add(mask(self.scale).shape)
+        if shape is not None:
+            shapes.add(shape)
+        if len(shapes) == 0:
+            raise ValueError("Cannot infer shape from the input.")
+        elif len(shapes) > 1:
+            raise ValueError("Inconsistent shapes.")
+        return self.replace(output_shape=shapes.pop())
 
     def head(self, n: int = 10) -> Self:
         """Return a new loader with the first n molecules."""

@@ -13,7 +13,7 @@ def center_by_mass(
 ) -> NDArray[np.float32]:
     """Centering an image by its center of mass."""
     shift = np.array(ndi.center_of_mass(img)) - np.array(img.shape) / 2
-    return ndi.shift(img, -shift, order=order, prefilter=order > 1, mode="reflect")
+    return ndi.shift(img, -shift, order=order, prefilter=order > 1, mode="nearest")
 
 
 @converter_function
