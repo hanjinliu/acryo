@@ -10,6 +10,7 @@ import polars as pl
 
 from dask import array as da
 
+from acryo import _utils
 from acryo.molecules import Molecules
 from acryo._types import nm, pixel
 from acryo.loader._base import LoaderBase
@@ -137,6 +138,31 @@ class BatchLoader(LoaderBase):
             for k in list(out._images.keys()):
                 if k not in _id_exists:
                     out._images.pop(k)
+        return out
+
+    def binning(self, binsize: int, *, compute: bool = False) -> Self:
+        """Return a new instance with binned images."""
+        if binsize == 1:
+            return self.copy()
+        tr = -(binsize - 1) / 2 * self.scale
+        molecules = self.molecules.translate([tr, tr, tr])
+        _images: dict[Hashable, NDArray[np.float32] | da.Array] = {}
+        _compute_dict: dict[Hashable, da.Array] = {}
+        for _id, image in self._images.items():
+            binned_image = _utils.bin_image(image, binsize=binsize)
+            if isinstance(binned_image, da.Array) and compute:
+                _compute_dict[_id] = binned_image
+            _images[_id] = binned_image
+
+        if _compute_dict:
+            _computed = da.compute(_compute_dict)
+            _images.update(_computed)
+
+        out = self.replace(
+            molecules=molecules,
+            scale=self.scale * binsize,
+        )
+        out._images = _images
         return out
 
     def construct_loading_tasks(

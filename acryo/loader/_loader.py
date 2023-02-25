@@ -163,6 +163,25 @@ class SubtomogramLoader(LoaderBase):
         )
 
     def binning(self, binsize: pixel = 2, *, compute: bool = True) -> Self:
+        """
+        Return a new instance with binned image.
+
+        This method also properly translates the molecule coordinates.
+
+        Parameters
+        ----------
+        binsize : int, default is 2
+            Bin size.
+        compute : bool, default is True
+            If true, the image is computed immediately to a numpy array.
+
+        Returns
+        -------
+        SubtomogramLoader
+            A new instance with binned image.
+        """
+        if binsize == 1:
+            return self.copy()
         tr = -(binsize - 1) / 2 * self.scale
         molecules = self.molecules.translate([tr, tr, tr])
         binned_image = _utils.bin_image(self.image, binsize=binsize)
