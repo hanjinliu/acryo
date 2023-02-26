@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from typing_extensions import Self
     from acryo.loader._base import _ShapeType
 
-IMAGE_ID_LABEL = "image"
+IMAGE_ID_LABEL = "image-id"
 
 
 class BatchLoader(LoaderBase):
@@ -211,3 +211,8 @@ class LoaderAccessor:
                 col.corner_safe,
             )
             yield loader
+
+    def __len__(self) -> int:
+        """Number of loaders."""
+        col = self._collection()
+        return len(col._images)
