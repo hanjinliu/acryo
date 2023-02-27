@@ -1,7 +1,9 @@
+# pyright: reportPrivateImportUsage=false
 from __future__ import annotations
 
 from typing import (
     Generic,
+    Hashable,
     Iterable,
     Iterator,
     Mapping,
@@ -56,7 +58,7 @@ class LoaderGroup(Generic[_K, _L]):
         return [key for key, _ in self._it]
 
     @classmethod
-    def _from_loader(cls, loader: _L, by: _K) -> Self[_K, _L]:
+    def _from_loader(cls, loader: _L, by: _K) -> LoaderGroup[_K, _L]:
         return cls(
             LoaderGroupByIterator(
                 loader,
@@ -72,16 +74,18 @@ class LoaderGroup(Generic[_K, _L]):
         yield from self._it
 
     def average(
-        self, output_shape: tuple[int, ...] | None = None
+        self, output_shape: _ShapeType | None = None
     ) -> dict[_K, NDArray[np.float32]]:
         """Calculate average images."""
         tasks = []
-        keys: list[str] = []
+        keys: list[Hashable] = []
         for key, loader in self:
             keys.append(key)
             if output_shape is None:
-                output_shape = loader.output_shape
-            dsk = loader.construct_dask(output_shape)
+                _output_shape = loader.output_shape
+            else:
+                _output_shape = output_shape
+            dsk = loader.construct_dask(_output_shape)
             tasks.append(da.mean(dsk, axis=0))
 
         out: list[NDArray[np.float32]] = da.compute(tasks)[0]
@@ -394,10 +398,14 @@ class LoaderGroup(Generic[_K, _L]):
             A data frame with FSC results.
         """
         if mask is None:
-            _mask = 1.0
+            _mask = 1
             output_shape = None
         elif isinstance(mask, np.ndarray):
+            _mask = mask
             output_shape = mask.shape
+        else:
+            _mask = 1
+            output_shape = None
 
         if n_set <= 0:
             raise ValueError("'n_set' must be positive.")
@@ -448,7 +456,7 @@ class LoaderGroup(Generic[_K, _L]):
         return self.__class__((key, loader.sample(n, seed)) for key, loader in self)
 
 
-class LoaderGroupByIterator:
+class LoaderGroupByIterator(Iterable[tuple[_K, _L]]):
     """Iterator for the loader groupby."""
 
     def __init__(
@@ -467,7 +475,7 @@ class LoaderGroupByIterator:
         self._output_shape = output_shape
         self._corner_safe = corner_safe
 
-    def __iter__(self) -> Iterator[_K, _L]:
+    def __iter__(self) -> Iterator[tuple[_K, _L]]:
         loader = self._loader
         cached = loader._get_cached_array(shape=None)
         index_col_name = "__index"

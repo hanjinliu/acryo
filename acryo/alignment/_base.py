@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Callable, Iterable, NamedTuple, Sequence, TYPE_CHECKING, Union
+from typing import (
+    Callable,
+    Iterable,
+    NamedTuple,
+    Sequence,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 from typing_extensions import Self
 import inspect
 
@@ -14,7 +22,12 @@ from dask import array as da, delayed
 
 from acryo.alignment._utils import normalize_rotations
 from acryo._types import Ranges, subpixel, degree
-from acryo._utils import compose_matrices, missing_wedge_mask, lowpass_filter_ft
+from acryo._utils import (
+    compose_matrices,
+    missing_wedge_mask,
+    lowpass_filter_ft,
+    delayed_affine,
+)
 from acryo._fft import ifftn
 
 if TYPE_CHECKING:
@@ -102,14 +115,14 @@ class BaseAlignmentModel(ABC):
         if callable(mask):
             if self._n_templates != 1:
                 raise ValueError("Cannot create a mask using multiple templates")
-            self._mask = mask(self._template)
+            self._mask: NDArray[np.float32] = mask(self._template)
             if self._template.shape != self._mask.shape:
                 raise ValueError(
                     "Shape mismatch in between template image "
                     f"{self._template.shape} and mask image {self._mask.shape})."
                 )
         elif mask is None:
-            self._mask = 1
+            self._mask = np.ones(self._template.shape[-self._ndim :], dtype=np.float32)
         else:
             if self._template.shape[-self._ndim :] != mask.shape:
                 raise ValueError(
@@ -121,18 +134,18 @@ class BaseAlignmentModel(ABC):
             self._mask = mask
 
         self._align_func = self._get_alignment_function()
-        self._template_input: NDArray[np.float32] | None = None
-        self._template_input_ft: NDArray[np.complex64] = None
+        self._template_input, self._mask_input = self._get_template_and_mask_input()
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(shape={self._template.shape})"
 
     @property
-    def template_input(self) -> NDArray[np.complex64]:
-        """Create (a stack of) template images (and will be cached)."""
-        if self._template_input is None:
-            self._template_input = self._get_template_input()
-        return self._template_input
+    def template(self) -> NDArray[np.float32]:
+        return self._template
+
+    @property
+    def mask(self) -> NDArray[np.float32]:
+        return self._mask
 
     @property
     def input_shape(self) -> tuple[int, ...]:
@@ -150,8 +163,8 @@ class BaseAlignmentModel(ABC):
     @abstractmethod
     def optimize(
         self,
-        subvolume: NDArray[np.float32],
-        template: NDArray[np.float32],
+        subvolume: NDArray[np.complex64],
+        template: NDArray[np.complex64],
         max_shifts: tuple[float, ...],
         quaternion: NDArray[np.float32],
         pos: NDArray[np.float32],
@@ -190,9 +203,11 @@ class BaseAlignmentModel(ABC):
     def pre_transform(self, image: NDArray[np.float32]) -> NDArray[np.complex64]:
         """Pre-transformation applied to input images (including template)."""
 
-    def _get_template_input(self) -> NDArray[np.complex64]:
+    def _get_template_and_mask_input(
+        self,
+    ) -> tuple[NDArray[np.complex64], NDArray[np.float32]]:
         """
-        Returns proper template image for alignment.
+        Returns proper template and mask images for alignment.
 
         Template dimensionality will be dispatched according to the input
         parameters. Returned template should be used in line of the
@@ -201,7 +216,7 @@ class BaseAlignmentModel(ABC):
         Returns
         -------
         array
-            Template image(s). Its axes varies depending on the input.
+            Template image(s) and mask image(s). Its axes varies depending on the input.
 
             - single template image ... 3D
             - many template images ... 4D
@@ -213,7 +228,7 @@ class BaseAlignmentModel(ABC):
             )
         else:
             template_input = self.pre_transform(self._template * self._mask)
-        return template_input
+        return template_input, self._mask
 
     def align(
         self,
@@ -246,8 +261,9 @@ class BaseAlignmentModel(ABC):
         else:
             _pos = pos
         return self._align_func(
-            self.pre_transform(img * self._mask),
-            self.template_input,
+            img,
+            self._template_input,
+            self._mask_input,
             max_shifts,
             _quat,
             _pos,
@@ -279,19 +295,20 @@ class BaseAlignmentModel(ABC):
         result = self.align(img, max_shifts=max_shifts, quaternion=None, pos=None)
         mtx = result.affine_matrix(img.shape)
         _cval = _normalize_cval(cval, img)
-        img_trans = ndi.affine_transform(img, mtx, cval=_cval)
+        img_trans: NDArray[np.float32] = ndi.affine_transform(img, mtx, cval=_cval)  # type: ignore
         return img_trans, result
 
     def _optimize_single(
         self,
         subvolume: NDArray[np.float32],
-        template: NDArray[np.float32],
+        template: NDArray[np.complex64],
+        mask: NDArray[np.float32],
         max_shifts: tuple[float, float, float],
         quaternion: NDArray[np.float32],
         pos: NDArray[np.float32],
     ) -> AlignmentResult:
         out = self.optimize(
-            subvolume,
+            self.pre_transform(subvolume * mask),
             template,
             max_shifts=max_shifts,
             quaternion=quaternion,
@@ -302,7 +319,8 @@ class BaseAlignmentModel(ABC):
     def _optimize_multiple(
         self,
         subvolume: NDArray[np.float32],
-        template_list: Iterable[NDArray[np.float32]],
+        template_list: Iterable[NDArray[np.complex64]],
+        mask_list: Iterable[NDArray[np.float32]],
         max_shifts: tuple[float, float, float],
         quaternion: NDArray[np.float32],
         pos: NDArray[np.float32],
@@ -310,9 +328,9 @@ class BaseAlignmentModel(ABC):
         all_shifts: list[np.ndarray] = []
         all_quat: list[np.ndarray] = []
         all_score: list[float] = []
-        for template in template_list:
+        for template, mask in zip(template_list, mask_list):
             shift, quat, score = self.optimize(
-                subvolume,
+                self.pre_transform(subvolume * mask),
                 template,
                 max_shifts=max_shifts,
                 quaternion=quaternion,
@@ -420,19 +438,18 @@ class RotationImplemented(BaseAlignmentModel):
         np.ndarray, AlignmentResult
             Transformed input image and the alignment result.
         """
-        img_input = self.pre_transform(img * self._mask)
         delayed_optimize = delayed(self.optimize)
-        delayed_transform = delayed(self._transform_template)
-        template_masked = self._template * self._mask
-        _temp_cval = _normalize_cval(cval, self._template)
-        rotators = [Rotation.from_quat(r).inv() for r in self.quaternions]
-        matrices = compose_matrices(
-            np.array(self._template.shape[-self._ndim :]) / 2 - 0.5, rotators
-        )
         tasks: list[Delayed] = []
-        for mat, quat in zip(matrices, self.quaternions):
-            tmp = delayed_transform(template_masked, mat, cval=_temp_cval)
-            task = delayed_optimize(img_input, tmp, max_shifts, quat, pos=None)
+        for quat, tmp, mask in zip(
+            self.quaternions, self._template_input, self._mask_input
+        ):
+            task = delayed_optimize(
+                self.pre_transform(img * mask),
+                tmp,
+                max_shifts,
+                quat,
+                pos=None,
+            )
             tasks.append(task)
         results: list[tuple] = da.compute(tasks)[0]
         scores = [x[2] for x in results]
@@ -466,7 +483,20 @@ class RotationImplemented(BaseAlignmentModel):
             )  # type: ignore
         )
 
-    def _get_template_input(self) -> np.ndarray:
+    @delayed
+    def _transform_template_delayed(
+        self,
+        temp: NDArray[np.float32],
+        matrix: NDArray[np.float32],
+        cval: float | None = None,
+        order: int = 3,
+        prefilter: bool = True,
+    ):
+        return self._transform_template(temp, matrix, cval, order, prefilter)
+
+    def _get_template_and_mask_input(
+        self,
+    ) -> tuple[NDArray[np.complex64], NDArray[np.float32]]:
         """
         Returns proper template image for alignment.
 
@@ -493,7 +523,8 @@ class RotationImplemented(BaseAlignmentModel):
             )
             cval = float(np.percentile(self._template, 1))
             if self.is_multi_templates:
-                all_templates: list[NDArray[np.complex64]] = []
+                all_templates: list[da.Array] = []
+                all_masks: list[da.Array] = []
                 inputs_templates: list[NDArray[np.float32]] = [
                     ndi.spline_filter(
                         tmp * self._mask,
@@ -506,12 +537,30 @@ class RotationImplemented(BaseAlignmentModel):
                 for mat in matrices:
                     for tmp in inputs_templates:
                         all_templates.append(
-                            self._transform_template(
-                                tmp, mat, order=3, cval=cval, prefilter=False
+                            da.from_delayed(
+                                self._transform_template_delayed(
+                                    tmp, mat, order=3, cval=cval, prefilter=False
+                                ),
+                                shape=tmp.shape,
+                                dtype=tmp.dtype,
                             )
                         )
+                    all_masks.extend(
+                        [
+                            delayed_affine(
+                                self._mask,
+                                mat,
+                                order=3,
+                                mode="nearest",
+                                prefilter=False,
+                            )
+                        ]
+                        * len(inputs_templates)
+                    )
 
-                template_input = np.stack(all_templates, axis=0)
+                template_input, mask_input = da.compute(
+                    da.stack(all_templates, axis=0), da.stack(all_masks, axis=0)
+                )
 
             else:
                 template_masked: NDArray[np.float32] = ndi.spline_filter(
@@ -520,14 +569,24 @@ class RotationImplemented(BaseAlignmentModel):
                     output=np.float32,  # type: ignore
                     mode="constant",
                 )
-                template_input = np.stack(
-                    [
-                        self._transform_template(
+                all_templates = [
+                    da.from_delayed(
+                        self._transform_template_delayed(
                             template_masked, mat, order=3, cval=cval, prefilter=False
-                        )
-                        for mat in matrices
-                    ],
-                    axis=0,
+                        ),
+                        shape=template_masked.shape,
+                        dtype=template_masked.dtype,
+                    )
+                    for mat in matrices
+                ]
+                all_masks = [
+                    delayed_affine(
+                        self._mask, matrix=mat, order=3, mode="nearest", prefilter=False
+                    )
+                    for mat in matrices
+                ]
+                template_input, mask_input = da.compute(
+                    da.stack(all_templates, axis=0), da.stack(all_masks, axis=0)
                 )
         else:
             if self.is_multi_templates:
@@ -535,10 +594,13 @@ class RotationImplemented(BaseAlignmentModel):
                     [self.pre_transform(tmp * self._mask) for tmp in self._template],
                     axis=0,
                 )
+                mask_input = np.stack([self._mask] * len(self._template), axis=0)
+
             else:
                 template_input = self.pre_transform(self._template)
+                mask_input = self._mask
 
-        return template_input
+        return template_input, mask_input
 
     def _get_alignment_function(self):
         if self.is_multi_templates or self._n_rotations > 1:
@@ -617,7 +679,7 @@ class TomographyInput(RotationImplemented):
             raise NotImplementedError(
                 "Masked difference is not implemented for multi-template."
             )
-        ft = self.template_input  # NOTE: ft.ndim == 3
+        ft = self._template_input  # NOTE: ft.ndim == 3
         ft[:] = self.mask_missing_wedge(ft, quaternion)
         template_masked = np.real(ifftn(ft))
         img_input = np.real(ifftn(self.pre_transform(image * self._mask)))
@@ -633,7 +695,7 @@ class TomographyInput(RotationImplemented):
 
     def _get_missing_wedge_mask(
         self, quat: NDArray[np.float32]
-    ) -> NDArray[np.float32] | float:
+    ) -> NDArray[np.float32] | int:
         """
         Create a binary mask that covers tomographical missing wedge.
 
@@ -648,7 +710,7 @@ class TomographyInput(RotationImplemented):
             Missing wedge mask. If ``tilt_range`` is None, 1 will be returned.
         """
         if self._tilt_range is None:
-            return 1.0
+            return 1
         return missing_wedge_mask(
             rotator=Rotation.from_quat(quat),
             tilt_range=self._tilt_range,
@@ -664,10 +726,13 @@ def _normalize_cval(cval: float | None, img: np.ndarray) -> float:
     return _cval
 
 
+_T = TypeVar("_T", bound=BaseAlignmentModel)
+
+
 def _with_params(
-    cls: type[Self],
+    cls: type[_T],
     **params,
-) -> Callable[[TemplateType, NDArray[np.float32] | None], Self]:
+) -> Callable[[TemplateType, NDArray[np.float32] | None], _T]:
     """Create a BaseAlignmentModel instance with parameters."""
     bound = inspect.signature(cls).bind_partial(**params)
     return lambda template, mask: cls(template, mask, *bound.args, **bound.kwargs)
