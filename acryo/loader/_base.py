@@ -1,3 +1,4 @@
+# pyright: reportPrivateImportUsage=false
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -5,15 +6,16 @@ from abc import ABC, abstractmethod, abstractproperty
 from typing import (
     Callable,
     TYPE_CHECKING,
-    ContextManager,
     Iterable,
     Iterator,
     NamedTuple,
     Any,
+    Sequence,
     SupportsIndex,
     Union,
     overload,
 )
+from typing_extensions import TypeGuard
 import numpy as np
 from numpy.typing import NDArray
 from dask import array as da
@@ -80,6 +82,7 @@ class LoaderBase(ABC):
     @abstractproperty
     def molecules(self) -> Molecules:
         """All the molecules"""
+        raise NotImplementedError
 
     @property
     def features(self) -> pl.DataFrame:
@@ -112,7 +115,7 @@ class LoaderBase(ABC):
     ) -> list[da.Array]:
         ...
 
-    def _get_cached_array(self, shape: tuple[int, int, int]) -> da.Array | None:
+    def _get_cached_array(self, shape: tuple[int, int, int] | None) -> da.Array | None:
         return CACHE.get_cache(id(self), shape)
 
     def construct_dask(
@@ -254,7 +257,7 @@ class LoaderBase(ABC):
         return CACHE.cache_array(dsk, id(self))
 
     @contextmanager
-    def cached(self, output_shape: _ShapeType = None) -> ContextManager[da.Array]:
+    def cached(self, output_shape: _ShapeType = None) -> Iterator[da.Array]:
         """
         Context manager for caching subtomograms of give shape.
 
@@ -332,7 +335,7 @@ class LoaderBase(ABC):
         """
         output_shape = self._get_output_shape(output_shape)
         dsk = self.construct_dask(output_shape=output_shape)
-        dsk = dsk.rechunk(("auto",) + output_shape)
+        dsk = dsk.rechunk(("auto",) + output_shape)  # type: ignore
         return da.compute(da.mean(dsk, axis=0))[0]
 
     def average_split(
@@ -376,8 +379,8 @@ class LoaderBase(ABC):
             ind0, ind1 = _misc.random_splitter(rng, nmole)
             _stack = da.stack(
                 [
-                    da.mean(dsk[ind0].rechunk(("auto",) + output_shape), axis=0),
-                    da.mean(dsk[ind1].rechunk(("auto",) + output_shape), axis=0),
+                    da.mean(dsk[ind0].rechunk(("auto",) + output_shape), axis=0),  # type: ignore
+                    da.mean(dsk[ind1].rechunk(("auto",) + output_shape), axis=0),  # type: ignore
                 ],
                 axis=0,
             )
@@ -608,7 +611,7 @@ class LoaderBase(ABC):
 
     def apply(
         self,
-        funcs: AggFunction | list[AggFunction],
+        func: AggFunction | Iterable[AggFunction],
         schema: list[str] | None = None,
     ) -> pl.DataFrame:
         """
@@ -627,12 +630,16 @@ class LoaderBase(ABC):
             Result table.
         """
         all_tasks: list[list[Delayed]] = []
-        if not hasattr(funcs, "__iter__"):
-            funcs = [funcs]
+        if _is_iterable_of_funcs(func):
+            funcs = func
+        else:
+            funcs: Iterable[AggFunction] = [func]  # type: ignore
         if schema is None:
             schema = [fn.__name__ for fn in funcs]
         if len(set(schema)) != len(schema):
             raise ValueError("Schema names must be unique.")
+        if isinstance(self.output_shape, Unset):
+            raise ValueError("Output shape is unknown.")
         for fn in funcs:
             tasks = self.construct_mapping_tasks(fn, output_shape=self.output_shape)
             all_tasks.append(tasks)
@@ -641,7 +648,7 @@ class LoaderBase(ABC):
 
     def fsc(
         self,
-        mask: TemplateInputType = None,
+        mask: TemplateInputType | None = None,
         seed: int | None = 0,
         n_set: int = 1,
         dfreq: float = 0.05,
@@ -673,7 +680,7 @@ class LoaderBase(ABC):
 
     def fsc_with_average(
         self,
-        mask: TemplateInputType = None,
+        mask: TemplateInputType | None = None,
         seed: int | None = 0,
         n_set: int = 1,
         dfreq: float | None = None,
@@ -710,6 +717,7 @@ class LoaderBase(ABC):
                 raise TypeError("Output shape is unknown.")
         elif isinstance(mask, ImageProvider):
             _mask = mask(self.scale)
+            output_shape = _mask.shape
         else:
             _mask = mask
             output_shape = mask.shape
@@ -786,9 +794,9 @@ class LoaderBase(ABC):
 
         if template is not None:
             template = self.normalize_template(template)
-        mask = self.normalize_mask(mask)
-        if isinstance(mask, np.ndarray):
-            shape = mask.shape
+        _mask = self.normalize_mask(mask)
+        if isinstance(_mask, np.ndarray):
+            shape = _mask.shape
         elif isinstance(template, np.ndarray):
             shape = template.shape
         elif isinstance(self.output_shape, Unset):
@@ -799,7 +807,7 @@ class LoaderBase(ABC):
         with self.cached(shape):
             if template is None:
                 template = self.average(shape)
-            model = ZNCCAlignment(template, mask, cutoff=cutoff, tilt_range=tilt_range)
+            model = ZNCCAlignment(template, _mask, cutoff=cutoff, tilt_range=tilt_range)
             tasks: list[da.Array] = []
             for task in self.iter_mapping_tasks(
                 model.masked_difference,
@@ -810,11 +818,11 @@ class LoaderBase(ABC):
 
             # PCA requires aggregation along the first axis.
             # Rechunk to improve performance.
-            stack = da.stack(tasks, axis=0).rechunk(("auto",) + shape)
+            stack = da.stack(tasks, axis=0).rechunk(("auto",) + shape)  # type: ignore
 
             clf = PcaClassifier(
                 stack,
-                mask,
+                model.mask,
                 n_components=n_components,
                 n_clusters=n_clusters,
                 seed=seed,
@@ -880,7 +888,9 @@ class LoaderBase(ABC):
         ...
 
     @overload
-    def groupby(self, by: list[str | pl.Expr]) -> LoaderGroup[tuple[str, ...], Self]:
+    def groupby(
+        self, by: Sequence[str | pl.Expr]
+    ) -> LoaderGroup[tuple[str, ...], Self]:
         ...
 
     def groupby(self, by):
@@ -989,3 +999,9 @@ def check_input(
 
     _corner_safe = bool(corner_safe)
     return order, _output_shape, _scale, _corner_safe
+
+
+def _is_iterable_of_funcs(x: Any) -> TypeGuard[Iterable[AggFunction]]:
+    if not hasattr(x, "__iter__"):
+        return False
+    return all(callable(f) for f in x)
