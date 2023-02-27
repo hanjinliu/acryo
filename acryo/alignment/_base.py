@@ -108,7 +108,7 @@ class BaseAlignmentModel(ABC):
         else:
             self._template = np.stack(template, axis=0)
             if self._template.dtype != np.float32:
-                self._template = self._template.astype(np.float32)
+                self._template: NDArray[np.float32] = self._template.astype(np.float32)
             self._n_templates = self._template.shape[0]
             self._ndim = self._template.ndim - 1
 
@@ -589,15 +589,26 @@ class RotationImplemented(BaseAlignmentModel):
                     da.stack(all_templates, axis=0), da.stack(all_masks, axis=0)
                 )
         else:
+            delayed_transform = delayed(self.pre_transform)
             if self.is_multi_templates:
-                template_input = np.stack(
-                    [self.pre_transform(tmp * self._mask) for tmp in self._template],
+                template_input = da.stack(
+                    [
+                        da.from_delayed(
+                            delayed_transform(tmp * self._mask),
+                            shape=tmp.shape,
+                            dtype=np.complex64,
+                        )
+                        for tmp in self._template
+                    ],
                     axis=0,
-                )
+                ).compute()
                 mask_input = np.stack([self._mask] * len(self._template), axis=0)
 
             else:
-                template_input = self.pre_transform(self._template)
+                # NOTE: dask.compute is always called once inside this method.
+                template_input = delayed_transform(
+                    self._template * self._mask
+                ).compute()
                 mask_input = self._mask
 
         return template_input, mask_input
