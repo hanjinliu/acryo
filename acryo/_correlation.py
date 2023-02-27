@@ -1,104 +1,14 @@
 from __future__ import annotations
-import itertools
 from functools import lru_cache
-from typing import Callable, Sequence
+from typing import Sequence
 import numpy as np
 from numpy.typing import NDArray
 
 from scipy.signal import fftconvolve
-from scipy.spatial.transform import Rotation
 from scipy import ndimage as ndi
 
 from acryo._fft import ifftn
-from acryo._types import Ranges, RangeLike, pixel
-from acryo.molecules import from_euler_xyz_coords
-
-
-def _normalize_a_range(rng: RangeLike) -> RangeLike:
-    if len(rng) != 2:
-        raise TypeError(f"Range must be defined by (float, float), got {rng!r}")
-    max_rot, drot = rng
-    return float(max_rot), float(drot)
-
-
-def _normalize_ranges(rng: RangeLike | Ranges) -> Ranges:
-    if isinstance(rng, (tuple, list)) and isinstance(rng[0], tuple):
-        return tuple(_normalize_a_range(r) for r in rng)  # type: ignore
-    else:
-        rng_ = _normalize_a_range(rng)  # type: ignore
-        return (rng_,) * 3
-
-
-def normalize_rotations(rotations: Ranges | Rotation | None) -> np.ndarray:
-    """
-    Normalize various rotation expressions to quaternions.
-
-    Parameters
-    ----------
-    rotations : tuple of float and float, or list of it, optional
-        Rotation around each axis.
-
-    Returns
-    -------
-    np.ndarray
-        Corresponding quaternions in shape (N, 4).
-    """
-    if isinstance(rotations, Rotation):
-        quat = rotations.as_quat()
-    elif rotations is not None:
-        _rotations = _normalize_ranges(rotations)
-        angles = []
-        for max_rot, step in _rotations:
-            if step == 0:
-                angles.append(np.zeros(1))
-            else:
-                n = int(max_rot / step)
-                angles.append(np.linspace(-n * step, n * step, 2 * n + 1))
-
-        quat: list[np.ndarray] = []
-        for angs in itertools.product(*angles):
-            quat.append(
-                from_euler_xyz_coords(np.array(angs), "zyx", degrees=True).as_quat()
-            )
-        quats = np.stack(quat, axis=0)
-    else:
-        quats = np.array([[0.0, 0.0, 0.0, 1.0]])
-
-    return quats
-
-
-def rotate(
-    image: np.ndarray,
-    degrees: tuple[float, float, float] | Sequence[float],
-    order: int = 3,
-    mode="constant",
-    cval: Callable | float = np.mean,
-):
-    from .._utils import compose_matrices
-
-    quat = euler_to_quat(degrees)
-    rotator = Rotation.from_quat(quat).inv()
-    matrix = compose_matrices(
-        np.array(image.shape[-image.ndim :]) / 2 - 0.5, [rotator]
-    )[0]
-    if callable(cval):
-        _cval = cval(image)
-    else:
-        _cval = cval
-
-    return ndi.affine_transform(
-        image,
-        matrix=matrix,
-        order=order,
-        mode=mode,
-        cval=_cval,
-        prefilter=order > 1,
-    )
-
-
-def euler_to_quat(degrees):
-    return from_euler_xyz_coords(np.array(degrees), "zyx", degrees=True).as_quat()
-
+from acryo._types import pixel
 
 # cross correlation
 # Modified from skimage/registration/_phase_cross_correlation.py
@@ -197,20 +107,20 @@ def crop_by_max_shifts(power: np.ndarray, left, right):
 # Normalized cross correlation
 
 
-def _draw_ncc_landscape_no_crop(
-    img0: np.ndarray,
-    img1: np.ndarray,
+def ncc_landscape(
+    img0: NDArray[np.float32],
+    img1: NDArray[np.float32],
     max_shifts: tuple[float, ...] | None = None,
-) -> np.ndarray:
+) -> NDArray[np.float32]:
     ndim = img1.ndim
     if max_shifts is not None:
         max_shifts = tuple(max_shifts)
     pad_width, sl = _get_padding_params(img0.shape, img1.shape, max_shifts)
-    padimg = np.pad(img0[sl], pad_width=pad_width, mode="constant", constant_values=0)  # type: ignore
+    padimg = np.pad(img0[sl], pad_width=pad_width, mode="constant", constant_values=0)
 
-    corr = fftconvolve(padimg, img1[(slice(None, None, -1),) * ndim], mode="valid")[
-        (slice(1, -1, None),) * ndim
-    ]
+    corr: NDArray[np.float32] = fftconvolve(
+        padimg, img1[(slice(None, None, -1),) * ndim], mode="valid"
+    )[(slice(1, -1, None),) * ndim]
 
     _win_sum = _window_sum_2d if ndim == 2 else _window_sum_3d
     win_sum1 = _win_sum(padimg, img1.shape)
@@ -231,18 +141,45 @@ def _draw_ncc_landscape_no_crop(
     return response
 
 
+def ncc_landscape_no_pad(
+    img: NDArray[np.float32],
+    template: NDArray[np.float32],
+) -> NDArray[np.float32]:
+    ndim = template.ndim
+    corr: NDArray[np.float32] = fftconvolve(
+        img, template[(slice(None, None, -1),) * ndim], mode="valid"
+    )[(slice(1, -1, None),) * ndim]
+
+    _win_sum = _window_sum_2d if ndim == 2 else _window_sum_3d
+    win_sum1 = _win_sum(img, template.shape)
+    win_sum2 = _win_sum(img**2, template.shape)
+
+    template_mean = np.mean(template)
+    template_volume = np.prod(template.shape)
+    template_ssd = np.sum((template - template_mean) ** 2)
+
+    var = (win_sum2 - win_sum1**2 / template_volume) * template_ssd
+
+    # zero division happens when perfectly matched
+    response = np.zeros_like(corr)
+    mask = var > 0
+    response[mask] = (corr - win_sum1 * template_mean)[mask] / _safe_sqrt(
+        var, fill=np.inf
+    )[mask]
+    return response
+
+
 def subpixel_zncc(
     img0: NDArray[np.float32],
     img1: NDArray[np.float32],
     upsample_factor: int,
     max_shifts: tuple[float, ...] | None = None,
 ) -> tuple[np.ndarray, float]:
-    img0, img1 = img0.astype(np.float32), img1.astype(np.float32)
     img0 -= img0.mean()
     img1 -= img1.mean()
     if isinstance(max_shifts, (int, float)):
         max_shifts = (max_shifts,) * img0.ndim
-    response = _draw_ncc_landscape_no_crop(img0, img1, max_shifts)
+    response = ncc_landscape(img0, img1, max_shifts)
     if max_shifts is None:
         pad_width_eff = (3,) * img1.ndim
     else:
@@ -257,10 +194,10 @@ def subpixel_zncc(
     if upsample_factor > 1:
         coords = _create_mesh(
             upsample_factor,
-            maxima,  # type: ignore
-            max_shifts,  # type: ignore
-            midpoints,  # type: ignore
-            pad_width_eff,  # type: ignore
+            maxima,
+            max_shifts,
+            midpoints,
+            pad_width_eff,
         )
         local_response: np.ndarray = ndi.map_coordinates(
             response, coords, order=3, mode="constant", cval=-1.0, prefilter=True

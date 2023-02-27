@@ -4,7 +4,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ._base import TomographyInput
-from ._utils import subpixel_pcc, subpixel_zncc
+from acryo._correlation import subpixel_pcc, subpixel_zncc
 from acryo._fft import ifftn
 
 

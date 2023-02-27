@@ -12,7 +12,7 @@ from scipy import ndimage as ndi
 from scipy.spatial.transform import Rotation
 from dask import array as da, delayed
 
-from acryo.alignment._utils import normalize_rotations
+from acryo._rotation import normalize_rotations
 from acryo._types import Ranges, subpixel, degree
 from acryo._utils import compose_matrices, missing_wedge_mask, lowpass_filter_ft
 from acryo._fft import ifftn
@@ -466,7 +466,7 @@ class RotationImplemented(BaseAlignmentModel):
             )  # type: ignore
         )
 
-    def _get_template_input(self) -> np.ndarray:
+    def _get_template_input(self) -> NDArray[np.float32]:
         """
         Returns proper template image for alignment.
 

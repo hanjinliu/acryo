@@ -6,7 +6,7 @@ from scipy import ndimage as ndi
 from acryo._fft import fftn, ifftn
 from acryo.molecules import Molecules
 from acryo._utils import compose_matrices
-from acryo.alignment._utils import normalize_rotations
+from acryo._rotation import normalize_rotations
 from acryo._types import nm, degree
 
 
