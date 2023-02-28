@@ -1,3 +1,3 @@
-from ._concrete import TemplateMatcher
+from ._concrete import ZNCCTemplateMatcher, LoGPicker, DoGPicker
 
-__all__ = ["TemplateMatcher"]
+__all__ = ["ZNCCTemplateMatcher", "LoGPicker", "DoGPicker"]

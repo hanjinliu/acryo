@@ -918,10 +918,6 @@ class Molecules:
             features=self.features.drop(columns),
         )
 
-    def topn(self, by: str, n: int) -> Self:
-        """Return the top n molecules by the given feature."""
-        return self.filter(pl.col(by).arg_sort() < n)
-
 
 _K = TypeVar("_K", bound=Hashable)
 
