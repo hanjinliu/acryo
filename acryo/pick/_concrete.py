@@ -8,7 +8,7 @@ from dask import array as da
 from scipy import ndimage as ndi
 from scipy.spatial.transform import Rotation
 
-from acryo.mining._base import MinerBase
+from acryo.pick._base import MinerBase
 from acryo.molecules import Molecules
 from acryo.pipe._classes import ImageProvider
 from acryo._correlation import ncc_landscape_no_pad
