@@ -1,9 +1,10 @@
+# pyright: reportPrivateImportUsage=false
 from __future__ import annotations
+from typing import Sequence
 
 import numpy as np
 from numpy.typing import NDArray
 from dask import array as da
-from dask import delayed
 from scipy import ndimage as ndi
 from scipy.spatial.transform import Rotation
 
@@ -13,7 +14,7 @@ from acryo.pipe._classes import ImageProvider
 from acryo._correlation import ncc_landscape_no_pad
 from acryo._rotation import normalize_rotations
 from acryo._types import nm
-from acryo._utils import compose_matrices, missing_wedge_mask
+from acryo._utils import compose_matrices, missing_wedge_mask, delayed_affine
 
 
 class TemplateMatcher(MinerBase):
@@ -53,49 +54,86 @@ class TemplateMatcher(MinerBase):
         return [o * mask for o in out]
 
     def find_molecules(
-        self, image: da.Array, scale: nm = 1.0, radius: nm = 1.0
+        self,
+        image: da.Array,
+        scale: nm = 1.0,
+        radius: nm = 1.0,
+        threshold: float = 0.8,
     ) -> Molecules:
         templates = self._get_template_input(scale)
         depth = tuple(np.ceil(np.array(templates[0].shape) / 2).astype(np.uint16))
 
-        all_landscapes = da.stack(
+        boxes: Sequence[MoleculesBox] = (
+            da.map_overlap(
+                self._find_molecules_in_block,
+                image=image,
+                templates=templates,
+                radius=radius,
+                scale=scale,
+                threshold=threshold,
+                # dask parameters
+                depth=depth,
+                boundary="nearest",
+                dtype=object,
+                meta=np.array([], dtype=object),
+            )
+            .compute()
+            .ravel()
+        )
+
+        return Molecules.concat([box.to_molecules() for box in boxes])
+
+    def _find_molecules_in_block(
+        self,
+        image: NDArray[np.float32],
+        templates: list[NDArray[np.float32]],
+        radius: nm,
+        scale: nm,
+        threshold: float,
+        block_info: dict,
+    ) -> NDArray[np.object_]:
+        all_landscapes = np.stack(
             [
-                image.map_overlap(
-                    ncc_landscape_no_pad,
-                    template=template,
-                    depth=depth,
-                    boundary="nearest",
-                    dtype=np.float32,
+                ncc_landscape_no_pad(
+                    image - np.mean(image), template - np.mean(template)
                 )
                 for template in templates
             ],
             axis=0,
         )
 
-        img_argmax = da.argmax(all_landscapes, axis=0)
-        img_max = da.choose(img_argmax, all_landscapes)  # 3D array of maxima
+        img_argmax = np.argmax(all_landscapes, axis=0)
+        # img_max = np.choose(img_argmax, all_landscapes)  # 3D array of maxima
+        img_max = np.max(all_landscapes, axis=0)
 
-        img_max_maxfilt = dask_maximum_filter(img_max, radius / scale)
-        max_indices = da.where(img_max_maxfilt == img_max)
+        img_max_maxfilt = maximum_filter(img_max, radius / scale)
+        max_indices = np.where((img_max_maxfilt == img_max) & (img_max > threshold))
         argmax_indices = img_argmax[max_indices]
-        argmax_indices_result, max_indices_result = da.compute(
-            argmax_indices, max_indices
+
+        locs: list[tuple[int, int]] = block_info[None]["array-location"]
+
+        for i, (start, _) in enumerate(locs):
+            max_indices[i][:] += start
+        pos = np.stack(max_indices, axis=1).astype(np.float32) * scale
+        quats = np.take_along_axis(
+            self._quaternions, argmax_indices[:, np.newaxis], axis=0
         )
-
-        pos = np.stack(max_indices_result, axis=1).astype(np.float32) * scale
-        quats = np.choose(argmax_indices_result, self._quaternions)
-
-        return Molecules.from_quat(pos, quats)
+        return np.array([[MoleculesBox(pos, quats)]], dtype=object)
 
 
-delayed_affine = delayed(ndi.affine_transform)
-
-
-def dask_maximum_filter(image: da.Array, radius: float) -> da.Array:
+def maximum_filter(image: da.Array, radius: float) -> NDArray[np.float32]:
     r_int = int(np.ceil(radius))
     size = 2 * r_int + 1
     zz, yy, xx = np.indices((size,) * 3)
     foot = (zz - r_int) ** 2 + (yy - r_int) ** 2 + (xx - r_int) ** 2 <= radius**2
-    return image.map_overlap(
-        ndi.maximum_filter, footprint=foot, depth=size, mode="nearest"
-    )
+    return ndi.maximum_filter(image, footprint=foot, mode="nearest")  # type: ignore
+
+
+# NOTE: np.array(mole) is dangerous.
+class MoleculesBox:
+    def __init__(self, pos, quats) -> None:
+        self._pos = pos
+        self._quats = quats
+
+    def to_molecules(self) -> Molecules:
+        return Molecules.from_quat(self._pos, self._quats)

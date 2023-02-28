@@ -120,13 +120,15 @@ def ncc_landscape(
 
     corr: NDArray[np.float32] = fftconvolve(
         padimg, img1[(slice(None, None, -1),) * ndim], mode="valid"
-    )[(slice(1, -1, None),) * ndim]
+    )[
+        (slice(1, -1, None),) * ndim
+    ]  # type: ignore
 
     _win_sum = _window_sum_2d if ndim == 2 else _window_sum_3d
     win_sum1 = _win_sum(padimg, img1.shape)
     win_sum2 = _win_sum(padimg**2, img1.shape)
 
-    template_mean = np.mean(img1)
+    template_mean = np.mean(img1, dtype=np.float32)
     template_volume = np.prod(img1.shape)
     template_ssd = np.sum((img1 - template_mean) ** 2)
 
@@ -148,7 +150,9 @@ def ncc_landscape_no_pad(
     ndim = template.ndim
     corr: NDArray[np.float32] = fftconvolve(
         img, template[(slice(None, None, -1),) * ndim], mode="valid"
-    )[(slice(1, -1, None),) * ndim]
+    )[
+        (slice(1, -1, None),) * ndim
+    ]  # type: ignore
 
     _win_sum = _window_sum_2d if ndim == 2 else _window_sum_3d
     win_sum1 = _win_sum(img, template.shape)
@@ -173,7 +177,7 @@ def subpixel_zncc(
     img0: NDArray[np.float32],
     img1: NDArray[np.float32],
     upsample_factor: int,
-    max_shifts: tuple[float, ...] | None = None,
+    max_shifts: pixel | tuple[pixel, ...] | None = None,
 ) -> tuple[np.ndarray, float]:
     img0 -= img0.mean()
     img1 -= img1.mean()
@@ -187,16 +191,16 @@ def subpixel_zncc(
             (s - int(m) * 2 - 1) // 2 for m, s in zip(max_shifts, response.shape)
         )
     sl_res = tuple(slice(w, -w, None) for w in pad_width_eff)
-    response_center: np.ndarray = response[sl_res]
+    response_center = response[sl_res]
     maxima = np.unravel_index(np.argmax(response_center), response_center.shape)
-    midpoints = np.asarray(response_center.shape) // 2
+    midpoints = np.asarray(response_center.shape, dtype=np.int32) // 2
 
     if upsample_factor > 1:
         coords = _create_mesh(
             upsample_factor,
             maxima,
             max_shifts,
-            midpoints,
+            midpoints.astype(np.float32),
             pad_width_eff,
         )
         local_response: np.ndarray = ndi.map_coordinates(
@@ -272,15 +276,13 @@ def _get_padding_params(
 
 def _create_mesh(
     upsample_factor: int,
-    maxima: Sequence[pixel],
+    maxima: Sequence[np.intp],
     max_shifts: Sequence[pixel] | None,
-    midpoints: Sequence[pixel],
+    midpoints: NDArray[np.float32],
     pad_width_eff: Sequence[pixel],
 ):
     if max_shifts is not None:
-        shifts = np.array(maxima, dtype=np.float32) - np.array(
-            midpoints, dtype=np.float32
-        )  # type: ignore
+        shifts = np.array(maxima, dtype=np.float32) - midpoints
         _max_shifts = np.array(max_shifts, dtype=np.float32)  # type: ignore
         left = -shifts - _max_shifts
         right = -shifts + _max_shifts

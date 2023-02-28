@@ -362,15 +362,21 @@ class Molecules:
             Molecule subset.
         """
         if isinstance(spec, int):
-            spec = slice(spec, spec + 1)
-        pos = self.pos[spec]
-        quat = self._rotator.as_quat()[spec]
+            if spec < 0:
+                raise IndexError("Negative indexing is not supported.")
+            if spec >= len(self):
+                raise IndexError("Index out of range.")
+            _spec = slice(spec, spec + 1)
+        else:
+            _spec = spec
+        pos = self.pos[_spec]
+        quat = self._rotator.as_quat()[_spec]
         if self._features is None:
             return self.__class__(pos, Rotation(quat))
-        if _is_boolean_array(spec):
+        if _is_boolean_array(_spec):
             # NOTE: polars does not support boolean indexing
-            return self.__class__(pos, Rotation(quat), self._features.filter(spec))
-        return self.__class__(pos, Rotation(quat), self._features[spec])
+            return self.__class__(pos, Rotation(quat), self._features.filter(_spec))
+        return self.__class__(pos, Rotation(quat), self._features[_spec])
 
     def affine_matrix(
         self, src: np.ndarray, dst: np.ndarray | None = None, inverse: bool = False
@@ -879,7 +885,7 @@ class Molecules:
 
     def sort(
         self,
-        by: str | pl.Expr | Sequence[str | pl.Expr],
+        by: str | pl.Expr | Sequence[str] | Sequence[pl.Expr],
         *,
         reverse: bool = False,
     ) -> Self:
@@ -904,12 +910,12 @@ class Molecules:
             features=self.features.with_columns(exprs),
         )
 
-    def drop_features(self, expr: pl.Expr | Sequence[pl.Expr]) -> Self:
+    def drop_features(self, columns: str | Sequence[str]) -> Self:
         """Return a new instance with updated features."""
         return self.__class__(
             self.pos,
             self.rotator,
-            features=self.features.drop(expr),
+            features=self.features.drop(columns),
         )
 
 
@@ -925,7 +931,7 @@ class MoleculeGroup(Generic[_K]):
     def __iter__(self) -> Iterator[tuple[_K, Molecules]]:
         for key, df in self._group:
             mole = Molecules.from_dataframe(df)
-            yield key, mole
+            yield key, mole  # type: ignore
 
     @property
     def features(self) -> GroupBy:
