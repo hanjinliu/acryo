@@ -7,7 +7,7 @@ from acryo.molecules import Molecules
 from acryo._types import nm
 
 
-class MinerBase(ABC):
+class BaseMoleculePicker(ABC):
     def __init__(self, order: int = 1) -> None:
         self._order = order
 

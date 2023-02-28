@@ -10,8 +10,6 @@ from acryo.simulator import TomogramSimulator
 
 imread = SubtomogramLoader.imread
 
-TomogramCollection = BatchLoader  # backward compatibility
-
 __all__ = [
     "Molecules",
     "SubtomogramLoader",
