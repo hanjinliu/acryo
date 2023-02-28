@@ -879,7 +879,7 @@ class Molecules:
 
     def sort(
         self,
-        by: str | pl.Expr | Sequence[str | pl.Expr],
+        by: str | pl.Expr | Sequence[str] | Sequence[pl.Expr],
         *,
         reverse: bool = False,
     ) -> Self:
@@ -911,6 +911,10 @@ class Molecules:
             self.rotator,
             features=self.features.drop(expr),
         )
+
+    def topn(self, by: str, n: int) -> Self:
+        """Return the top n molecules by the given feature."""
+        return self.filter(pl.col(by).arg_sort() < n)
 
 
 _K = TypeVar("_K", bound=Hashable)
