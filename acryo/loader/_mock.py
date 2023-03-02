@@ -95,9 +95,10 @@ class MockLoader(LoaderBase):
             raise ValueError("Mismatched output shape and template shape.")
 
         # spline prefilter in advance
-        template = ndi.spline_filter(
-            template, order=self.order, mode="constant", output=np.float32
-        )
+        if self.order > 1:
+            template = ndi.spline_filter(
+                template, order=self.order, mode="constant", output=np.float32
+            )
         center = np.array(template.shape) / 2 - 0.5
         matrices = self.molecules.affine_matrix(
             center, center + self.molecules.pos / self.scale
