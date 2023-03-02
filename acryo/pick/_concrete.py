@@ -14,7 +14,20 @@ from acryo._types import nm
 
 
 class ZNCCTemplateMatcher(BaseTemplateMatcher):
-    """Particle picking based on ZNCC template matching."""
+    """
+    Particle picking based on ZNCC template matching.
+
+    Parameters
+    ----------
+    template : 3D array or ImageProvider
+        Template image.
+    rotation : range-like
+        3D rotation of template image in degrees.
+    tilt_range: tuple of float, default is (-60, 60)
+        Tilt range in degrees.
+    order : int, default is 1
+        Order of interpolation.
+    """
 
     def pick_molecules(
         self,
@@ -69,7 +82,7 @@ class LoGPicker(BasePickerModel):
         sigma: float,
     ) -> tuple[NDArray[np.float32], NDArray[np.uint16], Any]:
         img_filt = -ndi.gaussian_laplace(image, sigma)
-        max_indices = find_maxima(img_filt, sigma * 2, 0.0)
+        max_indices = find_maxima(img_filt, sigma, 0.0)
         score = img_filt[max_indices]
         pos = np.stack(max_indices, axis=1).astype(np.float32)
         quats = np.zeros((pos.shape[0], 4), dtype=np.float32)
@@ -100,7 +113,7 @@ class DoGPicker(BasePickerModel):
         img_filt = ndi.gaussian_filter(image, sigma_low) - ndi.gaussian_filter(
             image, sigma_high
         )
-        max_indices = find_maxima(img_filt, sigma_low * 2, 0.0)
+        max_indices = find_maxima(img_filt, sigma_low, 0.0)
         score = img_filt[max_indices]
         pos = np.stack(max_indices, axis=1).astype(np.float32)
         quats = np.zeros((pos.shape[0], 4), dtype=np.float32)
@@ -115,6 +128,8 @@ class DoGPicker(BasePickerModel):
 
 
 def maximum_filter(image: da.Array, radius: float) -> NDArray[np.float32]:
+    if radius < 1:
+        return image
     r_int = int(np.ceil(radius))
     size = 2 * r_int + 1
     zz, yy, xx = np.indices((size,) * 3)

@@ -14,7 +14,7 @@ from acryo.pipe._classes import ImageProvider
 from acryo.molecules import Molecules
 from acryo._rotation import normalize_rotations
 from acryo._utils import compose_matrices, missing_wedge_mask, delayed_affine
-from acryo._types import nm
+from acryo._types import nm, Ranges
 
 
 class BasePickerModel(ABC):
@@ -36,7 +36,7 @@ class BasePickerModel(ABC):
             trim=False,
             boundary="nearest",
             dtype=object,
-            meta=np.array([[[]]]),
+            meta=np.array([]),
         )
         boxes: Sequence[MoleculesBox] = task.compute().ravel()
         mole = Molecules.concat([box.to_molecules() for box in boxes])
@@ -76,7 +76,7 @@ class BaseTemplateMatcher(BasePickerModel):
     def __init__(
         self,
         template: NDArray[np.float32] | ImageProvider,
-        rotation,
+        rotation: Ranges,
         tilt_range: tuple[float, float] = (-60, 60),
         order: int = 1,
     ) -> None:
