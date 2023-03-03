@@ -178,7 +178,18 @@ class Molecules:
         **pl_kwargs,
     ) -> Self:
         """Load csv as a Molecules object."""
-        df: pl.DataFrame = pl.read_csv(path, **pl_kwargs)
+        df = pl.read_csv(path, **pl_kwargs)
+        return cls.from_dataframe(df, pos_cols, rot_cols)
+
+    @classmethod
+    def from_parquet(
+        cls,
+        path: PathLike,
+        pos_cols: list[str] = ["z", "y", "x"],
+        rot_cols: list[str] = ["zvec", "yvec", "xvec"],
+    ) -> Self:
+        """Load parquet as a Molecules object."""
+        df = pl.read_parquet(path)
         return cls.from_dataframe(df, pos_cols, rot_cols)
 
     @classmethod
@@ -269,6 +280,21 @@ class Molecules:
         return self.to_dataframe().write_csv(
             str(save_path),
             float_precision=float_precision,
+        )
+
+    def to_parquet(self, save_path: PathLike, *, compression="zstd") -> None:
+        """
+        Save molecules as a parquet file.
+
+        Parameters
+        ----------
+        save_path : PathLike
+            Save path.
+        compression : str, default is "zstd"
+            Compression method, by default "zstd".
+        """
+        return self.to_dataframe().write_parquet(
+            str(save_path), compression=compression
         )
 
     def __len__(self) -> int:
