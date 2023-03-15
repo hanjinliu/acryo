@@ -4,7 +4,7 @@
   <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo.pipe package &mdash; acryo 0.2.0 documentation</title>
+  <title>acryo.pipe package &mdash; acryo 0.2.1 documentation</title>
       <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -30,7 +30,7 @@
             <a href="../index.html" class="icon icon-home"> acryo
           </a>
               <div class="version">
-                0.2.0
+                0.2.1
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
@@ -84,7 +84,7 @@
 
 <dl class="py function">
 <dt class="sig sig-object py" id="acryo.pipe.converter_function">
-<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">converter_function</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">fn</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Callable</span><span class="p"><span class="pre">[</span></span><span class="p"><span class="pre">[</span></span><span class="pre">numpy.ndarray</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">acryo.pipe._curry._P</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">acryo.pipe._curry._R</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Callable</span><span class="p"><span class="pre">[</span></span><span class="p"><span class="pre">[</span></span><span class="pre">acryo.pipe._curry._P</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">acryo.pipe._classes.ImageConverter</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/acryo/pipe/_curry.html#converter_function"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.converter_function" title="Permalink to this definition"></a></dt>
+<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">converter_function</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">fn</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Callable</span><span class="p"><span class="pre">[</span></span><span class="pre">Concatenate</span><span class="p"><span class="pre">[</span></span><span class="pre">np.ndarray</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">nm</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">_P</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">np.ndarray</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Callable</span><span class="p"><span class="pre">[</span></span><span class="pre">_P</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">ImageConverter</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/acryo/pipe/_curry.html#converter_function"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.converter_function" title="Permalink to this definition"></a></dt>
 <dd><p>Convert a function into a curried function that returns a image converter.</p>
 <p>Input function must accept <cite>fn(img, scale)</cite>.</p>
 <p class="rubric">Examples</p>
@@ -104,7 +104,7 @@
 <dd><p>Pipe operation that dilate (or erode) a binary image using a circular structure.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
-<dd class="field-odd"><p><strong>radius</strong> (<em>float</em>) – Radius of the structure element. If negative, erosion is applied.</p>
+<dd class="field-odd"><p><strong>radius</strong> (<em>float</em>) – Radius of the structure element in nanometer. If negative, erosion is applied.</p>
 </dd>
 </dl>
 </dd></dl>
@@ -129,6 +129,24 @@ Will be used for the template images or the mask images.</p>
 of the scale extracted from the image metadata.</p></li>
 <li><p><strong>tol</strong> (<em>float</em>) – Tolerance of the scale difference. If the relative difference is smaller than
 this, the image will not be resized.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="acryo.pipe.from_atoms">
+<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">from_atoms</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/pipe/_imread.html#from_atoms"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.from_atoms" title="Permalink to this definition"></a></dt>
+<dd><p>An image provider function using a point cloud.</p>
+<p>Given an array of atoms, such as data extracted from a PDB file, this function
+can generate a 3D image of the atoms by simply building a histogram.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>atoms</strong> (<em>(</em><em>N</em><em>, </em><em>3</em><em>) </em><em>array</em>) – Atoms coordinates in nanometer.</p></li>
+<li><p><strong>weights</strong> (<em>np.ndarray</em><em>, </em><em>optional</em>) – weights of the atoms.</p></li>
+<li><p><strong>center</strong> (<em>tuple of float</em><em>, </em><em>optional</em>) – Coordinates of the image center. If not given, the geometric center of the atoms
+will be used.</p></li>
 </ul>
 </dd>
 </dl>
@@ -211,7 +229,7 @@ the center.</p>
 
 <dl class="py function">
 <dt class="sig sig-object py" id="acryo.pipe.provider_function">
-<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">provider_function</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">fn</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Callable</span><span class="p"><span class="pre">[</span></span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">acryo.pipe._curry._P</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">acryo.pipe._curry._R</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Callable</span><span class="p"><span class="pre">[</span></span><span class="p"><span class="pre">[</span></span><span class="pre">acryo.pipe._curry._P</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">acryo.pipe._classes.ImageProvider</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/acryo/pipe/_curry.html#provider_function"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.provider_function" title="Permalink to this definition"></a></dt>
+<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">provider_function</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">fn</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Callable</span><span class="p"><span class="pre">[</span></span><span class="pre">Concatenate</span><span class="p"><span class="pre">[</span></span><span class="pre">nm</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">_P</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">np.ndarray</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Callable</span><span class="p"><span class="pre">[</span></span><span class="pre">_P</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">ImageProvider</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/acryo/pipe/_curry.html#provider_function"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.provider_function" title="Permalink to this definition"></a></dt>
 <dd><p>Convert a function into a curried function that returns a image provider.</p>
 <p class="rubric">Examples</p>
 <div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="nd">@provider_function</span>

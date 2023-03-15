@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo.loader._batch &mdash; acryo 0.2.0 documentation</title>
+  <title>acryo.loader._batch &mdash; acryo 0.2.1 documentation</title>
       <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -29,7 +29,7 @@
             <a href="../../../index.html" class="icon icon-home"> acryo
           </a>
               <div class="version">
-                0.2.0
+                0.2.1
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
@@ -42,6 +42,7 @@
               <ul>
 <li class="toctree-l1"><a class="reference internal" href="../../../main/molecules.html">Molecules</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../main/loader.html">Subtomogram Loader</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../main/caching.html">Cache Subtomograms</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../main/pipe.html">Piping Images to the Loader</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../main/alignment.html">Alignment Model</a></li>
 </ul>
@@ -83,6 +84,7 @@
 
 <span class="kn">from</span> <span class="nn">dask</span> <span class="kn">import</span> <span class="n">array</span> <span class="k">as</span> <span class="n">da</span>
 
+<span class="kn">from</span> <span class="nn">acryo</span> <span class="kn">import</span> <span class="n">_utils</span>
 <span class="kn">from</span> <span class="nn">acryo.molecules</span> <span class="kn">import</span> <span class="n">Molecules</span>
 <span class="kn">from</span> <span class="nn">acryo._types</span> <span class="kn">import</span> <span class="n">nm</span><span class="p">,</span> <span class="n">pixel</span>
 <span class="kn">from</span> <span class="nn">acryo.loader._base</span> <span class="kn">import</span> <span class="n">LoaderBase</span>
@@ -93,7 +95,7 @@
     <span class="kn">from</span> <span class="nn">typing_extensions</span> <span class="kn">import</span> <span class="n">Self</span>
     <span class="kn">from</span> <span class="nn">acryo.loader._base</span> <span class="kn">import</span> <span class="n">_ShapeType</span>
 
-<span class="n">IMAGE_ID_LABEL</span> <span class="o">=</span> <span class="s2">&quot;image&quot;</span>
+<span class="n">IMAGE_ID_LABEL</span> <span class="o">=</span> <span class="s2">&quot;image-id&quot;</span>
 
 
 <div class="viewcode-block" id="BatchLoader"><a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.BatchLoader">[docs]</a><span class="k">class</span> <span class="nc">BatchLoader</span><span class="p">(</span><span class="n">LoaderBase</span><span class="p">):</span>
@@ -212,6 +214,31 @@
                     <span class="n">out</span><span class="o">.</span><span class="n">_images</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">k</span><span class="p">)</span>
         <span class="k">return</span> <span class="n">out</span></div>
 
+<div class="viewcode-block" id="BatchLoader.binning"><a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.BatchLoader.binning">[docs]</a>    <span class="k">def</span> <span class="nf">binning</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">binsize</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">compute</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Return a new instance with binned images.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">binsize</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="n">tr</span> <span class="o">=</span> <span class="o">-</span><span class="p">(</span><span class="n">binsize</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">scale</span>
+        <span class="n">molecules</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">molecules</span><span class="o">.</span><span class="n">translate</span><span class="p">([</span><span class="n">tr</span><span class="p">,</span> <span class="n">tr</span><span class="p">,</span> <span class="n">tr</span><span class="p">])</span>
+        <span class="n">_images</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="n">Hashable</span><span class="p">,</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span> <span class="o">|</span> <span class="n">da</span><span class="o">.</span><span class="n">Array</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="n">_compute_dict</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="n">Hashable</span><span class="p">,</span> <span class="n">da</span><span class="o">.</span><span class="n">Array</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">_id</span><span class="p">,</span> <span class="n">image</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_images</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">binned_image</span> <span class="o">=</span> <span class="n">_utils</span><span class="o">.</span><span class="n">bin_image</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">binsize</span><span class="o">=</span><span class="n">binsize</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">binned_image</span><span class="p">,</span> <span class="n">da</span><span class="o">.</span><span class="n">Array</span><span class="p">)</span> <span class="ow">and</span> <span class="n">compute</span><span class="p">:</span>
+                <span class="n">_compute_dict</span><span class="p">[</span><span class="n">_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">binned_image</span>
+            <span class="n">_images</span><span class="p">[</span><span class="n">_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">binned_image</span>
+
+        <span class="k">if</span> <span class="n">_compute_dict</span><span class="p">:</span>
+            <span class="n">_computed</span> <span class="o">=</span> <span class="n">da</span><span class="o">.</span><span class="n">compute</span><span class="p">(</span><span class="n">_compute_dict</span><span class="p">)</span>
+            <span class="n">_images</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">_computed</span><span class="p">)</span>
+
+        <span class="n">out</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span>
+            <span class="n">molecules</span><span class="o">=</span><span class="n">molecules</span><span class="p">,</span>
+            <span class="n">scale</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">scale</span> <span class="o">*</span> <span class="n">binsize</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">_images</span> <span class="o">=</span> <span class="n">_images</span>
+        <span class="k">return</span> <span class="n">out</span></div>
+
 <div class="viewcode-block" id="BatchLoader.construct_loading_tasks"><a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.BatchLoader.construct_loading_tasks">[docs]</a>    <span class="k">def</span> <span class="nf">construct_loading_tasks</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span> <span class="n">output_shape</span><span class="p">:</span> <span class="n">_ShapeType</span> <span class="o">=</span> <span class="kc">None</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">da</span><span class="o">.</span><span class="n">Array</span><span class="p">]:</span>
@@ -258,6 +285,11 @@
                 <span class="n">col</span><span class="o">.</span><span class="n">corner_safe</span><span class="p">,</span>
             <span class="p">)</span>
             <span class="k">yield</span> <span class="n">loader</span>
+
+    <span class="k">def</span> <span class="fm">__len__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Number of loaders.&quot;&quot;&quot;</span>
+        <span class="n">col</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_collection</span><span class="p">()</span>
+        <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="n">col</span><span class="o">.</span><span class="n">_images</span><span class="p">)</span>
 </pre></div>
 
            </div>

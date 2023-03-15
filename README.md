@@ -1,3 +1,6 @@
+[![Python package index download statistics](https://img.shields.io/pypi/dm/acryo.svg)](https://pypistats.org/packages/acryo)
+[![PyPI version](https://badge.fury.io/py/acryo.svg)](https://badge.fury.io/py/acryo)
+
 # acryo
 
 `acryo` is an extensible cryo-EM/ET toolkit for Python.

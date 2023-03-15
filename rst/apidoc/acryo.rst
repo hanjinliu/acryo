@@ -10,6 +10,7 @@ Subpackages
    acryo.alignment
    acryo.classification
    acryo.loader
+   acryo.pick
    acryo.pipe
    acryo.testing
 

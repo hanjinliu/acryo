@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo.pipe._transform &mdash; acryo 0.2.0 documentation</title>
+  <title>acryo.pipe._transform &mdash; acryo 0.2.1 documentation</title>
       <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -29,7 +29,7 @@
             <a href="../../../index.html" class="icon icon-home"> acryo
           </a>
               <div class="version">
-                0.2.0
+                0.2.1
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
@@ -87,7 +87,7 @@
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
     <span class="sd">&quot;&quot;&quot;Centering an image by its center of mass.&quot;&quot;&quot;</span>
     <span class="n">shift</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">ndi</span><span class="o">.</span><span class="n">center_of_mass</span><span class="p">(</span><span class="n">img</span><span class="p">))</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">img</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
-    <span class="k">return</span> <span class="n">ndi</span><span class="o">.</span><span class="n">shift</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="o">-</span><span class="n">shift</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="n">order</span><span class="p">,</span> <span class="n">prefilter</span><span class="o">=</span><span class="n">order</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;reflect&quot;</span><span class="p">)</span></div>
+    <span class="k">return</span> <span class="n">ndi</span><span class="o">.</span><span class="n">shift</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="o">-</span><span class="n">shift</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="n">order</span><span class="p">,</span> <span class="n">prefilter</span><span class="o">=</span><span class="n">order</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;nearest&quot;</span><span class="p">)</span></div>
 
 
 <div class="viewcode-block" id="gaussian_filter"><a class="viewcode-back" href="../../../apidoc/acryo.pipe.html#acryo.pipe.gaussian_filter">[docs]</a><span class="nd">@converter_function</span>

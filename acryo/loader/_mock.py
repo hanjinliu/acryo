@@ -84,6 +84,10 @@ class MockLoader(LoaderBase):
     def construct_loading_tasks(
         self, output_shape: _ShapeType = None
     ) -> list[da.Array]:
+        # TODO: this implementation is not efficent. Radon transformation is not
+        # actually needed. Apply missing wedge mask directly to the template, and
+        # apply inverse-Radon only to the noise. The linearity of Radon
+        # transformation guarantees that the result is correct.
         tasks: list[Delayed] = []
         if isinstance(self._template, ImageProvider):
             template = self._template(self.scale)
@@ -200,7 +204,7 @@ def normalize_radon_input(
     central_axis = np.asarray(central_axis)
     central_axis /= np.sqrt(np.sum(central_axis**2))  # normalize
     if central_axis.shape != (3,):
-        raise ValueError(f"Central axis must be a 3D vector")
+        raise ValueError("Central axis must be a 3D vector")
 
     # construct Affine transform matrices
     height = int(np.ceil(np.linalg.norm(self.shape)))
@@ -243,6 +247,8 @@ def iradon(
     output_shape: tuple[int, int],
     interpolation: str = "cubic",
 ):
+    from scipy.interpolate import interp1d
+
     angles_count = len(degrees)
     dtype = img.dtype
     img_shape = img.shape[0]
@@ -256,8 +262,6 @@ def iradon(
     npr, ypr = np.indices(output_shape)
     npr -= output_shape[0] // 2
     ypr -= output_shape[1] // 2
-
-    from scipy.interpolate import interp1d
 
     x = np.arange(img_shape) - img_shape // 2
     for col, angle in zip(radon_filtered.T, np.deg2rad(degrees)):

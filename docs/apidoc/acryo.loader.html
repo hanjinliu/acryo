@@ -4,7 +4,7 @@
   <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo.loader package &mdash; acryo 0.2.0 documentation</title>
+  <title>acryo.loader package &mdash; acryo 0.2.1 documentation</title>
       <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -30,7 +30,7 @@
             <a href="../index.html" class="icon icon-home"> acryo
           </a>
               <div class="version">
-                0.2.0
+                0.2.1
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
@@ -94,6 +94,12 @@ to get the average of all the molecules available.</p>
 <dt class="sig sig-object py" id="acryo.loader.BatchLoader.add_tomogram">
 <span class="sig-name descname"><span class="pre">add_tomogram</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">image</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">np.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">da.Array</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">molecules</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="acryo.html#acryo.molecules.Molecules" title="acryo.molecules.Molecules"><span class="pre">Molecules</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">image_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Hashable</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="reference internal" href="../_modules/acryo/loader/_batch.html#BatchLoader.add_tomogram"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.loader.BatchLoader.add_tomogram" title="Permalink to this definition"></a></dt>
 <dd><p>Add a tomogram and its molecules to the collection.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="acryo.loader.BatchLoader.binning">
+<span class="sig-name descname"><span class="pre">binning</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">binsize</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">compute</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="reference internal" href="../_modules/acryo/loader/_batch.html#BatchLoader.binning"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.loader.BatchLoader.binning" title="Permalink to this definition"></a></dt>
+<dd><p>Return a new instance with binned images.</p>
 </dd></dl>
 
 <dl class="py method">
@@ -209,7 +215,23 @@ should be set false to save computation time.</p></li>
 <dl class="py method">
 <dt class="sig sig-object py" id="acryo.loader.SubtomogramLoader.binning">
 <span class="sig-name descname"><span class="pre">binning</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">binsize</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pixel</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">2</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">compute</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="reference internal" href="../_modules/acryo/loader/_loader.html#SubtomogramLoader.binning"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.loader.SubtomogramLoader.binning" title="Permalink to this definition"></a></dt>
-<dd></dd></dl>
+<dd><p>Return a new instance with binned image.</p>
+<p>This method also properly translates the molecule coordinates.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>binsize</strong> (<em>int</em><em>, </em><em>default is 2</em>) – Bin size.</p></li>
+<li><p><strong>compute</strong> (<em>bool</em><em>, </em><em>default is True</em>) – If true, the image is computed immediately to a numpy array.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>A new instance with binned image.</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p><a class="reference internal" href="#acryo.loader.SubtomogramLoader" title="acryo.loader.SubtomogramLoader">SubtomogramLoader</a></p>
+</dd>
+</dl>
+</dd></dl>
 
 <dl class="py method">
 <dt class="sig sig-object py" id="acryo.loader.SubtomogramLoader.construct_loading_tasks">

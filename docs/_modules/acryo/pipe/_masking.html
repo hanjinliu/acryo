@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo.pipe._masking &mdash; acryo 0.2.0 documentation</title>
+  <title>acryo.pipe._masking &mdash; acryo 0.2.1 documentation</title>
       <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -29,7 +29,7 @@
             <a href="../../../index.html" class="icon icon-home"> acryo
           </a>
               <div class="version">
-                0.2.0
+                0.2.1
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
@@ -117,33 +117,33 @@
 
 
 <div class="viewcode-block" id="dilation"><a class="viewcode-back" href="../../../apidoc/acryo.pipe.html#acryo.pipe.dilation">[docs]</a><span class="nd">@converter_function</span>
-<span class="k">def</span> <span class="nf">dilation</span><span class="p">(</span><span class="n">img</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">bool_</span><span class="p">],</span> <span class="n">scale</span><span class="p">:</span> <span class="n">nm</span><span class="p">,</span> <span class="n">radius</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">bool_</span><span class="p">]:</span>
+<span class="k">def</span> <span class="nf">dilation</span><span class="p">(</span><span class="n">img</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">bool_</span><span class="p">],</span> <span class="n">scale</span><span class="p">:</span> <span class="n">nm</span><span class="p">,</span> <span class="n">radius</span><span class="p">:</span> <span class="n">nm</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">bool_</span><span class="p">]:</span>
     <span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Pipe operation that dilate (or erode) a binary image using a circular structure.</span>
 
 <span class="sd">    Parameters</span>
 <span class="sd">    ----------</span>
 <span class="sd">    radius : float</span>
-<span class="sd">        Radius of the structure element. If negative, erosion is applied.</span>
+<span class="sd">        Radius of the structure element in nanometer. If negative, erosion is applied.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
-    <span class="k">if</span> <span class="n">radius</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+    <span class="n">radius_px</span> <span class="o">=</span> <span class="nb">abs</span><span class="p">(</span><span class="n">radius</span> <span class="o">/</span> <span class="n">scale</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">radius_px</span> <span class="o">&lt;</span> <span class="mi">1</span><span class="p">:</span>
         <span class="k">return</span> <span class="n">img</span>
-    <span class="n">radius_px</span> <span class="o">=</span> <span class="n">radius</span> <span class="o">/</span> <span class="n">scale</span>
-    <span class="n">r</span> <span class="o">=</span> <span class="nb">abs</span><span class="p">(</span><span class="n">radius_px</span><span class="p">)</span>
-    <span class="n">rceil</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">r</span> <span class="o">+</span> <span class="mi">1</span><span class="p">))</span>
-    <span class="n">zz</span><span class="p">,</span> <span class="n">yy</span><span class="p">,</span> <span class="n">xx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">indices</span><span class="p">((</span><span class="n">rceil</span><span class="p">,)</span> <span class="o">*</span> <span class="mi">3</span><span class="p">)</span>
+    <span class="n">r</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span><span class="n">radius_px</span><span class="p">))</span>
+    <span class="n">size</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">r</span> <span class="o">+</span> <span class="mi">1</span>
+    <span class="n">zz</span><span class="p">,</span> <span class="n">yy</span><span class="p">,</span> <span class="n">xx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">indices</span><span class="p">((</span><span class="n">size</span><span class="p">,)</span> <span class="o">*</span> <span class="mi">3</span><span class="p">)</span>
     <span class="n">structure</span> <span class="o">=</span> <span class="p">(</span><span class="n">xx</span> <span class="o">-</span> <span class="n">r</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span> <span class="o">+</span> <span class="p">(</span><span class="n">yy</span> <span class="o">-</span> <span class="n">r</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span> <span class="o">+</span> <span class="p">(</span><span class="n">zz</span> <span class="o">-</span> <span class="n">r</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span> <span class="o">&lt;=</span> <span class="n">r</span><span class="o">**</span><span class="mi">2</span>
-    <span class="k">if</span> <span class="n">radius_px</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">radius</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">:</span>
         <span class="n">out</span> <span class="o">=</span> <span class="n">ndi</span><span class="o">.</span><span class="n">binary_erosion</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">structure</span><span class="o">=</span><span class="n">structure</span><span class="p">,</span> <span class="n">border_value</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
-    <span class="k">elif</span> <span class="n">radius_px</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+    <span class="k">elif</span> <span class="n">radius</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
         <span class="n">out</span> <span class="o">=</span> <span class="n">ndi</span><span class="o">.</span><span class="n">binary_dilation</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">structure</span><span class="o">=</span><span class="n">structure</span><span class="p">,</span> <span class="n">border_value</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
     <span class="k">return</span> <span class="n">out</span></div>
 
 
 <div class="viewcode-block" id="gaussian_smooth"><a class="viewcode-back" href="../../../apidoc/acryo.pipe.html#acryo.pipe.gaussian_smooth">[docs]</a><span class="nd">@converter_function</span>
 <span class="k">def</span> <span class="nf">gaussian_smooth</span><span class="p">(</span>
-    <span class="n">img</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">bool_</span><span class="p">],</span> <span class="n">scale</span><span class="p">:</span> <span class="n">nm</span><span class="p">,</span> <span class="n">sigma</span><span class="p">:</span> <span class="nb">float</span>
-<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">bool_</span><span class="p">]:</span>
+    <span class="n">img</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">bool_</span><span class="p">],</span> <span class="n">scale</span><span class="p">:</span> <span class="n">nm</span><span class="p">,</span> <span class="n">sigma</span><span class="p">:</span> <span class="n">nm</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
     <span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Pipe operation that smooth a binary image using a Gaussian kernel.</span>
 
@@ -152,13 +152,15 @@
 <span class="sd">    sigma : float</span>
 <span class="sd">        Standard deviation of the Gaussian kernel.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">sigma</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">img</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
     <span class="n">img</span> <span class="o">=</span> <span class="o">~</span><span class="n">img</span>
     <span class="n">dist</span> <span class="o">=</span> <span class="n">ndi</span><span class="o">.</span><span class="n">distance_transform_edt</span><span class="p">(</span><span class="n">img</span><span class="p">)</span>
-    <span class="n">blurred_mask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="p">(</span><span class="n">dist</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span> <span class="o">/</span> <span class="p">(</span><span class="n">sigma</span> <span class="o">/</span> <span class="n">scale</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)</span>
+    <span class="n">blurred_mask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="p">(</span><span class="n">dist</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span> <span class="o">/</span> <span class="p">(</span><span class="n">sigma</span> <span class="o">/</span> <span class="n">scale</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
     <span class="k">return</span> <span class="n">blurred_mask</span></div>
 
 
-<div class="viewcode-block" id="soft_otsu"><a class="viewcode-back" href="../../../apidoc/acryo.pipe.html#acryo.pipe.soft_otsu">[docs]</a><span class="k">def</span> <span class="nf">soft_otsu</span><span class="p">(</span><span class="n">sigma</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">,</span> <span class="n">radius</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">,</span> <span class="n">bins</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">256</span><span class="p">):</span>
+<div class="viewcode-block" id="soft_otsu"><a class="viewcode-back" href="../../../apidoc/acryo.pipe.html#acryo.pipe.soft_otsu">[docs]</a><span class="k">def</span> <span class="nf">soft_otsu</span><span class="p">(</span><span class="n">sigma</span><span class="p">:</span> <span class="n">nm</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">,</span> <span class="n">radius</span><span class="p">:</span> <span class="n">nm</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">,</span> <span class="n">bins</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">256</span><span class="p">):</span>
     <span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Pipe operation of soft Otsu thresholding.</span>
 
@@ -180,7 +182,8 @@
 <span class="sd">    bins : int, default is 256</span>
 <span class="sd">        Number of bins to build histogram.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
-    <span class="k">return</span> <span class="n">gaussian_smooth</span><span class="p">(</span><span class="n">sigma</span><span class="p">)</span> <span class="o">@</span> <span class="n">dilation</span><span class="p">(</span><span class="n">radius</span><span class="p">)</span> <span class="o">@</span> <span class="n">threshold_otsu</span><span class="p">(</span><span class="n">bins</span><span class="p">)</span></div>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">gaussian_smooth</span><span class="p">(</span><span class="n">sigma</span><span class="p">)</span> <span class="o">@</span> <span class="n">dilation</span><span class="p">(</span><span class="n">radius</span><span class="p">)</span> <span class="o">@</span> <span class="n">threshold_otsu</span><span class="p">(</span><span class="n">bins</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;soft_otsu(</span><span class="si">{</span><span class="n">sigma</span><span class="si">=:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">radius</span><span class="si">=:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">bins</span><span class="si">=}</span><span class="s2">)&quot;</span><span class="p">)</span></div>
 </pre></div>
 
            </div>
