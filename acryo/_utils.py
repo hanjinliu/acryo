@@ -1,8 +1,9 @@
 # pyright: reportPrivateImportUsage=false
 from __future__ import annotations
 
-from typing import Sequence, TYPE_CHECKING
-from functools import lru_cache, reduce
+import warnings
+from typing import Callable, Sequence, TYPE_CHECKING, TypeVar
+from functools import lru_cache, reduce, wraps
 
 import numpy as np
 from numpy.typing import NDArray
@@ -387,3 +388,23 @@ def _get_ND_butterworth_filter(
     q2 = reduce(np.add, np.meshgrid(*ranges, indexing="ij", sparse=True))
     wfilt = 1 / (1 + q2**order)
     return wfilt
+
+
+_F = TypeVar("_F", bound=Callable)
+
+
+def deprecated_kwarg(old: str, new: str) -> Callable[[_F], _F]:
+    def _inner(f):
+        @wraps(f)
+        def _func(*args, **kwargs):
+            if old in kwargs:
+                warnings.warn(
+                    f"`{old}` is deprecated, use `{new}` instead",
+                    DeprecationWarning,
+                )
+                kwargs[new] = kwargs.pop(old)
+            return f(*args, **kwargs)
+
+        return _func
+
+    return _inner

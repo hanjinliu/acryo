@@ -5,9 +5,8 @@ from acryo.alignment import (
     ZNCCAlignment,
     PCCAlignment,
     BaseAlignmentModel,
-    rotate,
-    euler_to_quat,
 )
+from acryo._rotation import rotate, euler_to_quat
 from acryo.testing import TomogramGenerator, spiral
 from scipy import ndimage as ndi
 import pytest

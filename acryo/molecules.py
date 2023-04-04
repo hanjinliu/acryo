@@ -17,10 +17,12 @@ from numpy.typing import ArrayLike, NDArray
 import polars as pl
 from scipy.spatial.transform import Rotation
 from acryo._types import nm
+from acryo._utils import deprecated_kwarg
 
 if TYPE_CHECKING:
     from typing_extensions import Self, TypeGuard
-    from polars.internals.dataframe.groupby import GroupBy
+    from polars.type_aliases import IntoExpr
+    from polars.dataframe.groupby import GroupBy
 
 _CSV_COLUMNS = ["z", "y", "x", "zvec", "yvec", "xvec"]
 PathLike = Union[str, Path, bytes]
@@ -880,10 +882,10 @@ class Molecules:
     def groupby(self, by: Sequence[str | pl.Expr]) -> MoleculeGroup[tuple[str, ...]]:
         ...
 
-    def groupby(self, by):
+    def groupby(self, by: IntoExpr | Iterable[IntoExpr], *more_by: IntoExpr):
         """Group molecules into sub-groups."""
         df = self.to_dataframe()
-        return MoleculeGroup(df.groupby(by, maintain_order=True))
+        return MoleculeGroup(df.groupby(by, *more_by, maintain_order=True))
 
     def filter(
         self,
@@ -909,11 +911,12 @@ class Molecules:
         df = self.to_dataframe()
         return self.__class__.from_dataframe(df.sample(n, seed=seed))
 
+    @deprecated_kwarg(old="reverse", new="descending")
     def sort(
         self,
-        by: str | pl.Expr | Sequence[str] | Sequence[pl.Expr],
-        *,
-        reverse: bool = False,
+        by: IntoExpr | Iterable[IntoExpr],
+        *more_by: IntoExpr,
+        descending: bool = False,
     ) -> Self:
         """
         Return a new instance with sorted molecules and features.
@@ -922,26 +925,33 @@ class Molecules:
         ----------
         by : str or Expr or sequence of them
             Column name or expression to sort by.
-        reverse : bool, default is False
+        descending : bool, default is False
             If true, sort in descending order.
         """
         df = self.to_dataframe()
-        return self.__class__.from_dataframe(df.sort(by=by, reverse=reverse))
-
-    def with_features(self, exprs) -> Self:
-        """Return a new instance with updated features."""
-        return self.__class__(
-            self.pos,
-            self.rotator,
-            features=self.features.with_columns(exprs),
+        return self.__class__.from_dataframe(
+            df.sort(by, *more_by, descending=descending)
         )
 
-    def drop_features(self, columns: str | Sequence[str]) -> Self:
+    def with_features(
+        self,
+        exprs: IntoExpr | Iterable[IntoExpr],
+        *more_exprs: IntoExpr,
+        **named_exprs: IntoExpr,
+    ) -> Self:
         """Return a new instance with updated features."""
         return self.__class__(
             self.pos,
             self.rotator,
-            features=self.features.drop(columns),
+            features=self.features.with_columns(exprs, *more_exprs, **named_exprs),
+        )
+
+    def drop_features(self, columns: str | Sequence[str], *more_columns: str) -> Self:
+        """Return a new instance with updated features."""
+        return self.__class__(
+            self.pos,
+            self.rotator,
+            features=self.features.drop(columns, *more_columns),
         )
 
 
