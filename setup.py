@@ -1,17 +1,19 @@
 from setuptools import setup, find_packages
 
-with open("acryo/__init__.py", encoding="utf-8") as f:
+ACRYO = "acryo"
+
+with open(f"{ACRYO}/__init__.py", encoding="utf-8") as f:
     line = next(f)
     VERSION = line.strip().split()[-1][1:-1]
 
 with open("README.md", "r") as f:
-    readme = f.read()
+    README = f.read()
 
 setup(
-    name="acryo",
+    name=ACRYO,
     version=VERSION,
     description="An extensible cryo-EM/ET toolkit for Python.",
-    long_description=readme,
+    long_description=README,
     long_description_content_type="text/markdown",
     author="Hanjin Liu",
     author_email="liuhanjin-sc@g.ecc.u-tokyo.ac.jp",
