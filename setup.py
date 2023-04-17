@@ -22,7 +22,7 @@ setup(
     install_requires=[
         "numpy>=1.21",
         "scipy>=1.7.3",
-        "polars>=0.16.18",
+        "polars>=0.17.3",
         "dask>=2021.6.0",
         "typing_extensions>=4.1.1",
     ],

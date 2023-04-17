@@ -13,6 +13,7 @@ from typing import (
 )
 from typing_extensions import Self
 import inspect
+import warnings
 
 import numpy as np
 from numpy.typing import NDArray
@@ -133,7 +134,6 @@ class BaseAlignmentModel(ABC):
                 mask = mask.astype(np.float32)
             self._mask = mask
 
-        self._align_func = self._get_alignment_function()
         self._template_input, self._mask_input = self._get_template_and_mask_input()
 
     def __repr__(self) -> str:
@@ -141,10 +141,12 @@ class BaseAlignmentModel(ABC):
 
     @property
     def template(self) -> NDArray[np.float32]:
+        """The template image."""
         return self._template
 
     @property
     def mask(self) -> NDArray[np.float32]:
+        """The mask image."""
         return self._mask
 
     @property
@@ -161,7 +163,7 @@ class BaseAlignmentModel(ABC):
         return _with_params(cls, **params)
 
     @abstractmethod
-    def optimize(
+    def _optimize(
         self,
         subvolume: NDArray[np.complex64],
         template: NDArray[np.complex64],
@@ -202,6 +204,19 @@ class BaseAlignmentModel(ABC):
     @abstractmethod
     def pre_transform(self, image: NDArray[np.float32]) -> NDArray[np.complex64]:
         """Pre-transformation applied to input images (including template)."""
+
+    def _landscape(
+        self,
+        subvolume: NDArray[np.complex64],
+        template: NDArray[np.complex64],
+        max_shifts: tuple[float, ...],
+        quaternion: NDArray[np.float32],
+        pos: NDArray[np.float32],
+    ) -> NDArray[np.float32]:
+        """Return the landscape of the subvolume."""
+        raise NotImplementedError(
+            f"_landscape method is not implemented for {type(self).__name__}."
+        )
 
     def _get_template_and_mask_input(
         self,
@@ -260,7 +275,12 @@ class BaseAlignmentModel(ABC):
             _pos = self._DUMMY_POS
         else:
             _pos = pos
-        return self._align_func(
+
+        if self._is_multiple():
+            _align_fn = self._optimize_multiple
+        else:
+            _align_fn = self._optimize_single
+        return _align_fn(
             img,
             self._template_input,
             self._mask_input,
@@ -298,6 +318,88 @@ class BaseAlignmentModel(ABC):
         img_trans: NDArray[np.float32] = ndi.affine_transform(img, mtx, cval=_cval)  # type: ignore
         return img_trans, result
 
+    def landscape(
+        self,
+        img: NDArray[np.float32],
+        max_shifts: tuple[float, float, float],
+        quaternion: NDArray[np.float32] | None = None,
+        pos: NDArray[np.float32] | None = None,
+    ) -> NDArray[np.float32]:
+        """
+        Calculate correlation landscape of the input image.
+
+        Parameters
+        ----------
+        img : np.ndarray
+            Subvolume for the landscape calculation.
+        max_shifts : tuple[float, float, float]
+            Maximum shifts along z, y, x axis in pixel.
+
+        Returns
+        -------
+        np.ndarray
+            N (if single template) or N+1 (if multi-template) dimensional array of
+            correlation landscape.
+        """
+        if quaternion is None:
+            _quat = self._DUMMY_QUAT
+        else:
+            _quat = quaternion
+        if pos is None:
+            _pos = self._DUMMY_POS
+        else:
+            _pos = pos
+        if self._is_multiple():
+            fn = self._landscape_multiple
+        else:
+            fn = self._landscape_single
+        return fn(
+            img,
+            self._template_input,
+            self._mask_input,
+            max_shifts,
+            _quat,
+            _pos,
+        )
+
+    def _landscape_single(
+        self,
+        subvolume: NDArray[np.float32],
+        template: NDArray[np.complex64],
+        mask: NDArray[np.float32],
+        max_shifts: tuple[float, ...],
+        quaternion: NDArray[np.float32],
+        pos: NDArray[np.float32],
+    ):
+        return self._landscape(
+            self.pre_transform(subvolume * mask),
+            template,
+            max_shifts=max_shifts,
+            quaternion=quaternion,
+            pos=pos,
+        )
+
+    def _landscape_multiple(
+        self,
+        subvolume: NDArray[np.float32],
+        template_list: Iterable[NDArray[np.complex64]],
+        mask_list: Iterable[NDArray[np.float32]],
+        max_shifts: tuple[float, float, float],
+        quaternion: NDArray[np.float32],
+        pos: NDArray[np.float32],
+    ):
+        out: list[NDArray[np.float32]] = []
+        for template, mask in zip(template_list, mask_list):
+            lnd = self._landscape(
+                self.pre_transform(subvolume * mask),
+                template,
+                max_shifts=max_shifts,
+                quaternion=quaternion,
+                pos=pos,
+            )
+            out.append(lnd)
+        return np.stack(out, axis=0)
+
     def _optimize_single(
         self,
         subvolume: NDArray[np.float32],
@@ -307,7 +409,7 @@ class BaseAlignmentModel(ABC):
         quaternion: NDArray[np.float32],
         pos: NDArray[np.float32],
     ) -> AlignmentResult:
-        out = self.optimize(
+        out = self._optimize(
             self.pre_transform(subvolume * mask),
             template,
             max_shifts=max_shifts,
@@ -329,7 +431,7 @@ class BaseAlignmentModel(ABC):
         all_quat: list[np.ndarray] = []
         all_score: list[float] = []
         for template, mask in zip(template_list, mask_list):
-            shift, quat, score = self.optimize(
+            shift, quat, score = self._optimize(
                 self.pre_transform(subvolume * mask),
                 template,
                 max_shifts=max_shifts,
@@ -343,11 +445,8 @@ class BaseAlignmentModel(ABC):
         iopt = int(np.argmax(all_score))
         return AlignmentResult(iopt, all_shifts[iopt], all_quat[iopt], all_score[iopt])
 
-    def _get_alignment_function(self):
-        if self.is_multi_templates:
-            return self._optimize_multiple
-        else:
-            return self._optimize_single
+    def _is_multiple(self) -> bool:
+        return self._n_templates > 1
 
     @property
     def is_multi_templates(self) -> bool:
@@ -356,6 +455,14 @@ class BaseAlignmentModel(ABC):
         "Multi-template" includes alignment with subvolume rotation.
         """
         return self._n_templates > 1
+
+
+# deprecated
+def optimize(self: BaseAlignmentModel, *args, **kwargs):
+    warnings.warn(
+        "`optimize` is deprecated. It is now a private method.", DeprecationWarning
+    )
+    return self._optimize(*args, **kwargs)
 
 
 class RotationImplemented(BaseAlignmentModel):
@@ -438,7 +545,7 @@ class RotationImplemented(BaseAlignmentModel):
         np.ndarray, AlignmentResult
             Transformed input image and the alignment result.
         """
-        delayed_optimize = delayed(self.optimize)
+        delayed_optimize = delayed(self._optimize)
         tasks: list[Delayed] = []
         for quat, tmp, mask in zip(
             self.quaternions, self._template_input, self._mask_input
@@ -613,11 +720,8 @@ class RotationImplemented(BaseAlignmentModel):
 
         return template_input, mask_input
 
-    def _get_alignment_function(self):
-        if self.is_multi_templates or self._n_rotations > 1:
-            return self._optimize_multiple
-        else:
-            return self._optimize_single
+    def _is_multiple(self) -> bool:
+        return self.is_multi_templates or self._n_rotations > 1
 
 
 class TomographyInput(RotationImplemented):

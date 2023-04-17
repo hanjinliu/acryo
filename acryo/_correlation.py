@@ -1,6 +1,6 @@
 from __future__ import annotations
 from functools import lru_cache
-from typing import Sequence
+from typing import Sequence, TypeVar
 import numpy as np
 from numpy.typing import NDArray
 
@@ -14,6 +14,19 @@ from acryo._types import pixel
 # Modified from skimage/registration/_phase_cross_correlation.py
 
 
+def pcc_landscape(
+    f0: NDArray[np.complex64],
+    f1: NDArray[np.complex64],
+    max_shifts: tuple[float, ...] | None = None,
+):
+    product = f0 * f1.conj()
+    power = _abs2(ifftn(product))
+    if max_shifts is not None:
+        max_shifts = np.asarray(max_shifts)
+        power = crop_by_max_shifts(power, max_shifts, max_shifts)
+    return power
+
+
 def subpixel_pcc(
     f0: NDArray[np.complex64],
     f1: NDArray[np.complex64],
@@ -23,7 +36,7 @@ def subpixel_pcc(
     if isinstance(max_shifts, (int, float)):
         max_shifts = (max_shifts,) * f0.ndim
     product = f0 * f1.conj()
-    power = abs2(ifftn(product))
+    power = _abs2(ifftn(product))
     if max_shifts is not None:
         max_shifts = np.asarray(max_shifts)
         power = crop_by_max_shifts(power, max_shifts, max_shifts)
@@ -42,7 +55,7 @@ def subpixel_pcc(
         # Matrix multiply DFT around the current shift estimate
         sample_region_offset = dftshift - shifts * upsample_factor
         # Locate maximum and map back to original pixel grid
-        power = abs2(
+        power = _abs2(
             _upsampled_dft(
                 product.conj(),
                 upsampled_region_size,
@@ -90,11 +103,14 @@ def _upsampled_dft(
     return data
 
 
-def abs2(a: NDArray[np.number]) -> NDArray[np.number]:
+_DType = TypeVar("_DType", bound=np.number)
+
+
+def _abs2(a: NDArray[np.complex64]) -> NDArray[np.float32]:
     return a.real**2 + a.imag**2
 
 
-def crop_by_max_shifts(power: np.ndarray, left, right):
+def crop_by_max_shifts(power: NDArray[_DType], left, right) -> NDArray[_DType]:
     shifted_power = np.fft.fftshift(power)
     centers = tuple(s // 2 for s in power.shape)
     slices = tuple(
@@ -171,6 +187,22 @@ def ncc_landscape_no_pad(
         var, fill=np.inf
     )[mask]
     return response
+
+
+def zncc_landscape_with_crop(
+    img0: NDArray[np.float32],
+    img1: NDArray[np.float32],
+    max_shifts: tuple[float, ...] | None = None,
+):
+    response = ncc_landscape(img0 - img0.mean(), img1 - img1.mean(), max_shifts)
+    if max_shifts is None:
+        pad_width_eff = (3,) * img1.ndim
+    else:
+        pad_width_eff = tuple(
+            (s - int(m) * 2 - 1) // 2 for m, s in zip(max_shifts, response.shape)
+        )
+    sl_res = tuple(slice(w, -w, None) for w in pad_width_eff)
+    return response[sl_res]
 
 
 def subpixel_zncc(
