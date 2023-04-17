@@ -21,9 +21,16 @@ def pcc_landscape(
 ):
     product = f0 * f1.conj()
     power = _abs2(ifftn(product))
+    power = np.fft.fftshift(power)
     if max_shifts is not None:
-        max_shifts = np.asarray(max_shifts)
-        power = crop_by_max_shifts(power, max_shifts, max_shifts)
+        centers = tuple(s // 2 for s in power.shape)
+        slices = tuple(
+            slice(max(c - int(shiftl), 0), min(c + int(shiftr) + 1, s), None)
+            for c, shiftl, shiftr, s in zip(
+                centers, max_shifts, max_shifts, power.shape
+            )
+        )
+        power = power[slices]
     return power
 
 

@@ -39,11 +39,12 @@ class PCCAlignment(TomographyInput):
         template: NDArray[np.complex64],
         max_shifts: tuple[float, float, float],
         quaternion: NDArray[np.float32],
+        pos: NDArray[np.float32],
     ) -> NDArray[np.float32]:
         """Compute landscape."""
         return pcc_landscape(
-            np.real(ifftn(subvolume)),
-            np.real(ifftn(self.mask_missing_wedge(template, quaternion))),
+            subvolume,
+            self.mask_missing_wedge(template, quaternion),
             max_shifts=max_shifts,
         )
 
@@ -74,6 +75,7 @@ class ZNCCAlignment(TomographyInput):
         template: NDArray[np.complex64],
         max_shifts: tuple[float, float, float],
         quaternion: NDArray[np.float32],
+        pos: NDArray[np.float32],
     ) -> NDArray[np.float32]:
         """Compute landscape."""
         return zncc_landscape_with_crop(
