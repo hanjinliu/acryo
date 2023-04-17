@@ -76,6 +76,15 @@ def test_landscape(shift, alignment_model: "type[BaseAlignmentModel]"):
     assert_allclose(np.array(maxima) - 5, shift)
 
 
+def test_landscape_in_loader():
+    loader = SubtomogramLoader(
+        tomo, mole, order=0, scale=scale, output_shape=temp.shape
+    )
+    mask = temp > np.mean(temp)
+    arr = loader.construct_landscape(temp, mask=mask).compute()
+    assert arr.ndim == 4
+
+
 def test_pca_classify():
     loader = SubtomogramLoader(
         tomo, mole, order=0, scale=scale, output_shape=temp.shape
