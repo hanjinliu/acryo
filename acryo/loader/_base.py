@@ -637,9 +637,12 @@ class LoaderBase(ABC):
             **align_kwargs,
         )
 
-        task_shape = 2 * np.ceil(_max_shifts_px) + 1
+        if model.is_multi_templates:
+            task_shape = (model.niter,) + tuple(2 * np.ceil(_max_shifts_px).astype(np.int32) + 1)
+        else:
+            task_shape = tuple(2 * np.ceil(_max_shifts_px).astype(np.int32) + 1)
         task_arrays: list[da.Array] = [
-            da.from_delayed(task, shape=tuple(task_shape), dtype=np.float32)
+            da.from_delayed(task, shape=task_shape, dtype=np.float32)
             for task in self.iter_mapping_tasks(
                 model.landscape,
                 max_shifts=_max_shifts_px,

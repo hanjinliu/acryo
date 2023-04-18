@@ -76,6 +76,10 @@ def test_landscape(shift, alignment_model: "type[BaseAlignmentModel]", upsample)
     maxima = np.unravel_index(np.argmax(lnd), lnd.shape)
     assert_allclose((np.array(maxima) - 5 * upsample) / upsample, shift)
 
+def test_with_params():
+    model = ZNCCAlignment.with_params(rotations=((15, 15), (15, 15), (15, 15)), cutoff=0.4)
+    assert model.quaternions.shape == (27, 4)
+    assert type(model(temp)) is ZNCCAlignment
 
 @pytest.mark.parametrize("upsample", [1, 2])
 def test_landscape_in_loader(upsample):
@@ -83,8 +87,19 @@ def test_landscape_in_loader(upsample):
         tomo, mole, order=0, scale=scale, output_shape=temp.shape
     )
     mask = temp > np.mean(temp)
-    arr = loader.construct_landscape(temp, mask=mask, upsample=upsample).compute()
-    assert arr.ndim == 4
+    arr: np.ndarray = loader.construct_landscape(temp, mask=mask, upsample=upsample, max_shifts=1.0).compute()
+    assert arr.shape == (len(mole), 6 * upsample + 1, 6 * upsample + 1, 6 * upsample + 1)
+
+@pytest.mark.parametrize("upsample", [1, 2])
+def test_landscape_in_loader_with_rotation(upsample):
+    loader = SubtomogramLoader(
+        tomo, mole, order=0, scale=scale, output_shape=temp.shape
+    )
+    mask = temp > np.mean(temp)
+    arr: np.ndarray = loader.construct_landscape(
+        temp, mask=mask, upsample=upsample, max_shifts=1.0, rotations=((15, 15), (15, 15), (15, 15))
+    ).compute()
+    assert arr.shape == (len(mole), 27, 6 * upsample + 1, 6 * upsample + 1, 6 * upsample + 1)
 
 
 def test_pca_classify():

@@ -31,6 +31,7 @@ from acryo._utils import (
     delayed_affine,
 )
 from acryo._fft import ifftn
+from ._bound import ParametrizedModel
 
 if TYPE_CHECKING:
     from dask.delayed import Delayed
@@ -159,9 +160,9 @@ class BaseAlignmentModel(ABC):
     def with_params(
         cls,
         **params,
-    ) -> Callable[[TemplateType, NDArray[np.float32] | None], Self]:
+    ):
         """Create a BaseAlignmentModel instance with parameters."""
-        return _with_params(cls, **params)
+        return ParametrizedModel(cls, **params)
 
     @abstractmethod
     def _optimize(
@@ -237,7 +238,7 @@ class BaseAlignmentModel(ABC):
             - single template image ... 3D
             - many template images ... 4D
         """
-        if self.is_multi_templates:
+        if self._n_templates > 1:
             template_input = np.stack(
                 [self.pre_transform(tmp * self._mask) for tmp in self._template],
                 axis=0,
@@ -355,7 +356,7 @@ class BaseAlignmentModel(ABC):
             fn = self._landscape_multiple
         else:
             fn = self._landscape_single
-        
+
         # calculate the landscape
         lds = fn(
             img,
@@ -365,13 +366,23 @@ class BaseAlignmentModel(ABC):
             _quat,
             _pos,
         )
-
-        if upsample > 1:
-            coords = _create_mesh_for_landscape(lds.shape, max_shifts, upsample)
-            lds = ndi.map_coordinates(
-                lds, coords, order=3, mode="constant", cval=0., prefilter=True
-            )
         
+        if upsample > 1:
+            if not self._is_multiple():
+                coords = _create_mesh_for_landscape(lds.shape, max_shifts, upsample)
+                lds_upsampled = ndi.map_coordinates(
+                    lds, coords, order=3, mode="constant", cval=0., prefilter=True
+                )
+            else:
+                coords = _create_mesh_for_landscape(lds.shape[1:], max_shifts, upsample)
+                all_lds = [
+                    ndi.map_coordinates(
+                        l, coords, order=3, mode="constant", cval=0., prefilter=True
+                    )
+                    for l in lds
+                ]
+                lds_upsampled = np.stack(all_lds, axis=0)
+            return lds_upsampled
         return lds
 
     def _landscape_single(
@@ -458,7 +469,7 @@ class BaseAlignmentModel(ABC):
         return AlignmentResult(iopt, all_shifts[iopt], all_quat[iopt], all_score[iopt])
 
     def _is_multiple(self) -> bool:
-        return self._n_templates > 1
+        return self.niter > 1
 
     @property
     def is_multi_templates(self) -> bool:
@@ -466,8 +477,12 @@ class BaseAlignmentModel(ABC):
         Whether alignment parameters requires multi-templates.
         "Multi-template" includes alignment with subvolume rotation.
         """
-        return self._n_templates > 1
+        return self._is_multiple()
 
+    @property
+    def niter(self) -> int:
+        """Number of templates."""
+        return self._n_templates
 
 # deprecated
 def optimize(self: BaseAlignmentModel, *args, **kwargs):
@@ -501,9 +516,9 @@ class RotationImplemented(BaseAlignmentModel):
         cls,
         *,
         rotations: Ranges | None = None,
-    ) -> Callable[[TemplateType, NDArray[np.float32] | None], Self]:
+    ) -> ParametrizedModel[Self]:
         """Create an alignment model instance with parameters."""
-        return _with_params(cls, rotations=rotations)
+        return ParametrizedModel(cls, rotations=rotations)
 
     @property
     def has_rotation(self) -> bool:
@@ -646,7 +661,7 @@ class RotationImplemented(BaseAlignmentModel):
                 np.array(self._template.shape[-3:]) / 2 - 0.5, rotators
             )
             cval = float(np.percentile(self._template, 1))
-            if self.is_multi_templates:
+            if self._n_templates > 1:
                 all_templates: list[da.Array] = []
                 all_masks: list[da.Array] = []
                 inputs_templates: list[NDArray[np.float32]] = [
@@ -714,7 +729,7 @@ class RotationImplemented(BaseAlignmentModel):
                 )
         else:
             delayed_transform = delayed(self.pre_transform)
-            if self.is_multi_templates:
+            if self._n_templates > 1:
                 template_input = da.stack(
                     [
                         da.from_delayed(
@@ -738,8 +753,12 @@ class RotationImplemented(BaseAlignmentModel):
         return template_input, mask_input
 
     def _is_multiple(self) -> bool:
-        return self.is_multi_templates or self._n_rotations > 1
+        return self._n_templates * self._n_rotations > 1
 
+    @property
+    def niter(self) -> int:
+        """Number of iteration per sub-volume."""
+        return self._n_templates * self._n_rotations
 
 class TomographyInput(RotationImplemented):
     """
@@ -773,9 +792,9 @@ class TomographyInput(RotationImplemented):
         rotations: Ranges | None = None,
         cutoff: float | None = None,
         tilt_range: tuple[degree, degree] | None = None,
-    ) -> Callable[[TemplateType, NDArray[np.float32] | None], Self]:
+    ) -> ParametrizedModel[Self]:
         """Create an alignment model instance with parameters."""
-        return _with_params(
+        return ParametrizedModel(
             cls,
             rotations=rotations,
             cutoff=cutoff,
@@ -807,7 +826,7 @@ class TomographyInput(RotationImplemented):
         3D array
             Difference map.
         """
-        if self.is_multi_templates:
+        if self._n_templates > 1:
             raise NotImplementedError(
                 "Masked difference is not implemented for multi-template."
             )
@@ -857,17 +876,6 @@ def _normalize_cval(cval: float | None, img: np.ndarray) -> float:
         _cval = cval
     return _cval
 
-
-_T = TypeVar("_T", bound=BaseAlignmentModel)
-
-
-def _with_params(
-    cls: type[_T],
-    **params,
-) -> Callable[[TemplateType, NDArray[np.float32] | None], _T]:
-    """Create a BaseAlignmentModel instance with parameters."""
-    bound = inspect.signature(cls).bind_partial(**params)
-    return lambda template, mask: cls(template, mask, *bound.args, **bound.kwargs)
 
 @lru_cache(maxsize=2)
 def _create_mesh_for_landscape(
