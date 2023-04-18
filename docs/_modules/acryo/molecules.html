@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo.molecules &mdash; acryo 0.2.1 documentation</title>
+  <title>acryo.molecules &mdash; acryo 0.2.3 documentation</title>
       <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -14,7 +14,7 @@
         <script src="../../_static/jquery.js"></script>
         <script src="../../_static/underscore.js"></script>
         <script src="../../_static/doctools.js"></script>
-        <script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+        <script src="https://unpkg.com/mermaid@9.4.0/dist/mermaid.min.js"></script>
         <script>mermaid.initialize({startOnLoad:true});</script>
     <script src="../../_static/js/theme.js"></script>
     <link rel="index" title="Index" href="../../genindex.html" />
@@ -26,14 +26,18 @@
     <nav data-toggle="wy-nav-shift" class="wy-nav-side">
       <div class="wy-side-scroll">
         <div class="wy-side-nav-search" >
-            <a href="../../index.html" class="icon icon-home"> acryo
+
+
+
+          <a href="../../index.html" class="icon icon-home">
+            acryo
           </a>
               <div class="version">
-                0.2.1
+                0.2.3
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
-    <input type="text" name="q" placeholder="Search docs" />
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
     <input type="hidden" name="check_keywords" value="yes" />
     <input type="hidden" name="area" value="default" />
   </form>
@@ -60,9 +64,9 @@
         <div class="rst-content">
           <div role="navigation" aria-label="Page navigation">
   <ul class="wy-breadcrumbs">
-      <li><a href="../../index.html" class="icon icon-home"></a> &raquo;</li>
-          <li><a href="../index.html">Module code</a> &raquo;</li>
-      <li>acryo.molecules</li>
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">acryo.molecules</li>
       <li class="wy-breadcrumbs-aside">
       </li>
   </ul>
@@ -91,17 +95,19 @@
 <span class="kn">import</span> <span class="nn">polars</span> <span class="k">as</span> <span class="nn">pl</span>
 <span class="kn">from</span> <span class="nn">scipy.spatial.transform</span> <span class="kn">import</span> <span class="n">Rotation</span>
 <span class="kn">from</span> <span class="nn">acryo._types</span> <span class="kn">import</span> <span class="n">nm</span>
+<span class="kn">from</span> <span class="nn">acryo._utils</span> <span class="kn">import</span> <span class="n">deprecated_kwarg</span>
 
 <span class="k">if</span> <span class="n">TYPE_CHECKING</span><span class="p">:</span>
     <span class="kn">from</span> <span class="nn">typing_extensions</span> <span class="kn">import</span> <span class="n">Self</span><span class="p">,</span> <span class="n">TypeGuard</span>
-    <span class="kn">from</span> <span class="nn">polars.internals.dataframe.groupby</span> <span class="kn">import</span> <span class="n">GroupBy</span>
+    <span class="kn">from</span> <span class="nn">polars.type_aliases</span> <span class="kn">import</span> <span class="n">IntoExpr</span>
+    <span class="kn">from</span> <span class="nn">polars.dataframe.groupby</span> <span class="kn">import</span> <span class="n">GroupBy</span>
 
 <span class="n">_CSV_COLUMNS</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;z&quot;</span><span class="p">,</span> <span class="s2">&quot;y&quot;</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">,</span> <span class="s2">&quot;zvec&quot;</span><span class="p">,</span> <span class="s2">&quot;yvec&quot;</span><span class="p">,</span> <span class="s2">&quot;xvec&quot;</span><span class="p">]</span>
 <span class="n">PathLike</span> <span class="o">=</span> <span class="n">Union</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Path</span><span class="p">,</span> <span class="nb">bytes</span><span class="p">]</span>
 
 
 <div class="viewcode-block" id="Molecules"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules">[docs]</a><span class="k">class</span> <span class="nc">Molecules</span><span class="p">:</span>
-    <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Object that represents position- and orientation-defined molecules.</span>
 
 <span class="sd">    Positions are represented by a (N, 3) ``np.ndarray`` and orientations</span>
@@ -169,7 +175,7 @@
         <span class="n">y</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">x</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Construct molecule cloud with orientation from two of their local axes.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Construct molecule cloud with orientation from two of their local axes.&quot;&quot;&quot;</span>
         <span class="n">pos</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">atleast_2d</span><span class="p">(</span><span class="n">pos</span><span class="p">)</span>
 
         <span class="k">if</span> <span class="nb">sum</span><span class="p">((</span><span class="n">_ax</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">)</span> <span class="k">for</span> <span class="n">_ax</span> <span class="ow">in</span> <span class="p">[</span><span class="n">z</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">x</span><span class="p">])</span> <span class="o">!=</span> <span class="mi">2</span><span class="p">:</span>
@@ -204,7 +210,7 @@
         <span class="n">order</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;xyz&quot;</span><span class="p">,</span>
         <span class="n">features</span><span class="p">:</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Create molecules from Euler angles.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Create molecules from Euler angles.&quot;&quot;&quot;</span>
         <span class="k">if</span> <span class="n">order</span> <span class="o">==</span> <span class="s2">&quot;xyz&quot;</span><span class="p">:</span>
             <span class="n">rotator</span> <span class="o">=</span> <span class="n">from_euler_xyz_coords</span><span class="p">(</span><span class="n">angles</span><span class="p">,</span> <span class="n">seq</span><span class="p">,</span> <span class="n">degrees</span><span class="p">)</span>
         <span class="k">elif</span> <span class="n">order</span> <span class="o">==</span> <span class="s2">&quot;zyx&quot;</span><span class="p">:</span>
@@ -220,7 +226,7 @@
         <span class="n">quat</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span>
         <span class="n">features</span><span class="p">:</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Create molecules from quaternions.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Create molecules from quaternions.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="bp">cls</span><span class="p">(</span><span class="n">pos</span><span class="p">,</span> <span class="n">Rotation</span><span class="o">.</span><span class="n">from_quat</span><span class="p">(</span><span class="n">quat</span><span class="p">),</span> <span class="n">features</span><span class="p">)</span></div>
 
 <div class="viewcode-block" id="Molecules.from_rotvec"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.from_rotvec">[docs]</a>    <span class="nd">@classmethod</span>
@@ -230,7 +236,7 @@
         <span class="n">vec</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span>
         <span class="n">features</span><span class="p">:</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Create molecules from rotation vectors.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Create molecules from rotation vectors.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="bp">cls</span><span class="p">(</span><span class="n">pos</span><span class="p">,</span> <span class="n">Rotation</span><span class="o">.</span><span class="n">from_rotvec</span><span class="p">(</span><span class="n">vec</span><span class="p">),</span> <span class="n">features</span><span class="p">)</span></div>
 
 <div class="viewcode-block" id="Molecules.from_matrix"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.from_matrix">[docs]</a>    <span class="nd">@classmethod</span>
@@ -240,7 +246,7 @@
         <span class="n">matrix</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
         <span class="n">features</span><span class="p">:</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Create molecules from rotation matrices.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Create molecules from rotation matrices.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="bp">cls</span><span class="p">(</span><span class="n">pos</span><span class="p">,</span> <span class="n">Rotation</span><span class="o">.</span><span class="n">from_matrix</span><span class="p">(</span><span class="n">matrix</span><span class="p">),</span> <span class="n">features</span><span class="p">)</span></div>
 
 <div class="viewcode-block" id="Molecules.from_csv"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.from_csv">[docs]</a>    <span class="nd">@classmethod</span>
@@ -251,7 +257,7 @@
         <span class="n">rot_cols</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;zvec&quot;</span><span class="p">,</span> <span class="s2">&quot;yvec&quot;</span><span class="p">,</span> <span class="s2">&quot;xvec&quot;</span><span class="p">],</span>
         <span class="o">**</span><span class="n">pl_kwargs</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Load csv as a Molecules object.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Load csv as a Molecules object.&quot;&quot;&quot;</span>
         <span class="n">df</span> <span class="o">=</span> <span class="n">pl</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="o">**</span><span class="n">pl_kwargs</span><span class="p">)</span>
         <span class="k">return</span> <span class="bp">cls</span><span class="o">.</span><span class="n">from_dataframe</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="n">pos_cols</span><span class="p">,</span> <span class="n">rot_cols</span><span class="p">)</span></div>
 
@@ -262,7 +268,7 @@
         <span class="n">pos_cols</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;z&quot;</span><span class="p">,</span> <span class="s2">&quot;y&quot;</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">],</span>
         <span class="n">rot_cols</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;zvec&quot;</span><span class="p">,</span> <span class="s2">&quot;yvec&quot;</span><span class="p">,</span> <span class="s2">&quot;xvec&quot;</span><span class="p">],</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Load parquet as a Molecules object.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Load parquet as a Molecules object.&quot;&quot;&quot;</span>
         <span class="n">df</span> <span class="o">=</span> <span class="n">pl</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
         <span class="k">return</span> <span class="bp">cls</span><span class="o">.</span><span class="n">from_dataframe</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="n">pos_cols</span><span class="p">,</span> <span class="n">rot_cols</span><span class="p">)</span></div>
 
@@ -296,13 +302,13 @@
         <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">features</span><span class="p">:</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Create randomly oriented molecules from given positions.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Create randomly oriented molecules from given positions.&quot;&quot;&quot;</span>
         <span class="n">rot</span> <span class="o">=</span> <span class="n">Rotation</span><span class="o">.</span><span class="n">random</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">pos</span><span class="p">),</span> <span class="n">random_state</span><span class="o">=</span><span class="n">seed</span><span class="p">)</span>
         <span class="k">return</span> <span class="bp">cls</span><span class="p">(</span><span class="n">pos</span><span class="p">,</span> <span class="n">rot</span><span class="p">,</span> <span class="n">features</span><span class="o">=</span><span class="n">features</span><span class="p">)</span></div>
 
     <span class="nd">@property</span>
     <span class="k">def</span> <span class="nf">features</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Molecules features.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Molecules features.&quot;&quot;&quot;</span>
         <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_features</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
             <span class="kn">import</span> <span class="nn">polars</span> <span class="k">as</span> <span class="nn">pl</span>
 
@@ -330,7 +336,7 @@
         <span class="k">return</span> <span class="kc">None</span>
 
 <div class="viewcode-block" id="Molecules.to_dataframe"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.to_dataframe">[docs]</a>    <span class="k">def</span> <span class="nf">to_dataframe</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Convert coordinates, rotation and features into a single data frame.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Convert coordinates, rotation and features into a single data frame.&quot;&quot;&quot;</span>
         <span class="kn">import</span> <span class="nn">polars</span> <span class="k">as</span> <span class="nn">pl</span>
 
         <span class="n">rotvec</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">rotvec</span><span class="p">()</span>
@@ -341,7 +347,7 @@
         <span class="k">return</span> <span class="n">df</span></div>
 
 <div class="viewcode-block" id="Molecules.to_csv"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.to_csv">[docs]</a>    <span class="k">def</span> <span class="nf">to_csv</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">save_path</span><span class="p">:</span> <span class="n">PathLike</span><span class="p">,</span> <span class="n">float_precision</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="mi">4</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Save molecules as a csv file.</span>
 
 <span class="sd">        Parameters</span>
@@ -357,7 +363,7 @@
         <span class="p">)</span></div>
 
 <div class="viewcode-block" id="Molecules.to_parquet"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.to_parquet">[docs]</a>    <span class="k">def</span> <span class="nf">to_parquet</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">save_path</span><span class="p">:</span> <span class="n">PathLike</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">compression</span><span class="o">=</span><span class="s2">&quot;zstd&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Save molecules as a parquet file.</span>
 
 <span class="sd">        Parameters</span>
@@ -372,7 +378,7 @@
         <span class="p">)</span></div>
 
     <span class="k">def</span> <span class="fm">__len__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Return the number of molecules.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the number of molecules.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pos</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
 
     <span class="k">def</span> <span class="fm">__getitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="nb">slice</span> <span class="o">|</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
@@ -380,27 +386,27 @@
 
     <span class="nd">@property</span>
     <span class="k">def</span> <span class="nf">pos</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
-        <span class="sd">&quot;&quot;&quot;Positions of molecules.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Positions of molecules.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pos</span>
 
     <span class="nd">@property</span>
     <span class="k">def</span> <span class="nf">x</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
-        <span class="sd">&quot;&quot;&quot;Vectors of x-axis.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Vectors of x-axis.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rotator</span><span class="o">.</span><span class="n">apply</span><span class="p">([</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">])</span>
 
     <span class="nd">@property</span>
     <span class="k">def</span> <span class="nf">y</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
-        <span class="sd">&quot;&quot;&quot;Vectors of y-axis.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Vectors of y-axis.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rotator</span><span class="o">.</span><span class="n">apply</span><span class="p">([</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">])</span>
 
     <span class="nd">@property</span>
     <span class="k">def</span> <span class="nf">z</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
-        <span class="sd">&quot;&quot;&quot;Vectors of z-axis.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Vectors of z-axis.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rotator</span><span class="o">.</span><span class="n">apply</span><span class="p">([</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">])</span>
 
     <span class="nd">@property</span>
     <span class="k">def</span> <span class="nf">rotator</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Rotation</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Return ``scipy.spatial.transform.Rotation`` object&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return ``scipy.spatial.transform.Rotation`` object&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rotator</span>
 
 <div class="viewcode-block" id="Molecules.concat"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.concat">[docs]</a>    <span class="nd">@classmethod</span>
@@ -410,7 +416,7 @@
         <span class="n">concat_features</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
         <span class="n">nullable</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Concatenate Molecules objects.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Concatenate Molecules objects.&quot;&quot;&quot;</span>
         <span class="n">pos</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
         <span class="n">quat</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
         <span class="n">features</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
@@ -430,7 +436,7 @@
         <span class="k">return</span> <span class="bp">cls</span><span class="p">(</span><span class="n">all_pos</span><span class="p">,</span> <span class="n">Rotation</span><span class="p">(</span><span class="n">all_quat</span><span class="p">),</span> <span class="n">features</span><span class="o">=</span><span class="n">all_features</span><span class="p">)</span></div>
 
 <div class="viewcode-block" id="Molecules.copy"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.copy">[docs]</a>    <span class="k">def</span> <span class="nf">copy</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Make a copy of the object.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Make a copy of the object.&quot;&quot;&quot;</span>
         <span class="n">pos</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">pos</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
         <span class="n">quat</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rotator</span><span class="o">.</span><span class="n">as_quat</span><span class="p">()</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
         <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_features</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
@@ -441,7 +447,7 @@
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">spec</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="nb">slice</span> <span class="o">|</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">bool_</span><span class="p">]</span> <span class="o">|</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">integer</span><span class="p">],</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Create a subset of molecules by slicing.</span>
 
 <span class="sd">        Any slicing supported in ``numpy.ndarray``, except for integer, can be</span>
@@ -481,7 +487,7 @@
 <div class="viewcode-block" id="Molecules.affine_matrix"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.affine_matrix">[docs]</a>    <span class="k">def</span> <span class="nf">affine_matrix</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span> <span class="n">src</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">dst</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">inverse</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
-        <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Construct affine matrices using positions and angles of molecules.</span>
 
 <span class="sd">        Parameters</span>
@@ -561,7 +567,7 @@
         <span class="k">return</span> <span class="n">coords</span></div>
 
 <div class="viewcode-block" id="Molecules.matrix"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.matrix">[docs]</a>    <span class="k">def</span> <span class="nf">matrix</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
-        <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Calculate rotation matrices that align molecules in such orientations</span>
 <span class="sd">        that ``vec`` belong to the object.</span>
 
@@ -576,7 +582,7 @@
 <div class="viewcode-block" id="Molecules.euler_angle"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.euler_angle">[docs]</a>    <span class="k">def</span> <span class="nf">euler_angle</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span> <span class="n">seq</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;ZXZ&quot;</span><span class="p">,</span> <span class="n">degrees</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
-        <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Calculate Euler angles that transforms a source vector to vectors that</span>
 <span class="sd">        belong to the object.</span>
 
@@ -601,7 +607,7 @@
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rotator</span><span class="o">.</span><span class="n">as_euler</span><span class="p">(</span><span class="n">seq</span><span class="p">,</span> <span class="n">degrees</span><span class="o">=</span><span class="n">degrees</span><span class="p">)[</span><span class="o">...</span><span class="p">,</span> <span class="p">::</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span></div>
 
 <div class="viewcode-block" id="Molecules.quaternion"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.quaternion">[docs]</a>    <span class="k">def</span> <span class="nf">quaternion</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
-        <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Calculate quaternions that transforms a source vector to vectors that</span>
 <span class="sd">        belong to the object.</span>
 
@@ -613,7 +619,7 @@
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rotator</span><span class="o">.</span><span class="n">as_quat</span><span class="p">()</span></div>
 
 <div class="viewcode-block" id="Molecules.rotvec"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.rotvec">[docs]</a>    <span class="k">def</span> <span class="nf">rotvec</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
-        <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Calculate rotation vectors that transforms a source vector to vectors</span>
 <span class="sd">        that belong to the object.</span>
 
@@ -625,7 +631,7 @@
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rotator</span><span class="o">.</span><span class="n">as_rotvec</span><span class="p">()</span></div>
 
 <div class="viewcode-block" id="Molecules.translate"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.translate">[docs]</a>    <span class="k">def</span> <span class="nf">translate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">shifts</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span> <span class="n">copy</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Translate molecule positions by ``shifts``.</span>
 
 <span class="sd">        Shifts are applied in world coordinates, not internal coordinates of</span>
@@ -659,7 +665,7 @@
         <span class="k">return</span> <span class="n">out</span></div>
 
 <div class="viewcode-block" id="Molecules.translate_internal"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.translate_internal">[docs]</a>    <span class="k">def</span> <span class="nf">translate_internal</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">shifts</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">copy</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Translate molecule positions internally by ``shifts``.</span>
 
 <span class="sd">        Shifts are applied in the coordinates of each molecule. If molecules</span>
@@ -688,7 +694,7 @@
         <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">copy</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Apply random translation to each molecule.</span>
 
 <span class="sd">        Translation range is restricted by a maximum distance and translation</span>
@@ -728,7 +734,7 @@
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">translate</span><span class="p">(</span><span class="n">shifts</span><span class="p">,</span> <span class="n">copy</span><span class="o">=</span><span class="n">copy</span><span class="p">)</span></div>
 
 <div class="viewcode-block" id="Molecules.rotate_by_rotvec_internal"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.rotate_by_rotvec_internal">[docs]</a>    <span class="k">def</span> <span class="nf">rotate_by_rotvec_internal</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">vector</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span> <span class="n">copy</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Rotate molecules using internal rotation vector.</span>
 
 <span class="sd">        Vector components are calculated in the molecule-coordinate.</span>
@@ -757,7 +763,7 @@
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">rotate_by_rotvec</span><span class="p">(</span><span class="n">world_rotvec</span><span class="p">,</span> <span class="n">copy</span><span class="o">=</span><span class="n">copy</span><span class="p">)</span></div>
 
 <div class="viewcode-block" id="Molecules.rotate_by_matrix"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.rotate_by_matrix">[docs]</a>    <span class="k">def</span> <span class="nf">rotate_by_matrix</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">matrix</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span> <span class="n">copy</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Rotate molecules using rotation matrices, **with their position unchanged**.</span>
 
 <span class="sd">        Parameters</span>
@@ -778,7 +784,7 @@
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">rotate_by</span><span class="p">(</span><span class="n">rotator</span><span class="p">,</span> <span class="n">copy</span><span class="p">)</span></div>
 
 <div class="viewcode-block" id="Molecules.rotate_by_quaternion"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.rotate_by_quaternion">[docs]</a>    <span class="k">def</span> <span class="nf">rotate_by_quaternion</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">quat</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span> <span class="n">copy</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Rotate molecules using quaternions, **with their position unchanged**.</span>
 
 <span class="sd">        Parameters</span>
@@ -805,7 +811,7 @@
         <span class="n">order</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;xyz&quot;</span><span class="p">,</span>
         <span class="n">copy</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Rotate molecules using Euler angles, **with their position unchanged**.</span>
 
 <span class="sd">        Parameters</span>
@@ -830,7 +836,7 @@
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">rotate_by</span><span class="p">(</span><span class="n">rotator</span><span class="p">,</span> <span class="n">copy</span><span class="p">)</span></div>
 
 <div class="viewcode-block" id="Molecules.rotate_by_rotvec"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.rotate_by_rotvec">[docs]</a>    <span class="k">def</span> <span class="nf">rotate_by_rotvec</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">vector</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span> <span class="n">copy</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Rotate molecules using rotation vectors, **with their position unchanged**.</span>
 
 <span class="sd">        Parameters</span>
@@ -850,7 +856,7 @@
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">rotate_by</span><span class="p">(</span><span class="n">rotator</span><span class="p">,</span> <span class="n">copy</span><span class="p">)</span></div>
 
 <div class="viewcode-block" id="Molecules.rotate_by"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.rotate_by">[docs]</a>    <span class="k">def</span> <span class="nf">rotate_by</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">rotator</span><span class="p">:</span> <span class="n">Rotation</span><span class="p">,</span> <span class="n">copy</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Rotate molecule with a ``Rotation`` object.</span>
 
 <span class="sd">        Note that ``Rotation`` object satisfies following equation.</span>
@@ -881,7 +887,7 @@
         <span class="k">return</span> <span class="n">out</span></div>
 
 <div class="viewcode-block" id="Molecules.rotate_random"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.rotate_random">[docs]</a>    <span class="k">def</span> <span class="nf">rotate_random</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">copy</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Rotate molecules randomly.</span>
 
 <span class="sd">        Parameters</span>
@@ -905,7 +911,7 @@
         <span class="n">rotator</span><span class="p">:</span> <span class="n">Rotation</span><span class="p">,</span>
         <span class="n">inv</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Shift and rotate molecules around their own coordinate.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Shift and rotate molecules around their own coordinate.&quot;&quot;&quot;</span>
         <span class="n">rotvec</span> <span class="o">=</span> <span class="n">rotator</span><span class="o">.</span><span class="n">as_rotvec</span><span class="p">()</span>
         <span class="k">if</span> <span class="n">inv</span><span class="p">:</span>
             <span class="n">shift_corrected</span> <span class="o">=</span> <span class="n">rotator</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="n">shift</span><span class="p">,</span> <span class="n">inverse</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
@@ -924,7 +930,7 @@
         <span class="o">/</span><span class="p">,</span>
         <span class="n">nullable</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Concatenate the molecules with the others.</span>
 
 <span class="sd">        Parameters</span>
@@ -954,68 +960,76 @@
     <span class="k">def</span> <span class="nf">groupby</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">by</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">str</span> <span class="o">|</span> <span class="n">pl</span><span class="o">.</span><span class="n">Expr</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">MoleculeGroup</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]]:</span>
         <span class="o">...</span>
 
-<div class="viewcode-block" id="Molecules.groupby"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.groupby">[docs]</a>    <span class="k">def</span> <span class="nf">groupby</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">by</span><span class="p">):</span>
-        <span class="sd">&quot;&quot;&quot;Group molecules into sub-groups.&quot;&quot;&quot;</span>
+<div class="viewcode-block" id="Molecules.groupby"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.groupby">[docs]</a>    <span class="k">def</span> <span class="nf">groupby</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">by</span><span class="p">:</span> <span class="n">IntoExpr</span> <span class="o">|</span> <span class="n">Iterable</span><span class="p">[</span><span class="n">IntoExpr</span><span class="p">],</span> <span class="o">*</span><span class="n">more_by</span><span class="p">:</span> <span class="n">IntoExpr</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Group molecules into sub-groups.&quot;&quot;&quot;</span>
         <span class="n">df</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">to_dataframe</span><span class="p">()</span>
-        <span class="k">return</span> <span class="n">MoleculeGroup</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="n">by</span><span class="p">,</span> <span class="n">maintain_order</span><span class="o">=</span><span class="kc">True</span><span class="p">))</span></div>
+        <span class="k">return</span> <span class="n">MoleculeGroup</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="n">by</span><span class="p">,</span> <span class="o">*</span><span class="n">more_by</span><span class="p">,</span> <span class="n">maintain_order</span><span class="o">=</span><span class="kc">True</span><span class="p">))</span></div>
 
 <div class="viewcode-block" id="Molecules.filter"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.filter">[docs]</a>    <span class="k">def</span> <span class="nf">filter</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">predicate</span><span class="p">:</span> <span class="n">pl</span><span class="o">.</span><span class="n">Expr</span> <span class="o">|</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">pl</span><span class="o">.</span><span class="n">Series</span> <span class="o">|</span> <span class="nb">list</span><span class="p">[</span><span class="nb">bool</span><span class="p">]</span> <span class="o">|</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Filter molecules by its features.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Filter molecules by its features.&quot;&quot;&quot;</span>
         <span class="n">df</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">to_dataframe</span><span class="p">()</span>
         <span class="n">df_filt</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span><span class="n">predicate</span><span class="p">)</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="n">from_dataframe</span><span class="p">(</span><span class="n">df_filt</span><span class="p">)</span></div>
 
 <div class="viewcode-block" id="Molecules.head"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.head">[docs]</a>    <span class="k">def</span> <span class="nf">head</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">n</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">10</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Return the first n molecules.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the first n molecules.&quot;&quot;&quot;</span>
         <span class="n">df</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">to_dataframe</span><span class="p">()</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="n">from_dataframe</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">head</span><span class="p">(</span><span class="n">n</span><span class="p">))</span></div>
 
 <div class="viewcode-block" id="Molecules.tail"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.tail">[docs]</a>    <span class="k">def</span> <span class="nf">tail</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">n</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">10</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Return the last n molecules.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the last n molecules.&quot;&quot;&quot;</span>
         <span class="n">df</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">to_dataframe</span><span class="p">()</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="n">from_dataframe</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">tail</span><span class="p">(</span><span class="n">n</span><span class="p">))</span></div>
 
 <div class="viewcode-block" id="Molecules.sample"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.sample">[docs]</a>    <span class="k">def</span> <span class="nf">sample</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">n</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">10</span><span class="p">,</span> <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Return n randomly sampled molecules.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return n randomly sampled molecules.&quot;&quot;&quot;</span>
         <span class="n">df</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">to_dataframe</span><span class="p">()</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="n">from_dataframe</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">sample</span><span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="n">seed</span><span class="p">))</span></div>
 
-<div class="viewcode-block" id="Molecules.sort"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.sort">[docs]</a>    <span class="k">def</span> <span class="nf">sort</span><span class="p">(</span>
+<div class="viewcode-block" id="Molecules.sort"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.sort">[docs]</a>    <span class="nd">@deprecated_kwarg</span><span class="p">(</span><span class="n">old</span><span class="o">=</span><span class="s2">&quot;reverse&quot;</span><span class="p">,</span> <span class="n">new</span><span class="o">=</span><span class="s2">&quot;descending&quot;</span><span class="p">)</span>
+    <span class="k">def</span> <span class="nf">sort</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
-        <span class="n">by</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">pl</span><span class="o">.</span><span class="n">Expr</span> <span class="o">|</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="n">Sequence</span><span class="p">[</span><span class="n">pl</span><span class="o">.</span><span class="n">Expr</span><span class="p">],</span>
-        <span class="o">*</span><span class="p">,</span>
-        <span class="n">reverse</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+        <span class="n">by</span><span class="p">:</span> <span class="n">IntoExpr</span> <span class="o">|</span> <span class="n">Iterable</span><span class="p">[</span><span class="n">IntoExpr</span><span class="p">],</span>
+        <span class="o">*</span><span class="n">more_by</span><span class="p">:</span> <span class="n">IntoExpr</span><span class="p">,</span>
+        <span class="n">descending</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Return a new instance with sorted molecules and features.</span>
 
 <span class="sd">        Parameters</span>
 <span class="sd">        ----------</span>
 <span class="sd">        by : str or Expr or sequence of them</span>
 <span class="sd">            Column name or expression to sort by.</span>
-<span class="sd">        reverse : bool, default is False</span>
+<span class="sd">        descending : bool, default is False</span>
 <span class="sd">            If true, sort in descending order.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="n">df</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">to_dataframe</span><span class="p">()</span>
-        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="n">from_dataframe</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">by</span><span class="o">=</span><span class="n">by</span><span class="p">,</span> <span class="n">reverse</span><span class="o">=</span><span class="n">reverse</span><span class="p">))</span></div>
-
-<div class="viewcode-block" id="Molecules.with_features"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.with_features">[docs]</a>    <span class="k">def</span> <span class="nf">with_features</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">exprs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Return a new instance with updated features.&quot;&quot;&quot;</span>
-        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">pos</span><span class="p">,</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">rotator</span><span class="p">,</span>
-            <span class="n">features</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">features</span><span class="o">.</span><span class="n">with_columns</span><span class="p">(</span><span class="n">exprs</span><span class="p">),</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="n">from_dataframe</span><span class="p">(</span>
+            <span class="n">df</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">by</span><span class="p">,</span> <span class="o">*</span><span class="n">more_by</span><span class="p">,</span> <span class="n">descending</span><span class="o">=</span><span class="n">descending</span><span class="p">)</span>
         <span class="p">)</span></div>
 
-<div class="viewcode-block" id="Molecules.drop_features"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.drop_features">[docs]</a>    <span class="k">def</span> <span class="nf">drop_features</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">columns</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Return a new instance with updated features.&quot;&quot;&quot;</span>
+<div class="viewcode-block" id="Molecules.with_features"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.with_features">[docs]</a>    <span class="k">def</span> <span class="nf">with_features</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">exprs</span><span class="p">:</span> <span class="n">IntoExpr</span> <span class="o">|</span> <span class="n">Iterable</span><span class="p">[</span><span class="n">IntoExpr</span><span class="p">],</span>
+        <span class="o">*</span><span class="n">more_exprs</span><span class="p">:</span> <span class="n">IntoExpr</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">named_exprs</span><span class="p">:</span> <span class="n">IntoExpr</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return a new instance with updated features.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">pos</span><span class="p">,</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">rotator</span><span class="p">,</span>
-            <span class="n">features</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">features</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">columns</span><span class="p">),</span>
+            <span class="n">features</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">features</span><span class="o">.</span><span class="n">with_columns</span><span class="p">(</span><span class="n">exprs</span><span class="p">,</span> <span class="o">*</span><span class="n">more_exprs</span><span class="p">,</span> <span class="o">**</span><span class="n">named_exprs</span><span class="p">),</span>
+        <span class="p">)</span></div>
+
+<div class="viewcode-block" id="Molecules.drop_features"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.Molecules.drop_features">[docs]</a>    <span class="k">def</span> <span class="nf">drop_features</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">columns</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="o">*</span><span class="n">more_columns</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return a new instance with updated features.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">pos</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">rotator</span><span class="p">,</span>
+            <span class="n">features</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">features</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">columns</span><span class="p">,</span> <span class="o">*</span><span class="n">more_columns</span><span class="p">),</span>
         <span class="p">)</span></div></div>
 
 
@@ -1023,7 +1037,7 @@
 
 
 <div class="viewcode-block" id="MoleculeGroup"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.MoleculeGroup">[docs]</a><span class="k">class</span> <span class="nc">MoleculeGroup</span><span class="p">(</span><span class="n">Generic</span><span class="p">[</span><span class="n">_K</span><span class="p">]):</span>
-    <span class="sd">&quot;&quot;&quot;A groupby-like object for molecules.&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A groupby-like object for molecules.&quot;&quot;&quot;</span>
 
     <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">group</span><span class="p">:</span> <span class="n">GroupBy</span><span class="p">[</span><span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">]):</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_group</span> <span class="o">=</span> <span class="n">group</span>
@@ -1035,7 +1049,7 @@
 
     <span class="nd">@property</span>
     <span class="k">def</span> <span class="nf">features</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">GroupBy</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Return the groupby object.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the groupby object.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_group</span></div>
 
 
@@ -1054,19 +1068,19 @@
 <div class="viewcode-block" id="from_euler_xyz_coords"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.from_euler_xyz_coords">[docs]</a><span class="k">def</span> <span class="nf">from_euler_xyz_coords</span><span class="p">(</span>
     <span class="n">angles</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span> <span class="n">seq</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;ZXZ&quot;</span><span class="p">,</span> <span class="n">degrees</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Rotation</span><span class="p">:</span>
-    <span class="sd">&quot;&quot;&quot;Create a rotator using zyx-coordinate system, from Euler angles.&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Create a rotator using zyx-coordinate system, from Euler angles.&quot;&quot;&quot;</span>
     <span class="n">seq</span> <span class="o">=</span> <span class="n">_translate_euler</span><span class="p">(</span><span class="n">seq</span><span class="p">)</span>
     <span class="n">angles</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">angles</span><span class="p">)</span>
     <span class="k">return</span> <span class="n">Rotation</span><span class="o">.</span><span class="n">from_euler</span><span class="p">(</span><span class="n">seq</span><span class="p">,</span> <span class="n">angles</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="p">::</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">degrees</span><span class="p">)</span></div>
 
 
 <span class="k">def</span> <span class="nf">_normalize</span><span class="p">(</span><span class="n">a</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
-    <span class="sd">&quot;&quot;&quot;Normalize vectors to length 1. Input must be (N, 3).&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Normalize vectors to length 1. Input must be (N, 3).&quot;&quot;&quot;</span>
     <span class="k">return</span> <span class="n">a</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">a</span><span class="o">**</span><span class="mi">2</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">))[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>
 
 
 <span class="k">def</span> <span class="nf">_extract_orthogonal</span><span class="p">(</span><span class="n">a</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">b</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
-    <span class="sd">&quot;&quot;&quot;Extract component of b orthogonal to a.&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Extract component of b orthogonal to a.&quot;&quot;&quot;</span>
     <span class="n">a_norm</span> <span class="o">=</span> <span class="n">_normalize</span><span class="p">(</span><span class="n">a</span><span class="p">)</span>
     <span class="k">return</span> <span class="n">b</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">a_norm</span> <span class="o">*</span> <span class="n">b</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span> <span class="o">*</span> <span class="n">a_norm</span>
 
@@ -1105,7 +1119,7 @@
 
 
 <div class="viewcode-block" id="cross"><a class="viewcode-back" href="../../apidoc/acryo.html#acryo.molecules.cross">[docs]</a><span class="k">def</span> <span class="nf">cross</span><span class="p">(</span><span class="n">x</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span> <span class="n">y</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
-    <span class="sd">&quot;&quot;&quot;Vector outer product in zyx coordinate.&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Vector outer product in zyx coordinate.&quot;&quot;&quot;</span>
     <span class="k">return</span> <span class="o">-</span><span class="n">np</span><span class="o">.</span><span class="n">cross</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="n">axis</span><span class="p">)</span>  <span class="c1"># type: ignore</span></div>
 </pre></div>
 

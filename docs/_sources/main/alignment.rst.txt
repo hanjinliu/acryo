@@ -191,6 +191,7 @@ calculate the optimal shift/rotation parameters. To transform the sub-volume, us
         subvolume,
         max_shifts,
         quaternion,
+        pos,
     )
 
 - ``subvolume`` is the sub-volume to be aligned. It must be a 3D array with the same shape
@@ -200,6 +201,8 @@ calculate the optimal shift/rotation parameters. To transform the sub-volume, us
 - ``quaternion`` is the rotation of the sub-volume in the original tomogram. It must be a (4,)
   :class:`numpy.ndarray` object of quaternion. If you are using :class:`acryo.Molecules`,
   its quaternions can directly be used here. This is basically used to mask the missing wedge.
+- ``pos`` is the position of the sub-volume in the original tomogram. It must be a (3,)
+  :class:`numpy.ndarray` object. Default alignment models does not use this parameter.
 
 The return value ``result`` is a named-tuple :class:`AlignmentResult` object. It contains the
 following fields.
@@ -237,6 +240,30 @@ because it parallelizes the rotation and alignment processes.
 - ``cval`` is the constant value used for Affine transformations. 1% percentile will be used
   by default.
 
+Correlation landscape
+---------------------
+
+The word "correlation landscape" came from "energy landscape" in the context of protein
+folding. It is a 3D array of the correlation scores between the sub-volume and the template
+image.
+
+.. code-block:: python
+
+    arr = model.landscape(
+        subvolume,
+        max_shifts,
+    )
+
+- ``subvolume`` is the sub-volume to be aligned. It must be a 3D array with the same shape
+  as the template.
+- ``max_shifts`` is a tuple of maximum shifts in z, y and x direction. The unit is pixel but
+  it can be a float number.
+- ``quaternion`` is the rotation of the sub-volume in the original tomogram. It must be a (4,)
+  :class:`numpy.ndarray` object of quaternion. If you are using :class:`acryo.Molecules`,
+  its quaternions can directly be used here. This is basically used to mask the missing wedge.
+- ``pos`` is the position of the sub-volume in the original tomogram. It must be a (3,)
+  :class:`numpy.ndarray` object. Default alignment models does not use this parameter.
+
 Define Custom Alignment Model
 =============================
 
@@ -244,12 +271,12 @@ In :mod:`acryo.alignment`, there are several abstract base classes that can be u
 efficiently define custom alignment models.
 
 - :class:`BaseAlignmentModel` ... The most basic one that provides the minimum interface.
-  Need to override :meth:`optimize` and :meth:`pre_transform`.
+  Need to override :meth:`_optimize` and :meth:`pre_transform`.
 - :class:`RotationImplemented` ... Rotated templates will be generated even if the
-  optimization algorithm does not optimize the rotation. Need to override :meth:`optimize`
+  optimization algorithm does not optimize the rotation. Need to override :meth:`_optimize`
   and :meth:`pre_transform`.
 - :class:`TomographyInput` ... Rotation, low-pass filtering and missing wedge masking is
-  already implemented. Only need to override :meth:`optimize`.
+  already implemented. Only need to override :meth:`_optimize`.
 
 When you override methods, the following should be noted.
 
@@ -259,21 +286,21 @@ When you override methods, the following should be noted.
 
     .. code-block:: python
 
-        def pre_transform(self, image: NDArray[np.float32]) -> NDArray[T]:
+        def pre_transform(self, image: NDArray[np.float32]) -> NDArray[np.complex64]:
             ...
 
     The input image could be either the sub-volume or the template image. It is masked by
     the input mask image but is not masked by the missing wedge mask in :class:`TomographyInput`.
-    The output image will be directly passed to the :meth:`optimize` method, so the data
+    The output image will be directly passed to the :meth:`_optimize` method, so the data
     type depends on the implementation.
 
-- :meth:`optimize`
+- :meth:`_optimize`
 
     This method must have the following signature.
 
     .. code-block:: python
 
-        def optimize(
+        def _optimize(
             self,
             subvolume: NDArray[T],
             template: NDArray[T],
