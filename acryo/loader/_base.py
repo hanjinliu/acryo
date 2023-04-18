@@ -618,6 +618,7 @@ class LoaderBase(ABC):
         mask: MaskInputType = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
         alignment_model: type[BaseAlignmentModel] | AlignmentFactory = ZNCCAlignment,
+        upsample: int = 1,
         **align_kwargs,
     ) -> da.Array:
         """
@@ -628,7 +629,7 @@ class LoaderBase(ABC):
         """
         if np.isscalar(max_shifts):
             max_shifts = (max_shifts,) * 3
-        _max_shifts_px = np.asarray(max_shifts) / self.scale
+        _max_shifts_px = tuple(np.asarray(max_shifts) / self.scale)
 
         model = alignment_model(
             template=self.normalize_template(template),
@@ -637,18 +638,18 @@ class LoaderBase(ABC):
         )
 
         task_shape = 2 * np.ceil(_max_shifts_px) + 1
-        task_arrays: list[da.Array] = []
-        for task in self.iter_mapping_tasks(
-            model.landscape,
-            max_shifts=_max_shifts_px,
-            var_kwarg=dict(
-                quaternion=self.molecules.quaternion(),
-                pos=self.molecules.pos / self.scale,
-            ),
-        ):
-            task_arrays.append(
-                da.from_delayed(task, shape=tuple(task_shape), dtype=np.float32)
+        task_arrays: list[da.Array] = [
+            da.from_delayed(task, shape=tuple(task_shape), dtype=np.float32)
+            for task in self.iter_mapping_tasks(
+                model.landscape,
+                max_shifts=_max_shifts_px,
+                upsample=upsample,
+                var_kwarg=dict(
+                    quaternion=self.molecules.quaternion(),
+                    pos=self.molecules.pos / self.scale,
+                )
             )
+        ]
         return da.stack(task_arrays, axis=0)
 
     def apply(

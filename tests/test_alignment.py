@@ -67,21 +67,23 @@ def test_fit(shift, rot, alignment_model: "type[BaseAlignmentModel]"):
 
 @pytest.mark.parametrize("shift", [[1, 2, 2], [-4, 3, 2]])
 @pytest.mark.parametrize("alignment_model", [ZNCCAlignment, PCCAlignment])
-def test_landscape(shift, alignment_model: "type[BaseAlignmentModel]"):
+@pytest.mark.parametrize("upsample", [1, 2])
+def test_landscape(shift, alignment_model: "type[BaseAlignmentModel]", upsample):
     model = alignment_model(temp)
     temp_transformed = temp * 4 + np.mean(temp)  # linear transformation to input image
     img = ndi.shift(temp_transformed, shift=shift)
-    lnd = model.landscape(img, (5, 5, 5))
+    lnd = model.landscape(img, (5, 5, 5), upsample=upsample)
     maxima = np.unravel_index(np.argmax(lnd), lnd.shape)
-    assert_allclose(np.array(maxima) - 5, shift)
+    assert_allclose((np.array(maxima) - 5 * upsample) / upsample, shift)
 
 
-def test_landscape_in_loader():
+@pytest.mark.parametrize("upsample", [1, 2])
+def test_landscape_in_loader(upsample):
     loader = SubtomogramLoader(
         tomo, mole, order=0, scale=scale, output_shape=temp.shape
     )
     mask = temp > np.mean(temp)
-    arr = loader.construct_landscape(temp, mask=mask).compute()
+    arr = loader.construct_landscape(temp, mask=mask, upsample=upsample).compute()
     assert arr.ndim == 4
 
 

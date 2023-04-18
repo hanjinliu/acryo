@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
+from functools import lru_cache
 from typing import (
     Callable,
     Iterable,
@@ -324,6 +325,7 @@ class BaseAlignmentModel(ABC):
         max_shifts: tuple[float, float, float],
         quaternion: NDArray[np.float32] | None = None,
         pos: NDArray[np.float32] | None = None,
+        upsample: int = 1,
     ) -> NDArray[np.float32]:
         """
         Calculate correlation landscape of the input image.
@@ -353,7 +355,9 @@ class BaseAlignmentModel(ABC):
             fn = self._landscape_multiple
         else:
             fn = self._landscape_single
-        return fn(
+        
+        # calculate the landscape
+        lds = fn(
             img,
             self._template_input,
             self._mask_input,
@@ -361,6 +365,14 @@ class BaseAlignmentModel(ABC):
             _quat,
             _pos,
         )
+
+        if upsample > 1:
+            coords = _create_mesh_for_landscape(lds.shape, max_shifts, upsample)
+            lds = ndi.map_coordinates(
+                lds, coords, order=3, mode="constant", cval=0., prefilter=True
+            )
+        
+        return lds
 
     def _landscape_single(
         self,
@@ -492,6 +504,11 @@ class RotationImplemented(BaseAlignmentModel):
     ) -> Callable[[TemplateType, NDArray[np.float32] | None], Self]:
         """Create an alignment model instance with parameters."""
         return _with_params(cls, rotations=rotations)
+
+    @property
+    def has_rotation(self) -> bool:
+        """If the alignment model has rotation optimization."""
+        return self._n_rotations > 1
 
     def align(
         self,
@@ -851,3 +868,18 @@ def _with_params(
     """Create a BaseAlignmentModel instance with parameters."""
     bound = inspect.signature(cls).bind_partial(**params)
     return lambda template, mask: cls(template, mask, *bound.args, **bound.kwargs)
+
+@lru_cache(maxsize=2)
+def _create_mesh_for_landscape(
+    shape: tuple[int, int, int], 
+    max_shifts: tuple[float, float, float], 
+    upsample: int,
+) -> NDArray[np.float32]:
+    upsampled_max_shifts = (np.asarray(max_shifts) * upsample).astype(np.int32)
+    center = np.array(shape) / 2 - 0.5
+    mesh = np.meshgrid(
+        *[np.arange(-width, width + 1) / upsample + c
+        for c, width in zip(center, upsampled_max_shifts)], 
+        indexing="ij",
+    )
+    return np.stack(mesh, axis=0)
