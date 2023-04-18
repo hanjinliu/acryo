@@ -52,16 +52,37 @@ def test_fsc():
 
 @pytest.mark.parametrize("shift", [[1, 2, 2], [-4, 3, 2]])
 @pytest.mark.parametrize("rot", [[15, 0, 15], [-15, 15, 15], [0, 0, -15]])
-def test_fit(shift, rot):
+@pytest.mark.parametrize("alignment_model", [ZNCCAlignment, PCCAlignment])
+def test_fit(shift, rot, alignment_model: "type[BaseAlignmentModel]"):
     rotations = ((15, 15), (15, 15), (15, 15))
-    model = ZNCCAlignment(temp, rotations=rotations)
+    model = alignment_model(temp, rotations=rotations)
     temp_transformed = temp * 4 + np.mean(temp)  # linear transformation to input image
     img = ndi.shift(rotate(temp_transformed, rot, cval=np.min), shift=shift)
-    imgout, result = model.fit(img, (5, 5, 5))  # type: ignore
+    imgout, result = model.fit(img, (5, 5, 5))
     assert_allclose(result.quat, euler_to_quat(rot))
     assert_allclose(result.shift, shift)
     coef = np.corrcoef(imgout.ravel(), temp.ravel())
     assert coef[0, 1] > 0.95  # check results are well aligned
+
+
+@pytest.mark.parametrize("shift", [[1, 2, 2], [-4, 3, 2]])
+@pytest.mark.parametrize("alignment_model", [ZNCCAlignment, PCCAlignment])
+def test_landscape(shift, alignment_model: "type[BaseAlignmentModel]"):
+    model = alignment_model(temp)
+    temp_transformed = temp * 4 + np.mean(temp)  # linear transformation to input image
+    img = ndi.shift(temp_transformed, shift=shift)
+    lnd = model.landscape(img, (5, 5, 5))
+    maxima = np.unravel_index(np.argmax(lnd), lnd.shape)
+    assert_allclose(np.array(maxima) - 5, shift)
+
+
+def test_landscape_in_loader():
+    loader = SubtomogramLoader(
+        tomo, mole, order=0, scale=scale, output_shape=temp.shape
+    )
+    mask = temp > np.mean(temp)
+    arr = loader.construct_landscape(temp, mask=mask).compute()
+    assert arr.ndim == 4
 
 
 def test_pca_classify():
