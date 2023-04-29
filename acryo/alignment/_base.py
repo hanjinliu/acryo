@@ -17,7 +17,6 @@ import warnings
 import numpy as np
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
-from dask import array as da, delayed
 
 from acryo._rotation import normalize_rotations
 from acryo._types import Ranges, subpixel, degree
@@ -25,13 +24,13 @@ from acryo._utils import (
     compose_matrices,
     missing_wedge_mask,
     lowpass_filter_ft,
-    delayed_affine,
 )
 from acryo._typed_scipy import ifftn, spline_filter, affine_transform, map_coordinates
+from acryo._dask import DaskTaskPool
 from ._bound import ParametrizedModel
 
 if TYPE_CHECKING:
-    from dask.delayed import Delayed
+    pass
 
 
 TemplateType = Union[NDArray[np.float32], Sequence[NDArray[np.float32]]]
@@ -575,20 +574,19 @@ class RotationImplemented(BaseAlignmentModel):
         np.ndarray, AlignmentResult
             Transformed input image and the alignment result.
         """
-        delayed_optimize = delayed(self._optimize)
-        tasks: list[Delayed] = []
+        pool = DaskTaskPool.from_func(self._optimize)
+        pos = np.zeros(3, dtype=np.float32)
         for quat, tmp, mask in zip(
             self.quaternions, self._template_input, self._mask_input
         ):
-            task = delayed_optimize(
+            pool.add_task(
                 self.pre_transform(img * mask),
                 tmp,
                 max_shifts,
                 quat,
-                pos=None,
+                pos=pos,
             )
-            tasks.append(task)
-        results: list[tuple] = da.compute(tasks)[0]
+        results = pool.compute()
         scores = [x[2] for x in results]
         iopt = np.argmax(scores)
         opt_result = results[iopt]
@@ -620,17 +618,6 @@ class RotationImplemented(BaseAlignmentModel):
             )
         )
 
-    @delayed
-    def _transform_template_delayed(
-        self,
-        temp: NDArray[np.float32],
-        matrix: NDArray[np.float32],
-        cval: float | None = None,
-        order: int = 3,
-        prefilter: bool = True,
-    ):
-        return self._transform_template(temp, matrix, cval, order, prefilter)
-
     def _get_template_and_mask_input(
         self,
     ) -> tuple[NDArray[np.complex64], NDArray[np.float32]]:
@@ -660,8 +647,8 @@ class RotationImplemented(BaseAlignmentModel):
             )
             cval = float(np.percentile(self._template, 1))
             if self._n_templates > 1:
-                all_templates: list[da.Array] = []
-                all_masks: list[da.Array] = []
+                # all_templates: list[da.Array] = []
+                # all_masks: list[da.Array] = []
                 inputs_templates: list[NDArray[np.float32]] = [
                     spline_filter(
                         tmp * self._mask,
@@ -671,81 +658,74 @@ class RotationImplemented(BaseAlignmentModel):
                     )
                     for tmp in self._template
                 ]
+                pool_template = DaskTaskPool.from_func(self._transform_template)
+                pool_mask = DaskTaskPool.from_func(affine_transform)
+                ntmp = len(inputs_templates)
                 for mat in matrices:
                     for tmp in inputs_templates:
-                        all_templates.append(
-                            da.from_delayed(
-                                self._transform_template_delayed(
-                                    tmp, mat, order=3, cval=cval, prefilter=False
-                                ),
-                                shape=tmp.shape,
-                                dtype=tmp.dtype,
-                            )
+                        pool_template.add_task(
+                            tmp, mat, order=3, cval=cval, prefilter=False
                         )
-                    all_masks.extend(
-                        [
-                            delayed_affine(
-                                self._mask,
-                                mat,
-                                order=3,
-                                mode="nearest",
-                                prefilter=False,
-                            )
-                        ]
-                        * len(inputs_templates)
+                        # all_templates.append(
+                        #     da.from_delayed(
+                        #         self._transform_template_delayed(
+                        #             tmp, mat, order=3, cval=cval, prefilter=False
+                        #         ),
+                        #         shape=tmp.shape,
+                        #         dtype=tmp.dtype,
+                        #     )
+                        # )
+                    pool_mask.add_tasks(
+                        ntmp, self._mask, mat, order=3, mode="nearest", prefilter=False
                     )
 
-                template_input, mask_input = da.compute(
-                    da.stack(all_templates, axis=0), da.stack(all_masks, axis=0)
-                )
+                    # all_masks.extend(
+                    #     [
+                    #         delayed_affine(
+                    #             self._mask,
+                    #             mat,
+                    #             order=3,
+                    #             mode="nearest",
+                    #             prefilter=False,
+                    #         )
+                    #     ]
+                    #     * len(inputs_templates)
+                    # )
+                template_input = np.stack(pool_template.compute(), axis=0)
+                mask_input = np.stack(pool_mask.compute(), axis=0)
+                # template_input, mask_input = da.compute(
+                #     da.stack(all_templates, axis=0), da.stack(all_masks, axis=0)
+                # )
 
             else:
-                template_masked: NDArray[np.float32] = spline_filter(
+                template_masked = spline_filter(
                     self._template * self._mask,
                     order=3,
                     output=np.float32,
                     mode="constant",
                 )
-                all_templates = [
-                    da.from_delayed(
-                        self._transform_template_delayed(
-                            template_masked, mat, order=3, cval=cval, prefilter=False
-                        ),
-                        shape=template_masked.shape,
-                        dtype=template_masked.dtype,
+                pool_template = DaskTaskPool.from_func(self._transform_template)
+                pool_mask = DaskTaskPool.from_func(affine_transform)
+                for mat in matrices:
+                    pool_template.add_task(
+                        template_masked, mat, order=3, cval=cval, prefilter=False
                     )
-                    for mat in matrices
-                ]
-                all_masks = [
-                    delayed_affine(
-                        self._mask, matrix=mat, order=3, mode="nearest", prefilter=False
+                    pool_mask.add_task(
+                        self._mask, mat, order=3, mode="nearest", prefilter=False
                     )
-                    for mat in matrices
-                ]
-                template_input, mask_input = da.compute(
-                    da.stack(all_templates, axis=0), da.stack(all_masks, axis=0)
-                )
+                template_input = np.stack(pool_template.compute(), axis=0)
+                mask_input = np.stack(pool_mask.compute(), axis=0)
         else:
-            delayed_transform = delayed(self.pre_transform)
+            pool = DaskTaskPool.from_func(self.pre_transform)
             if self._n_templates > 1:
-                template_input = da.stack(
-                    [
-                        da.from_delayed(
-                            delayed_transform(tmp * self._mask),
-                            shape=tmp.shape,
-                            dtype=np.complex64,
-                        )
-                        for tmp in self._template
-                    ],
-                    axis=0,
-                ).compute()
+                for tmp in self._template:
+                    pool.add_task(tmp * self._mask)
+                template_input = np.stack(pool.compute(), axis=0)
                 mask_input = np.stack([self._mask] * len(self._template), axis=0)
 
             else:
                 # NOTE: dask.compute is always called once inside this method.
-                template_input = delayed_transform(
-                    self._template * self._mask
-                ).compute()
+                template_input = pool.add_task(self._template * self._mask).compute()[0]
                 mask_input = self._mask
 
         return template_input, mask_input

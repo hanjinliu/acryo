@@ -12,6 +12,7 @@ from typing import (
     Any,
     Sequence,
     SupportsIndex,
+    TypeVar,
     Union,
     overload,
 )
@@ -32,7 +33,7 @@ from acryo.alignment import (
 )
 from acryo import _utils
 from acryo._types import nm, pixel
-from acryo._dask import DaskArrayList
+from acryo._dask import DaskArrayList, DaskTaskList, DaskTaskIterator
 from acryo.molecules import Molecules
 from acryo.loader import _misc
 from acryo.loader._group import LoaderGroup
@@ -49,6 +50,8 @@ _ShapeType = Union[pixel, tuple[pixel, ...], None]
 TemplateInputType = Union[NDArray[np.float32], ImageProvider]
 MaskInputType = Union[NDArray[np.float32], ImageProvider, ImageConverter, None]
 AggFunction = Callable[[NDArray[np.float32]], Any]
+
+_R = TypeVar("_R")
 
 
 class Unset:
@@ -161,12 +164,12 @@ class LoaderBase(ABC):
 
     def iter_mapping_tasks(
         self,
-        func: Callable,
+        func: Callable[..., _R],
         *const_args,
         output_shape: _ShapeType = None,
         var_kwarg: dict[str, Iterable[Any]] | None = None,
         **const_kwargs,
-    ) -> Iterator[Delayed]:
+    ) -> DaskTaskIterator[_R]:
         """
         Iterate over delayed mapping tasks using subtomograms.
 
@@ -195,16 +198,16 @@ class LoaderBase(ABC):
                 delayed_f(ar, *const_args, **const_kwargs, **kw)
                 for ar, kw in zip(dask_array, _misc.dict_iterrows(var_kwarg))
             )
-        return it
+        return DaskTaskIterator(it)
 
     def construct_mapping_tasks(
         self,
-        func: Callable,
+        func: Callable[..., _R],
         *const_args,
         output_shape: _ShapeType = None,
         var_kwarg: dict[str, Iterable[Any]] | None = None,
         **const_kwargs,
-    ) -> list[Delayed]:
+    ) -> DaskTaskList[_R]:
         """
         Construct delayed mapping tasks using subtomograms.
 
@@ -220,18 +223,16 @@ class LoaderBase(ABC):
 
         Returns
         -------
-        list of da.delayed.Delayed object
-            List of delayed tasks that are ready for ``da.compute``.
+        DaskTaskList
+            List of delayed tasks that are ready for computation.
         """
-        return list(
-            self.iter_mapping_tasks(
-                func,
-                *const_args,
-                output_shape=output_shape,
-                var_kwarg=var_kwarg,
-                **const_kwargs,
-            )
-        )
+        return self.iter_mapping_tasks(
+            func,
+            *const_args,
+            output_shape=output_shape,
+            var_kwarg=var_kwarg,
+            **const_kwargs,
+        ).tolist()
 
     def _create_cache(self, output_shape: _ShapeType = None) -> da.Array:
         """
@@ -443,7 +444,7 @@ class LoaderBase(ABC):
                 pos=self.molecules.pos / self.scale,
             ),
         )
-        all_results = da.compute(tasks)[0]
+        all_results = tasks.compute()
         return self._post_align(all_results, model.input_shape)
 
     def _post_align(
@@ -503,12 +504,11 @@ class LoaderBase(ABC):
         """
         if output_shape is None and isinstance(mask, np.ndarray):
             output_shape = mask.shape
-
         with self.cached(output_shape=output_shape):
             template = self.average(output_shape=output_shape)
             out = self.align(
                 template,
-                mask=self.normalize_mask(mask),
+                mask=mask,
                 max_shifts=max_shifts,
                 alignment_model=alignment_model,
                 **align_kwargs,
@@ -569,7 +569,7 @@ class LoaderBase(ABC):
                 pos=self.molecules.pos / self.scale,
             ),
         )
-        all_results = da.compute(tasks)[0]
+        all_results = tasks.compute()
         if isinstance(model, RotationImplemented) and model._n_rotations > 1:
             remainder = len(templates)
         else:
@@ -638,9 +638,8 @@ class LoaderBase(ABC):
             )
         else:
             task_shape = tuple(2 * np.ceil(_max_shifts_px).astype(np.int32) + 1)
-        task_arrays: list[da.Array] = [
-            da.from_delayed(task, shape=task_shape, dtype=np.float32)
-            for task in self.iter_mapping_tasks(
+        task_arrays = (
+            self.iter_mapping_tasks(
                 model.landscape,
                 max_shifts=_max_shifts_px,
                 upsample=upsample,
@@ -649,7 +648,9 @@ class LoaderBase(ABC):
                     pos=self.molecules.pos / self.scale,
                 ),
             )
-        ]
+            .tolist()
+            .asarrays(shape=task_shape, dtype=np.float32)
+        )
         return da.stack(task_arrays, axis=0)
 
     def apply(
@@ -672,7 +673,7 @@ class LoaderBase(ABC):
         pl.DataFrame
             Result table.
         """
-        all_tasks: list[list[Delayed]] = []
+        all_tasks: list[list[da.Array | Delayed]] = []
         if _is_iterable_of_funcs(func):
             funcs = func
         else:
@@ -685,7 +686,7 @@ class LoaderBase(ABC):
             raise ValueError("Output shape is unknown.")
         for fn in funcs:
             tasks = self.construct_mapping_tasks(fn, output_shape=self.output_shape)
-            all_tasks.append(tasks)
+            all_tasks.append(list(tasks))
         all_results = np.array(da.compute(all_tasks)[0])
         return pl.DataFrame(all_results, schema=schema)
 
@@ -967,7 +968,7 @@ class LoaderBase(ABC):
 
     def normalize_mask(self, mask: MaskInputType) -> MaskType:
         """Resolve any mask input type to a 3D array."""
-        if isinstance(mask, (np.ndarray, type(None))):
+        if isinstance(mask, np.ndarray) or mask is None:
             return mask
         elif isinstance(mask, ImageProvider):
             out = mask(self.scale)

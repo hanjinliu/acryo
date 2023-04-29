@@ -240,7 +240,7 @@ class SubtomogramLoader(LoaderBase):
                 cval=np.mean,
             )
 
-        return pool.tolist(shape=output_shape, dtype=np.float32)
+        return pool.asarrays(shape=output_shape, dtype=np.float32)
 
 
 class ClassificationResult(NamedTuple):

@@ -116,7 +116,7 @@ class MockLoader(LoaderBase):
         pool = DaskTaskPool.from_func(affine_transform)
         for mtx in matrices:
             pool.add_task(template, mtx, order=self.order, prefilter=False)
-        task_list = pool.tolist(shape=template.shape, dtype=np.float32)
+        task_list = pool.asarrays(shape=template.shape, dtype=np.float32)
         if self._degrees is not None:
             task_list = DaskArrayList(
                 simulate_noise(
