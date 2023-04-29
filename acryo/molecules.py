@@ -22,7 +22,7 @@ from acryo._utils import deprecated_kwarg
 
 if TYPE_CHECKING:
     from typing_extensions import Self, TypeGuard
-    from polars.type_aliases import IntoExpr
+    from polars.type_aliases import IntoExpr, ParquetCompression
     from polars.dataframe.groupby import GroupBy
 
 _CSV_COLUMNS = ["z", "y", "x", "zvec", "yvec", "xvec"]
@@ -285,7 +285,12 @@ class Molecules:
             float_precision=float_precision,
         )
 
-    def to_parquet(self, save_path: PathLike, *, compression="zstd") -> None:
+    def to_parquet(
+        self,
+        save_path: PathLike,
+        *,
+        compression: ParquetCompression = "zstd",
+    ) -> None:
         """
         Save molecules as a parquet file.
 
