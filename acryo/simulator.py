@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import Callable, NamedTuple, Sequence, TYPE_CHECKING, Tuple
+from typing import Callable, NamedTuple, Sequence, TYPE_CHECKING, Tuple, TypeVar
 import numpy as np
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
 
 from acryo import _utils
-from acryo.molecules import Molecules
+from acryo.molecules import Molecules, axes_to_rotator, cross
 from acryo.pipe._classes import ImageProvider
 from acryo._types import nm, pixel
 from acryo._dask import DaskTaskPool
@@ -202,7 +202,7 @@ class TomogramSimulator:
         colormap: Callable[[pl.DataFrame], ColorType] | None = None,
     ) -> NDArray[np.float32]:
         """
-        Simulate tomogram.
+        Simulate a tomogram.
 
         Parameters
         ----------
@@ -211,6 +211,7 @@ class TomogramSimulator:
         colormap: callable, optional
             Colormap used to generate the colored tomogram. The input is a polars
             row vector of features of each molecule.
+
         Returns
         -------
         np.ndarray
@@ -230,26 +231,17 @@ class TomogramSimulator:
     def _simulate(self, shape: tuple[pixel, pixel, pixel]):
         """Simulate a grayscale tomogram."""
         tomogram = np.zeros(shape, dtype=np.float32)
-        pool = DaskTaskPool.from_func(_delayed_simulate)
+        pool = DaskTaskPool.from_func(_simulate_one)
         for mol, image in self._components.values():
-            if isinstance(image, ImageProvider):
-                img = image(self.scale)
-            else:
-                img = image
-            starts, stops, mtxs = _prep_iterators(mol, img, self._scale)
-
-            # prefilter here to avoid repeated computation
-            if self.order > 1:
-                img = spline_filter(
-                    img, order=self.order, output=np.float32, mode="constant"
-                )
-
+            img = self._get_image(image)
+            starts, stops, mtxs = _prep_iterators(mol, img.shape, self._scale)
             for start, stop, mtx in zip(starts, stops, mtxs):
                 pool.add_task(img, start, stop, mtx, shape, self.order)
 
         results = pool.compute()
         for sl, img_fragment in results:
-            tomogram[sl] += img_fragment
+            if img_fragment is not None:
+                tomogram[sl] += img_fragment
 
         return tomogram
 
@@ -260,81 +252,92 @@ class TomogramSimulator:
     ):
         """Simulate a colored tomogram."""
         tomogram = np.zeros((3,) + shape, dtype=np.float32)
+        pool = DaskTaskPool.from_func(_simulate_color_one)
         for mol, image in self._components.values():
-            if isinstance(image, ImageProvider):
-                img = image(self.scale)
-            else:
-                img = image
-            # image slice must be integer so split it into two parts
-            img_min = img.min()
-            img_max = img.max()
-            starts, stops, mtxs = _prep_iterators(mol, img, self._scale)
-
-            # prefilter here to avoid repeated computation
-            if self.order > 1:
-                img = spline_filter(img, order=self.order, mode="constant")
-
+            img = self._get_image(image)
+            starts, stops, mtxs = _prep_iterators(mol, img.shape, self._scale)
             feat = mol.features
             for i, (start, stop, mtx) in enumerate(zip(starts, stops, mtxs)):
-                _cr, _cg, _cb = colormap(feat[i])
-                sl_src, sl_dst = _prep_slices(start, stop, shape, img.shape)
-                sl_dst = (slice(None),) + sl_dst
+                f0 = colormap(feat[i])
+                pool.add_task(img, start, stop, mtx, shape, self.order, f0)
 
-                transformed = affine_transform(
-                    img,
-                    mtx,
-                    mode="constant",
-                    cval=0.0,
-                    order=self.order,
-                    prefilter=False,
-                )
-                _a = (transformed[sl_src] - img_min) / (img_max - img_min)
-                color_array = np.stack([_cr * _a, _cg * _a, _cb * _a], axis=0)
-
-                tomogram[sl_dst] += color_array
+        results = pool.compute()
+        for sl, img_fragment in results:
+            if img_fragment is not None:
+                tomogram[sl] += img_fragment
 
         return tomogram
 
-    def simulate_2d(self, shape: tuple[pixel, pixel]):
+    def simulate_2d(self, shape: tuple[pixel, pixel]) -> NDArray[np.float32]:
         """Simulate a grayscale tomogram."""
-        tomogram = np.zeros(shape, dtype=np.float32)
+        projection = np.zeros(shape, dtype=np.float32)
+        pool = DaskTaskPool.from_func(_simulate_2d_one)
         for mol, image in self._components.values():
-            if isinstance(image, ImageProvider):
-                img = image(self.scale)
-            else:
-                img = image
-            starts, stops, mtxs = _prep_iterators(mol, img, self._scale)
+            img = self._get_image(image)
+            starts, stops, mtxs = _prep_iterators(mol, img.shape, self._scale)
             zsize = mol.pos[:, 0].max() / self.scale + np.sum(img.shape)
             shape3d = (int(np.ceil(zsize)),) + shape
 
             # reduce z axis
             starts, stops, mtxs = starts[1:], stops[1:], mtxs[1:]
 
-            # prefilter here to avoid repeated computation
-            if self.order > 1:
-                img = spline_filter(img, order=self.order, mode="constant")
-
             for start, stop, mtx in zip(starts, stops, mtxs):
-                sl_src, sl_dst = _prep_slices(start, stop, shape3d, img.shape)
-                transformed = affine_transform(
-                    img,
-                    mtx,
-                    mode="constant",
-                    cval=0.0,
-                    order=self.order,
-                    prefilter=False,
-                )
-                projected = np.sum(transformed[sl_src], axis=0)
-                tomogram[sl_dst[1:]] += projected
+                pool.add_task(img, start, stop, mtx, shape3d, self.order)
 
-        return tomogram
+        results = pool.compute()
+        for sl, img_fragment in results:
+            if img_fragment is not None:
+                projection[sl] += img_fragment
+
+        return projection
+
+    def simulate_projection(
+        self,
+        shape: tuple[int, int],
+        xaxis: tuple[float, float, float],
+        yaxis: tuple[float, float, float],
+        center: tuple[float, float, float],
+    ) -> NDArray[np.float32]:
+        projection = np.zeros(shape, dtype=np.float32)
+        ex = np.asarray(xaxis, dtype=np.float32) / np.linalg.norm(xaxis)
+        ey = np.asarray(yaxis, dtype=np.float32) / np.linalg.norm(yaxis)
+        if np.abs(np.dot(ex, ey)) > 1e-6:
+            raise ValueError(f"xaxis {xaxis!r} and yaxis {xaxis!r} are not orthogonal.")
+        rc = np.asarray(center, dtype=np.float32)
+        pool = DaskTaskPool.from_func(_simulate_projection_one)
+        for mol, image in self._components.values():
+            img = self._get_image(image)
+            xcoords = (mol.pos / self.scale - rc).dot(ex) + (shape[1] - 1) / 2
+            ycoords = (mol.pos / self.scale - rc).dot(ey) + (shape[0] - 1) / 2
+            glob_rotator = axes_to_rotator(cross(ex, ey), ey)
+            for x, y in zip(xcoords, ycoords):
+                pool.add_task(x, y, shape, img, mol.rotator * glob_rotator)
+
+        results = pool.compute()
+        for sl, img_fragment in results:
+            if img_fragment is not None:
+                projection[sl] += img_fragment
+
+        return projection
+
+    def _get_image(
+        self, image: NDArray[np.float32] | ImageProvider
+    ) -> NDArray[np.float32]:
+        if isinstance(image, ImageProvider):
+            img = image.provide(self.scale)
+        else:
+            img = image
+
+        if self.order > 1:
+            img = spline_filter(img, order=self.order, mode="constant")
+        return img
 
 
 def _compose_affine_matrices(
     center: np.ndarray,
     rotator: Rotation,
     output_center: np.ndarray | None = None,
-):
+) -> NDArray[np.float32]:
     """Compose Affine matrices from an array shape and a Rotation object."""
 
     dz, dy, dx = center
@@ -358,24 +361,23 @@ def _compose_affine_matrices(
     rot_mtx = _eyes(len(rotator))
     rot_mtx[:, :3, :3] = rotator.as_matrix()
 
-    return np.einsum("ij,njk,nkl->nil", translation_0, rot_mtx, translation_1)
+    return np.einsum("ij,njk,nkl->nil", translation_0, rot_mtx, translation_1)  # type: ignore
 
 
 def _eyes(n: int) -> np.ndarray:
     return np.stack([np.eye(4, dtype=np.float32)] * n, axis=0)
 
 
-def _prep_iterators(mol: Molecules, image: np.ndarray, scale: float):
+def _prep_iterators(mol: Molecules, shape: tuple[int, int, int], scale: float):
     # image slice must be integer so split it into two parts
     pos = mol.pos / scale
     intpos = pos.astype(np.int32)
     residue = pos - intpos.astype(np.float32)
-    template_shape = image.shape
 
     # construct matrices
-    center = (np.array(template_shape) - 1.0) / 2.0
+    center = (np.array(shape) - 1.0) / 2.0
     starts = intpos - center.astype(np.int32)
-    stops = starts + template_shape
+    stops = starts + shape
     mtxs = _compose_affine_matrices(
         center, mol.rotator.inv(), output_center=center + residue
     )
@@ -383,12 +385,15 @@ def _prep_iterators(mol: Molecules, image: np.ndarray, scale: float):
     return starts, stops, mtxs
 
 
+_T = TypeVar("_T", bound=Tuple[int, ...])
+
+
 def _prep_slices(
-    start: tuple[int, int, int],
-    stop: tuple[int, int, int],
-    tomogram_shape: tuple[int, int, int],
-    template_shape: tuple[int, int, int],
-):
+    start: _T,
+    stop: _T,
+    tomogram_shape: _T,
+    template_shape: _T,
+) -> tuple[tuple[slice, ...], tuple[slice, ...] | None]:
     sl_src_list: list[slice] = []
     sl_dst_list: list[slice] = []
     for s, e, size, tsize in zip(start, stop, tomogram_shape, template_shape):
@@ -396,7 +401,7 @@ def _prep_slices(
             _sl, _pads, _out_of_bound = _utils.make_slice_and_pad(s, e, size)
         except ValueError:
             # out-of-bound is not a problem while simulation
-            continue
+            return (slice(None),), None
         else:
             sl_dst_list.append(_sl)
             if _out_of_bound:
@@ -409,16 +414,17 @@ def _prep_slices(
     return sl_src, sl_dst
 
 
-def _delayed_simulate(
+def _simulate_one(
     img: NDArray[np.float32],
     start: tuple[int, int, int],
     stop: tuple[int, int, int],
     mtx: NDArray[np.float32],
     shape: tuple[int, int, int],
     order: int,
-) -> tuple[tuple[slice, ...], NDArray[np.float32]]:
+) -> tuple[tuple[slice, ...], NDArray[np.float32] | None]:
     sl_src, sl_dst = _prep_slices(start, stop, shape, img.shape)
-
+    if sl_dst is None:
+        return (slice(None),), None
     transformed = affine_transform(
         img,
         mtx,
@@ -428,3 +434,91 @@ def _delayed_simulate(
         prefilter=False,
     )
     return sl_dst, transformed[sl_src]
+
+
+def _simulate_color_one(
+    img: NDArray[np.float32],
+    start: tuple[int, int, int],
+    stop: tuple[int, int, int],
+    mtx: NDArray[np.float32],
+    shape: tuple[int, int, int],
+    order: int,
+    color: tuple[float, float, float],
+) -> tuple[tuple[slice, ...], NDArray[np.float32] | None]:
+    _cr, _cg, _cb = color
+    sl_src, sl_dst = _prep_slices(start, stop, shape, img.shape)
+    if sl_dst is None:
+        return (slice(None),), None
+
+    sl_dst = (slice(None),) + sl_dst
+
+    transformed = affine_transform(
+        img,
+        mtx,
+        mode="constant",
+        cval=0.0,
+        order=order,
+        prefilter=False,
+    )
+    img_min = img.min()
+    img_max = img.max()
+    _a = (transformed[sl_src] - img_min) / (img_max - img_min)
+    color_array = np.stack([_cr * _a, _cg * _a, _cb * _a], axis=0)
+
+    return sl_dst, color_array
+
+
+def _simulate_2d_one(
+    img: NDArray[np.float32],
+    start: tuple[int, int, int],
+    stop: tuple[int, int, int],
+    mtx: NDArray[np.float32],
+    shape: tuple[int, int, int],
+    order: int,
+):
+    sl_src, sl_dst = _prep_slices(start, stop, shape, img.shape)
+    if sl_dst is None:
+        return (slice(None),), None
+    transformed = affine_transform(
+        img,
+        mtx,
+        mode="constant",
+        cval=0.0,
+        order=order,
+        prefilter=False,
+    )
+    projected = np.sum(transformed[sl_src], axis=0)
+    return sl_dst[1:], projected
+
+
+def _simulate_projection_one(
+    x: float,
+    y: float,
+    shape: tuple[int, int],
+    image: NDArray[np.float32],
+    rotator: Rotation,
+) -> tuple[tuple[slice, ...], NDArray[np.float32] | None]:
+    proj_shape: tuple[int, int] = image.shape[1:]
+    ymin = int(y - proj_shape[0] // 2)
+    xmin = int(x - proj_shape[1] // 2)
+    ymax = ymin + proj_shape[0]
+    xmax = xmin + proj_shape[1]
+
+    sl_src, sl_dst = _prep_slices((ymin, xmin), (ymax, xmax), shape, proj_shape)
+
+    if sl_dst is None:
+        return (slice(None),), None
+
+    center = np.array(image.shape) / 2 - 0.5
+    residue = np.array([0, y - int(y), x - int(x)])
+    mtx = _compose_affine_matrices(
+        center,
+        rotator,
+        center + residue,
+    )[0]
+
+    transformed = affine_transform(
+        image, mtx, mode="constant", cval=0.0, order=3, prefilter=False
+    )
+    projection: NDArray[np.float32] = np.sum(transformed, axis=0)
+    return sl_dst, projection[sl_src]

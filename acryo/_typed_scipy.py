@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 import numpy as np
 from numpy.typing import NDArray
 
 # scipy is not well typed. Make patches here.
 if TYPE_CHECKING:
+    Mode = Literal["constant", "nearest", "mirror", "wrap", "reflect"]
 
     def fftn(
         img: NDArray[np.float32] | NDArray[np.complex64], axes=None
@@ -25,7 +26,7 @@ if TYPE_CHECKING:
         input: NDArray[np.float32],
         order: int = 3,
         output: Any = np.float64,
-        mode: str = "mirror",
+        mode: Mode = "mirror",
     ) -> NDArray[np.float32]:
         ...
 
@@ -36,7 +37,7 @@ if TYPE_CHECKING:
         output_shape: tuple[int, ...] | None = None,
         output: NDArray[np.float32] | None = None,
         order: int = 3,
-        mode: str = "constant",
+        mode: Mode = "constant",
         cval: float = 0.0,
         prefilter: bool = True,
     ) -> NDArray[np.float32]:
@@ -47,7 +48,7 @@ if TYPE_CHECKING:
         coordinates: NDArray[np.float32],
         output: NDArray[np.float32] | None = None,
         order: int = 3,
-        mode: str = "constant",
+        mode: Mode = "constant",
         cval: float = 0.0,
         prefilter: bool = True,
     ) -> NDArray[np.float32]:
