@@ -3,23 +3,26 @@
 from __future__ import annotations
 from typing import (
     TYPE_CHECKING,
+    Callable,
     NamedTuple,
     Any,
 )
 import numpy as np
+from scipy import ndimage as ndi
 from dask import array as da
 
 from acryo._types import nm, pixel
 from acryo._reader import imread
 from acryo.molecules import Molecules
 from acryo import _utils
-from acryo.loader._base import LoaderBase, Unset
+from acryo.loader import _misc
+from acryo.loader._base import LoaderBase, Unset, _ShapeType
+from acryo._dask import DaskTaskPool, DaskArrayList
 
 if TYPE_CHECKING:
     from typing_extensions import Self
     from numpy.typing import NDArray
     from acryo.classification import PcaClassifier
-    from dask.delayed import Delayed
 
 
 class SubtomogramLoader(LoaderBase):
@@ -197,8 +200,8 @@ class SubtomogramLoader(LoaderBase):
 
     def construct_loading_tasks(
         self,
-        output_shape: tuple[pixel, ...] = None,
-    ) -> list[da.Array]:
+        output_shape: _ShapeType = None,
+    ) -> DaskArrayList:
         """
         Construct a list of subtomogram lazy loader.
 
@@ -207,8 +210,10 @@ class SubtomogramLoader(LoaderBase):
         list of Delayed object
             Each object returns a subtomogram on execution by ``da.compute``.
         """
+        output_shape = self._get_output_shape(output_shape)
         if (cached := self._get_cached_array(output_shape)) is not None:
-            return [cached[i] for i in range(len(self))]
+            return DaskArrayList(cached[i] for i in range(len(self)))
+
         image = self.image
         scale = self.scale
         if isinstance(image, np.ndarray):
@@ -218,7 +223,7 @@ class SubtomogramLoader(LoaderBase):
             _prep = _utils.prepare_affine_cornersafe
         else:
             _prep = _utils.prepare_affine
-        tasks: list[Delayed] = []
+        pool = DaskTaskPool.from_func(_rotated_crop)
         for i in range(len(self)):
             subvol, mtx = _prep(
                 image,
@@ -226,21 +231,16 @@ class SubtomogramLoader(LoaderBase):
                 output_shape=output_shape,
                 rot=self.molecules.rotator[i],
             )
-            task = da.from_delayed(
-                _utils.rotated_crop(
-                    subvol,
-                    mtx,
-                    shape=output_shape,
-                    order=self.order,
-                    mode="constant",
-                    cval=np.mean,
-                ),
+            pool.add_task(
+                subvol,
+                mtx,
                 shape=output_shape,
-                dtype=np.float32,
+                order=self.order,
+                mode="constant",
+                cval=np.mean,
             )
-            tasks.append(task)
 
-        return tasks
+        return pool.tolist(shape=output_shape, dtype=np.float32)
 
 
 class ClassificationResult(NamedTuple):
@@ -267,7 +267,7 @@ def check_input(
     if isinstance(output_shape, Unset):
         _output_shape = output_shape
     else:
-        _output_shape = _utils.normalize_shape(output_shape, ndim=ndim)
+        _output_shape = _misc.normalize_shape(output_shape, ndim=ndim)
 
     # check scale
     _scale = float(scale)
@@ -276,3 +276,26 @@ def check_input(
 
     _corner_safe = bool(corner_safe)
     return order, _output_shape, _scale, _corner_safe
+
+
+def _rotated_crop(
+    subimg,
+    mtx: NDArray[np.float32],
+    shape: tuple[int, int, int],
+    order: int,
+    mode: str,
+    cval: float | Callable[[NDArray[np.float32]], float],
+) -> NDArray[np.float32]:
+    if callable(cval):
+        cval = cval(subimg)
+
+    out = ndi.affine_transform(
+        subimg,
+        matrix=mtx,
+        output_shape=shape,
+        order=order,
+        prefilter=order > 1,
+        mode=mode,
+        cval=cval,
+    )
+    return out  # type: ignore

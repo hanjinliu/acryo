@@ -9,16 +9,13 @@ from typing import (
     NamedTuple,
     Sequence,
     TYPE_CHECKING,
-    TypeVar,
     Union,
 )
 from typing_extensions import Self
-import inspect
 import warnings
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy import ndimage as ndi
 from scipy.spatial.transform import Rotation
 from dask import array as da, delayed
 
@@ -30,7 +27,7 @@ from acryo._utils import (
     lowpass_filter_ft,
     delayed_affine,
 )
-from acryo._fft import ifftn
+from acryo._typed_scipy import ifftn, spline_filter, affine_transform, map_coordinates
 from ._bound import ParametrizedModel
 
 if TYPE_CHECKING:
@@ -317,7 +314,7 @@ class BaseAlignmentModel(ABC):
         result = self.align(img, max_shifts=max_shifts, quaternion=None, pos=None)
         mtx = result.affine_matrix(img.shape)
         _cval = _normalize_cval(cval, img)
-        img_trans: NDArray[np.float32] = ndi.affine_transform(img, mtx, cval=_cval)  # type: ignore
+        img_trans = affine_transform(img, mtx, cval=_cval)
         return img_trans, result
 
     def landscape(
@@ -366,18 +363,18 @@ class BaseAlignmentModel(ABC):
             _quat,
             _pos,
         )
-        
+
         if upsample > 1:
             if not self._is_multiple():
                 coords = _create_mesh_for_landscape(lds.shape, max_shifts, upsample)
-                lds_upsampled = ndi.map_coordinates(
-                    lds, coords, order=3, mode="constant", cval=0., prefilter=True
+                lds_upsampled = map_coordinates(
+                    lds, coords, order=3, mode="constant", cval=0.0, prefilter=True
                 )
             else:
                 coords = _create_mesh_for_landscape(lds.shape[1:], max_shifts, upsample)
                 all_lds = [
-                    ndi.map_coordinates(
-                        l, coords, order=3, mode="constant", cval=0., prefilter=True
+                    map_coordinates(
+                        l, coords, order=3, mode="constant", cval=0.0, prefilter=True
                     )
                     for l in lds
                 ]
@@ -483,6 +480,7 @@ class BaseAlignmentModel(ABC):
     def niter(self) -> int:
         """Number of templates."""
         return self._n_templates
+
 
 # deprecated
 def optimize(self: BaseAlignmentModel, *args, **kwargs):
@@ -603,7 +601,7 @@ class RotationImplemented(BaseAlignmentModel):
 
         mtx = result.affine_matrix(img.shape)
         _img_cval = _normalize_cval(cval, img)
-        img_trans: NDArray[np.float32] = ndi.affine_transform(img, mtx, cval=_img_cval)  # type: ignore
+        img_trans = affine_transform(img, mtx, cval=_img_cval)
         return img_trans, result
 
     def _transform_template(
@@ -617,9 +615,9 @@ class RotationImplemented(BaseAlignmentModel):
         _cval = _normalize_cval(cval, temp)
 
         return self.pre_transform(
-            ndi.affine_transform(
+            affine_transform(
                 temp, matrix=matrix, cval=_cval, order=order, prefilter=prefilter
-            )  # type: ignore
+            )
         )
 
     @delayed
@@ -665,11 +663,11 @@ class RotationImplemented(BaseAlignmentModel):
                 all_templates: list[da.Array] = []
                 all_masks: list[da.Array] = []
                 inputs_templates: list[NDArray[np.float32]] = [
-                    ndi.spline_filter(
+                    spline_filter(
                         tmp * self._mask,
                         order=3,
                         mode="constant",
-                        output=np.float32,  # type: ignore
+                        output=np.float32,
                     )
                     for tmp in self._template
                 ]
@@ -702,10 +700,10 @@ class RotationImplemented(BaseAlignmentModel):
                 )
 
             else:
-                template_masked: NDArray[np.float32] = ndi.spline_filter(
+                template_masked: NDArray[np.float32] = spline_filter(
                     self._template * self._mask,
                     order=3,
-                    output=np.float32,  # type: ignore
+                    output=np.float32,
                     mode="constant",
                 )
                 all_templates = [
@@ -759,6 +757,7 @@ class RotationImplemented(BaseAlignmentModel):
     def niter(self) -> int:
         """Number of iteration per sub-volume."""
         return self._n_templates * self._n_rotations
+
 
 class TomographyInput(RotationImplemented):
     """
@@ -879,15 +878,17 @@ def _normalize_cval(cval: float | None, img: np.ndarray) -> float:
 
 @lru_cache(maxsize=2)
 def _create_mesh_for_landscape(
-    shape: tuple[int, int, int], 
-    max_shifts: tuple[float, float, float], 
+    shape: tuple[int, int, int],
+    max_shifts: tuple[float, float, float],
     upsample: int,
 ) -> NDArray[np.float32]:
     upsampled_max_shifts = (np.asarray(max_shifts) * upsample).astype(np.int32)
     center = np.array(shape) / 2 - 0.5
     mesh = np.meshgrid(
-        *[np.arange(-width, width + 1) / upsample + c
-        for c, width in zip(center, upsampled_max_shifts)], 
+        *[
+            np.arange(-width, width + 1) / upsample + c
+            for c, width in zip(center, upsampled_max_shifts)
+        ],
         indexing="ij",
     )
     return np.stack(mesh, axis=0)

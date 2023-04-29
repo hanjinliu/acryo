@@ -13,7 +13,7 @@ def center_by_mass(
 ) -> NDArray[np.float32]:
     """Centering an image by its center of mass."""
     shift = np.array(ndi.center_of_mass(img)) - np.array(img.shape) / 2
-    return ndi.shift(img, -shift, order=order, prefilter=order > 1, mode="nearest")
+    return ndi.shift(img, -shift, order=order, prefilter=order > 1, mode="nearest")  # type: ignore
 
 
 @converter_function
@@ -21,7 +21,7 @@ def gaussian_filter(
     img: NDArray[np.float32], scale: nm, *, sigma: nm, mode="reflect", cval: float = 0.0
 ) -> NDArray[np.float32]:
     """Gaussian filtering an image."""
-    return ndi.gaussian_filter(img, sigma / scale, mode=mode, cval=cval)
+    return ndi.gaussian_filter(img, sigma / scale, mode=mode, cval=cval)  # type: ignore
 
 
 @converter_function

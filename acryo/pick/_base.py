@@ -6,15 +6,16 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy import ndimage as ndi
 from scipy.spatial.transform import Rotation
 from dask import array as da
 
 from acryo.pipe._classes import ImageProvider
 from acryo.molecules import Molecules
 from acryo._rotation import normalize_rotations
-from acryo._utils import compose_matrices, missing_wedge_mask, delayed_affine
+from acryo._utils import compose_matrices, missing_wedge_mask
 from acryo._types import nm, Ranges
+from acryo._typed_scipy import spline_filter, affine_transform
+from acryo._dask import DaskTaskPool
 
 
 class BasePickerModel(ABC):
@@ -101,20 +102,20 @@ class BaseTemplateMatcher(BasePickerModel):
         matrices = compose_matrices(_center, rotators)
 
         if self.order > 2:
-            template = ndi.spline_filter(
+            template = spline_filter(
                 template,
                 order=self.order,
-                output=np.float32,  # type: ignore
+                output=np.float32,
                 mode="constant",
             )
-        tasks = [
-            delayed_affine(template, mtx, order=self.order, prefilter=False)
-            for mtx in matrices
-        ]
+
+        pool = DaskTaskPool.from_func(affine_transform)
+        for mtx in matrices:
+            pool.add_task(template, mtx, order=self.order, prefilter=False)
         mask = missing_wedge_mask(
             Rotation.from_quat([0, 0, 0, 1]), self._tilt_range, template.shape
         )
-        out: list[NDArray[np.float32]] = da.compute(tasks)[0]  # rotated templates
+        out = pool.compute()  # rotated templates
         templates = [o * mask for o in out]
         depth = tuple(np.ceil(np.array(templates[0].shape) / 2).astype(np.uint16))
         return {"templates": templates}, depth

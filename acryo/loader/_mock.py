@@ -1,3 +1,4 @@
+# pyright: reportPrivateImportUsage=false
 from __future__ import annotations
 
 from ._base import LoaderBase, Unset
@@ -10,7 +11,8 @@ from scipy.spatial.transform import Rotation
 
 from acryo import _utils
 from acryo._types import nm, pixel
-from acryo._fft import fftn, ifftn
+from acryo._typed_scipy import fftn, ifftn, spline_filter
+from acryo._dask import DaskArrayList
 from acryo.molecules import Molecules
 from acryo.pipe._classes import ImageProvider
 
@@ -52,7 +54,7 @@ class MockLoader(LoaderBase):
         template: NDArray[np.float32] | ImageProvider,
         molecules: Molecules,
         noise: float = 0.0,
-        degrees: Sequence[float] | None = None,
+        degrees: Sequence[float] | NDArray[np.float32] | None = None,
         central_axis: tuple[float, float, float] = (0.0, 1.0, 0.0),
         order: int = 3,
         scale: nm = 1.0,
@@ -81,9 +83,7 @@ class MockLoader(LoaderBase):
         """All the molecules"""
         return self._molecules
 
-    def construct_loading_tasks(
-        self, output_shape: _ShapeType = None
-    ) -> list[da.Array]:
+    def construct_loading_tasks(self, output_shape: _ShapeType = None) -> DaskArrayList:
         # TODO: this implementation is not efficent. Radon transformation is not
         # actually needed. Apply missing wedge mask directly to the template, and
         # apply inverse-Radon only to the noise. The linearity of Radon
@@ -100,7 +100,7 @@ class MockLoader(LoaderBase):
 
         # spline prefilter in advance
         if self.order > 1:
-            template = ndi.spline_filter(
+            template = spline_filter(
                 template, order=self.order, mode="constant", output=np.float32
             )
         center = np.array(template.shape) / 2 - 0.5
@@ -160,9 +160,9 @@ def simulate_noise(
     degrees: NDArray[np.float32],
     noise: float,
     seed: int,
-):
+) -> da.Array:
     # img: spline filtered
-    matrices, output_shape = normalize_radon_input(img, central_axis, degrees)
+    matrices, output_shape = normalize_radon_input(img.shape, central_axis, degrees)
     sino: da.Array = da.stack(
         [
             da.from_delayed(
@@ -194,9 +194,9 @@ def simulate_noise(
 
 
 def normalize_radon_input(
-    self: NDArray[np.float32],
+    shape: tuple[int, int, int],
     central_axis: NDArray[np.float32],
-    degrees: NDArray[np.float32] | float,
+    degrees: NDArray[np.float32],
 ):
     radians = np.deg2rad(list(degrees))
 
@@ -207,10 +207,10 @@ def normalize_radon_input(
         raise ValueError("Central axis must be a 3D vector")
 
     # construct Affine transform matrices
-    height = int(np.ceil(np.linalg.norm(self.shape)))
-    output_shape = (height, self.shape[1], self.shape[2])
+    height = int(np.ceil(np.linalg.norm(shape)))
+    output_shape = (height, shape[1], shape[2])
     params = _get_rotation_matrices_for_radon_3d(
-        radians, central_axis, self.shape, output_shape
+        radians, central_axis, shape, output_shape
     )
 
     return params, output_shape

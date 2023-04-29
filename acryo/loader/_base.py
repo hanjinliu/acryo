@@ -32,6 +32,7 @@ from acryo.alignment import (
 )
 from acryo import _utils
 from acryo._types import nm, pixel
+from acryo._dask import DaskArrayList
 from acryo.molecules import Molecules
 from acryo.loader import _misc
 from acryo.loader._group import LoaderGroup
@@ -44,8 +45,7 @@ if TYPE_CHECKING:
     from acryo.classification import PcaClassifier
     from acryo.alignment._base import MaskType
 
-    _ShapeType = Union[pixel, tuple[pixel, ...], None]
-
+_ShapeType = Union[pixel, tuple[pixel, ...], None]
 TemplateInputType = Union[NDArray[np.float32], ImageProvider]
 MaskInputType = Union[NDArray[np.float32], ImageProvider, ImageConverter, None]
 AggFunction = Callable[[NDArray[np.float32]], Any]
@@ -110,9 +110,7 @@ class LoaderBase(ABC):
         return self._corner_safe
 
     @abstractmethod
-    def construct_loading_tasks(
-        self, output_shape: _ShapeType = None
-    ) -> list[da.Array]:
+    def construct_loading_tasks(self, output_shape: _ShapeType = None) -> DaskArrayList:
         ...
 
     def _get_cached_array(self, shape: tuple[int, int, int] | None) -> da.Array | None:
@@ -428,8 +426,7 @@ class LoaderBase(ABC):
         subtomogram loader object
             A loader instance of the same type with updated molecules.
         """
-        if np.isscalar(max_shifts):
-            max_shifts = (max_shifts,) * 3
+        max_shifts = _normalize_max_shifts(max_shifts)
         _max_shifts_px = np.asarray(max_shifts) / self.scale
 
         model = alignment_model(
@@ -588,7 +585,6 @@ class LoaderBase(ABC):
         remainder: int = -1,
         label_name: str = "labels",
     ):
-
         local_shifts, local_rot, scores = _misc.allocate(len(results))
         labels = np.zeros(len(results), dtype=np.uint32)
         for i, result in enumerate(results):
@@ -627,8 +623,7 @@ class LoaderBase(ABC):
         This method internally calls the ``landscape`` method of the input alignment
         model.
         """
-        if np.isscalar(max_shifts):
-            max_shifts = (max_shifts,) * 3
+        max_shifts = _normalize_max_shifts(max_shifts)
         _max_shifts_px = tuple(np.asarray(max_shifts) / self.scale)
 
         model = alignment_model(
@@ -638,7 +633,9 @@ class LoaderBase(ABC):
         )
 
         if model.is_multi_templates:
-            task_shape = (model.niter,) + tuple(2 * np.ceil(_max_shifts_px).astype(np.int32) + 1)
+            task_shape = (model.niter,) + tuple(
+                2 * np.ceil(_max_shifts_px).astype(np.int32) + 1
+            )
         else:
             task_shape = tuple(2 * np.ceil(_max_shifts_px).astype(np.int32) + 1)
         task_arrays: list[da.Array] = [
@@ -650,7 +647,7 @@ class LoaderBase(ABC):
                 var_kwarg=dict(
                     quaternion=self.molecules.quaternion(),
                     pos=self.molecules.pos / self.scale,
-                )
+                ),
             )
         ]
         return da.stack(task_arrays, axis=0)
@@ -1051,3 +1048,14 @@ def _is_iterable_of_funcs(x: Any) -> TypeGuard[Iterable[AggFunction]]:
     if not hasattr(x, "__iter__"):
         return False
     return all(callable(f) for f in x)
+
+
+def _normalize_max_shifts(x: nm | tuple[nm, nm, nm]) -> tuple[nm, nm, nm]:
+    if hasattr(x, "__iter__"):
+        tup = tuple(float(x0) for x0 in x)  # type: ignore
+        if len(tup) != 3:
+            raise ValueError(
+                "max_shifts must be a 3-tuple if multiple values are given."
+            )
+        return tup
+    return (float(x),) * 3  # type: ignore
