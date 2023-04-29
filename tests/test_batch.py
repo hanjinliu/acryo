@@ -6,26 +6,26 @@ import polars as pl
 
 
 def test_replace():
-    collection = BatchLoader()
-    assert collection.replace(order=1).order == 1
-    assert collection.replace(order=1).corner_safe == collection.corner_safe
-    assert collection.replace(output_shape=(1, 2, 3)).output_shape == (1, 2, 3)
-    assert collection.replace(scale=0.5).scale == 0.5
+    loader = BatchLoader()
+    assert loader.replace(order=1).order == 1
+    assert loader.replace(order=1).corner_safe == loader.corner_safe
+    assert loader.replace(output_shape=(1, 2, 3)).output_shape == (1, 2, 3)
+    assert loader.replace(scale=0.5).scale == 0.5
 
 
 @lru_cache(maxsize=1)
 def _get_batch_loader():
-    collection = BatchLoader()
+    loader = BatchLoader()
     img0 = np.zeros((10, 10, 10))
     img1 = np.ones((10, 10, 10))
-    collection.add_tomogram(
+    loader.add_tomogram(
         img0,
         Molecules(
             np.zeros((4, 3)),
             Rotation.from_quat(np.ones((4, 4))),
         ),
     )
-    collection.add_tomogram(
+    loader.add_tomogram(
         img1,
         Molecules(
             np.zeros((2, 3)),
@@ -33,33 +33,33 @@ def _get_batch_loader():
         ),
     )
 
-    return collection
+    return loader
 
 
 def test_add_tomograms():
-    collection = _get_batch_loader()
+    loader = _get_batch_loader()
 
-    assert list(collection.images.keys()) == [0, 1]
-    assert len(collection.molecules) == 6
+    assert list(loader.images.keys()) == [0, 1]
+    assert len(loader.molecules) == 6
 
 
 def test_get_loader():
-    collection = _get_batch_loader()
-    assert collection.loaders[0].image.mean() == 0
-    assert collection.loaders[1].image.mean() == 1
+    loader = _get_batch_loader()
+    assert loader.loaders[0].image.mean() == 0
+    assert loader.loaders[1].image.mean() == 1
 
 
 def test_iter_loader():
-    collection = _get_batch_loader()
-    for _ in collection.loaders:
+    loader = _get_batch_loader()
+    for _ in loader.loaders:
         pass
 
 
 def test_filter():
-    collection = BatchLoader()
+    loader = BatchLoader()
     img0 = np.zeros((10, 10, 10))
     img1 = np.ones((10, 10, 10))
-    collection.add_tomogram(
+    loader.add_tomogram(
         img0,
         Molecules(
             np.zeros((4, 3)),
@@ -67,7 +67,7 @@ def test_filter():
             features={"a": [0, 0, 0, 1]},
         ),
     )
-    collection.add_tomogram(
+    loader.add_tomogram(
         img1,
         Molecules(
             np.zeros((2, 3)),
@@ -76,24 +76,24 @@ def test_filter():
         ),
     )
 
-    out0 = collection.filter(pl.col("a") == 0)
-    out1 = collection.filter(pl.col("a") == 1)
+    out0 = loader.filter(pl.col("a") == 0)
+    out1 = loader.filter(pl.col("a") == 1)
     assert len(out0.molecules) == 4
     assert len(out1.molecules) == 2
 
 
 def test_averaging():
-    collection = _get_batch_loader()
-    collection.average((3, 3, 3))
+    loader = _get_batch_loader()
+    loader.average((3, 3, 3))
 
 
 def test_alignment():
-    collection = _get_batch_loader()
-    out = collection.align(np.ones((3, 3, 3), dtype=np.float32))
+    loader = _get_batch_loader()
+    out = loader.align(np.ones((3, 3, 3), dtype=np.float32))
     assert len(out.molecules) == 6
 
 
 def test_align_no_template():
-    collection = _get_batch_loader()
-    out = collection.replace(output_shape=(3, 3, 3)).align_no_template()
+    loader = _get_batch_loader()
+    out = loader.replace(output_shape=(3, 3, 3)).align_no_template()
     assert len(out.molecules) == 6

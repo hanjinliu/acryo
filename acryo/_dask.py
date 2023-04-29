@@ -17,7 +17,9 @@ if TYPE_CHECKING:
     from dask.delayed import Delayed
 
 _P = ParamSpec("_P")
+_P1 = ParamSpec("_P1")
 _R = TypeVar("_R")
+_R1 = TypeVar("_R1")
 
 
 class DaskTaskPool(Generic[_P, _R]):
@@ -97,3 +99,6 @@ class DaskArrayList(Sequence["da.Array"]):
         pool = DaskTaskPool.from_func(func)
         [pool.add_task(s, *args, **kwargs) for s in self]
         return pool
+
+    def enumerate(self) -> Iterator[tuple[int, da.Array]]:
+        return enumerate(self)

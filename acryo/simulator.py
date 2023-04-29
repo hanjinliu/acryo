@@ -84,7 +84,7 @@ class TomogramSimulator:
     @property
     def components(self) -> MappingProxyType[str, Component]:
         """Return all the components in the tomogram."""
-        return MappingProxyType(self._components)
+        return MappingProxyType(self._components)  # type: ignore
 
     @property
     def order(self) -> Literal[0, 1, 3]:
