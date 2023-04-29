@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from typing import Callable, overload
+from typing import Callable, overload, Union
 from typing_extensions import Self
 
 import numpy as np
 from numpy.typing import NDArray
 from acryo._types import nm
+
+_Quatity = Union[int, float, NDArray[np.float32]]
 
 
 class _Pipeline:
@@ -39,10 +41,14 @@ class ImageProvider(_Pipeline):
     def __init__(self, provider: Callable[[nm], NDArray[np.float32]]):
         super().__init__(provider)
 
-    def __call__(self, scale: nm) -> NDArray[np.float32]:
+    def provide(self, scale: nm) -> NDArray[np.float32]:
+        """Provide an image at a given scale."""
         out = self._func(scale)
         _assert_3d_array(out, self._func)
         return out
+
+    def __call__(self, scale: nm) -> NDArray[np.float32]:
+        return self.provide(scale)
 
     def __add__(self, other) -> ImageProvider:
         if isinstance(other, ImageProvider):
@@ -90,30 +96,30 @@ class ImageProvider(_Pipeline):
 
     def __lt__(self, other) -> ImageProvider:
         if isinstance(other, ImageProvider):
-            return self.__class__(lambda scale: self(scale) < other(scale)).with_name(
-                f"{self.__name__} < {other.__name__}"
-            )
+            return self.__class__(
+                lambda scale: _lt(self(scale), other(scale))
+            ).with_name(f"{self.__name__} < {other.__name__}")
         return self.__class__(lambda scale: self(scale) < other)
 
     def __le__(self, other) -> ImageProvider:
         if isinstance(other, ImageProvider):
-            return self.__class__(lambda scale: self(scale) <= other(scale)).with_name(
-                f"{self.__name__} <= {other.__name__}"
-            )
+            return self.__class__(
+                lambda scale: _le(self(scale), other(scale))
+            ).with_name(f"{self.__name__} <= {other.__name__}")
         return self.__class__(lambda scale: self(scale) <= other)
 
     def __gt__(self, other) -> ImageProvider:
         if isinstance(other, ImageProvider):
-            return self.__class__(lambda scale: self(scale) > other(scale)).with_name(
-                f"{self.__name__} > {other.__name__}"
-            )
+            return self.__class__(
+                lambda scale: _gt(self(scale), other(scale))
+            ).with_name(f"{self.__name__} > {other.__name__}")
         return self.__class__(lambda scale: self(scale) > other)
 
     def __ge__(self, other) -> ImageProvider:
         if isinstance(other, ImageProvider):
-            return self.__class__(lambda scale: self(scale) >= other(scale)).with_name(
-                f"{self.__name__} >= {other.__name__}"
-            )
+            return self.__class__(
+                lambda scale: _ge(self(scale), other(scale))
+            ).with_name(f"{self.__name__} >= {other.__name__}")
         return self.__class__(lambda scale: self(scale) >= other)
 
     def __neg__(self) -> ImageProvider:
@@ -130,10 +136,13 @@ class ImageConverter(_Pipeline):
     ):
         super().__init__(converter)
 
-    def __call__(self, image: NDArray[np.float32], scale: nm) -> NDArray[np.float32]:
+    def convert(self, image: NDArray[np.float32], scale: nm) -> NDArray[np.float32]:
         out = self._func(image, scale)
         _assert_3d_array(out, self._func)
         return out
+
+    def __call__(self, image: NDArray[np.float32], scale: nm) -> NDArray[np.float32]:
+        return self.convert(image, scale)
 
     @overload
     def compose(self, other: ImageProvider) -> ImageProvider:
@@ -237,44 +246,44 @@ class ImageConverter(_Pipeline):
     def __gt__(self, other) -> ImageConverter:
         if isinstance(other, ImageConverter):
             return self.__class__(
-                lambda x, scale: self(x, scale) > other(x, scale)
+                lambda x, scale: _gt(self(x, scale), other(x, scale))
             ).with_name(f"({self.__name__} > {other.__name__})")
         elif isinstance(other, ImageProvider):
             return self.__class__(
-                lambda x, scale: self(x, scale) > other(scale)
+                lambda x, scale: _gt(self(x, scale), other(scale))
             ).with_name(f"({self.__name__} > {other.__name__})")
         return self.__class__(lambda x, scale: self(x, scale) > other)
 
     def __ge__(self, other) -> ImageConverter:
         if isinstance(other, ImageConverter):
             return self.__class__(
-                lambda x, scale: self(x, scale) >= other(x, scale)
+                lambda x, scale: _ge(self(x, scale), other(x, scale))
             ).with_name(f"({self.__name__} >= {other.__name__})")
         elif isinstance(other, ImageProvider):
             return self.__class__(
-                lambda x, scale: self(x, scale) >= other(scale)
+                lambda x, scale: _ge(self(x, scale), other(scale))
             ).with_name(f"({self.__name__} >= {other.__name__})")
         return self.__class__(lambda x, scale: self(x, scale) >= other)
 
     def __lt__(self, other) -> ImageConverter:
         if isinstance(other, ImageConverter):
             return self.__class__(
-                lambda x, scale: self(x, scale) < other(x, scale)
+                lambda x, scale: _lt(self(x, scale), other(x, scale))
             ).with_name(f"({self.__name__} < {other.__name__})")
         elif isinstance(other, ImageProvider):
             return self.__class__(
-                lambda x, scale: self(x, scale) < other(scale)
+                lambda x, scale: _lt(self(x, scale), other(scale))
             ).with_name(f"({self.__name__} < {other.__name__})")
         return self.__class__(lambda x, scale: self(x, scale) < other)
 
     def __le__(self, other) -> ImageConverter:
         if isinstance(other, ImageConverter):
             return self.__class__(
-                lambda x, scale: self(x, scale) <= other(x, scale)
+                lambda x, scale: _le(self(x, scale), other(x, scale))
             ).with_name(f"({self.__name__} <= {other.__name__})")
         elif isinstance(other, ImageProvider):
             return self.__class__(
-                lambda x, scale: self(x, scale) <= other(scale)
+                lambda x, scale: _le(self(x, scale), other(scale))
             ).with_name(f"({self.__name__} <= {other.__name__})")
         return self.__class__(lambda x, scale: self(x, scale) <= other)
 
@@ -289,3 +298,19 @@ def _assert_3d_array(out, func):
         )
     if out.ndim != 3:
         raise ValueError(f"Wrong image dimensionality: {out.shape}")
+
+
+def _ge(a, b) -> NDArray[np.float32]:
+    return np.greater_equal(a, b, dtype=np.float32)
+
+
+def _le(a, b) -> NDArray[np.float32]:
+    return np.less_equal(a, b, dtype=np.float32)
+
+
+def _gt(a, b) -> NDArray[np.float32]:
+    return np.greater(a, b, dtype=np.float32)
+
+
+def _lt(a, b) -> NDArray[np.float32]:
+    return np.less(a, b, dtype=np.float32)

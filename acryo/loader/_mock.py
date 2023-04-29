@@ -1,6 +1,7 @@
+# pyright: reportPrivateImportUsage=false
 from __future__ import annotations
 
-from ._base import LoaderBase, Unset
+from ._base import LoaderBase
 from typing import TYPE_CHECKING, Iterable, Sequence
 import numpy as np
 from numpy.typing import NDArray
@@ -9,14 +10,14 @@ from scipy import ndimage as ndi
 from scipy.spatial.transform import Rotation
 
 from acryo import _utils
-from acryo._types import nm, pixel
-from acryo._fft import fftn, ifftn
+from acryo._types import nm
+from acryo._typed_scipy import fftn, ifftn, spline_filter, affine_transform
+from acryo._dask import DaskArrayList, DaskTaskPool
 from acryo.molecules import Molecules
 from acryo.pipe._classes import ImageProvider
 
 if TYPE_CHECKING:
     from typing_extensions import Self
-    from dask.delayed import Delayed
     from ._base import _ShapeType
 
 
@@ -52,16 +53,15 @@ class MockLoader(LoaderBase):
         template: NDArray[np.float32] | ImageProvider,
         molecules: Molecules,
         noise: float = 0.0,
-        degrees: Sequence[float] | None = None,
+        degrees: Sequence[float] | NDArray[np.float32] | None = None,
         central_axis: tuple[float, float, float] = (0.0, 1.0, 0.0),
         order: int = 3,
         scale: nm = 1.0,
-        output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
         corner_safe: bool = False,
     ) -> None:
         if noise < 0:
             raise ValueError("Noise must be non-negative.")
-        super().__init__(order, scale, output_shape, corner_safe)
+        super().__init__(order, scale, corner_safe)
         self._template = template
         self._noise = noise
         if degrees is None:
@@ -75,20 +75,23 @@ class MockLoader(LoaderBase):
             self._degrees = np.asarray(degrees, dtype=np.float32)
         self._molecules = molecules
         self._central_axis = np.array(central_axis, dtype=np.float32)
+        if isinstance(template, ImageProvider):
+            self._output_shape = template(self.scale).shape
+        else:
+            self._output_shape = template.shape
+        if len(self._output_shape) != 3:
+            raise ValueError("Template must be 3D.")
 
     @property
     def molecules(self) -> Molecules:
         """All the molecules"""
         return self._molecules
 
-    def construct_loading_tasks(
-        self, output_shape: _ShapeType = None
-    ) -> list[da.Array]:
+    def construct_loading_tasks(self, output_shape: _ShapeType = None) -> DaskArrayList:
         # TODO: this implementation is not efficent. Radon transformation is not
         # actually needed. Apply missing wedge mask directly to the template, and
         # apply inverse-Radon only to the noise. The linearity of Radon
         # transformation guarantees that the result is correct.
-        tasks: list[Delayed] = []
         if isinstance(self._template, ImageProvider):
             template = self._template(self.scale)
         else:
@@ -96,46 +99,48 @@ class MockLoader(LoaderBase):
         if output_shape is None:
             output_shape = template.shape
         elif output_shape != template.shape:
-            raise ValueError("Mismatched output shape and template shape.")
+            raise ValueError(
+                f"Mismatched output shape {output_shape!r} and template shape "
+                f"{template.shape}."
+            )
 
         # spline prefilter in advance
         if self.order > 1:
-            template = ndi.spline_filter(
+            template = spline_filter(
                 template, order=self.order, mode="constant", output=np.float32
             )
         center = np.array(template.shape) / 2 - 0.5
         matrices = self.molecules.affine_matrix(
             center, center + self.molecules.pos / self.scale
         )
-        for i, mtx in enumerate(matrices):
-            img = _utils.delayed_affine(
-                template, mtx, order=self.order, prefilter=False
-            )
-            if self._degrees is None:
-                tasks.append(img)
-            else:
-                task = simulate_noise(
-                    img,
+        pool = DaskTaskPool.from_func(affine_transform)
+        for mtx in matrices:
+            pool.add_task(template, mtx, order=self.order, prefilter=False)
+        task_list = pool.asarrays(shape=template.shape, dtype=np.float32)
+        if self._degrees is not None:
+            task_list = DaskArrayList(
+                simulate_noise(
+                    task,
                     self._central_axis,
                     self._degrees,
                     self._noise,
                     seed=i,
                 )
-                tasks.append(task)
-        return tasks
+                for i, task in task_list.enumerate()
+            )
+
+        return task_list
 
     def replace(
         self,
         molecules: Molecules | None = None,
-        output_shape: pixel | tuple[pixel, pixel, pixel] | Unset | None = None,
+        output_shape: None = None,  # just for compatibility
         order: int | None = None,
         scale: float | None = None,
         corner_safe: bool | None = None,
     ) -> Self:
         if molecules is None:
             molecules = self.molecules
-        if output_shape is None:
-            output_shape = self.output_shape
         if order is None:
             order = self.order
         if scale is None:
@@ -147,7 +152,6 @@ class MockLoader(LoaderBase):
             molecules=molecules,
             noise=self._noise,
             degrees=self._degrees,
-            output_shape=output_shape,
             order=order,
             scale=scale,
             corner_safe=corner_safe,
@@ -155,14 +159,14 @@ class MockLoader(LoaderBase):
 
 
 def simulate_noise(
-    img: NDArray[np.float32],
+    img: NDArray[np.float32] | da.Array,
     central_axis,
     degrees: NDArray[np.float32],
     noise: float,
     seed: int,
-):
+) -> da.Array:
     # img: spline filtered
-    matrices, output_shape = normalize_radon_input(img, central_axis, degrees)
+    matrices, output_shape = normalize_radon_input(img.shape, central_axis, degrees)
     sino: da.Array = da.stack(
         [
             da.from_delayed(
@@ -194,9 +198,9 @@ def simulate_noise(
 
 
 def normalize_radon_input(
-    self: NDArray[np.float32],
+    shape: tuple[int, int, int],
     central_axis: NDArray[np.float32],
-    degrees: NDArray[np.float32] | float,
+    degrees: NDArray[np.float32],
 ):
     radians = np.deg2rad(list(degrees))
 
@@ -207,10 +211,10 @@ def normalize_radon_input(
         raise ValueError("Central axis must be a 3D vector")
 
     # construct Affine transform matrices
-    height = int(np.ceil(np.linalg.norm(self.shape)))
-    output_shape = (height, self.shape[1], self.shape[2])
+    height = int(np.ceil(np.linalg.norm(shape)))
+    output_shape = (height, shape[1], shape[2])
     params = _get_rotation_matrices_for_radon_3d(
-        radians, central_axis, self.shape, output_shape
+        radians, central_axis, shape, output_shape
     )
 
     return params, output_shape

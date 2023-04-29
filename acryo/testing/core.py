@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import numpy as np
-from scipy import ndimage as ndi
 
-from acryo._fft import fftn, ifftn
+from acryo._typed_scipy import fftn, ifftn, affine_transform
 from acryo.molecules import Molecules
 from acryo._utils import compose_matrices
 from acryo._rotation import normalize_rotations
@@ -76,7 +75,7 @@ class TomogramGenerator:
             mtx_iterator = iter(matrices)
             for i, j in wrange(gy, gx):
                 mtx = next(mtx_iterator)
-                mols[i][j] = ndi.affine_transform(mols[i][j], mtx)
+                mols[i][j] = affine_transform(mols[i][j], mtx)
 
         for i, j in wrange(gy, gx):
             mols[i][j] += rng.normal(scale=self.noise_sigma, size=template.shape)

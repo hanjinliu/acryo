@@ -28,7 +28,6 @@ from acryo import _utils
 from acryo.loader import _misc
 
 if TYPE_CHECKING:
-    from typing_extensions import Self
     from dask.delayed import Delayed
     from numpy.typing import NDArray
     from acryo.loader._base import (
@@ -159,7 +158,7 @@ class LoaderGroup(Generic[_K, _L]):
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
         alignment_model: type[BaseAlignmentModel] | AlignmentFactory = ZNCCAlignment,
         **align_kwargs,
-    ) -> Self[_K, _L]:
+    ) -> LoaderGroup[_K, _L]:
         """
         Align subtomograms to the template image.
 
@@ -186,12 +185,12 @@ class LoaderGroup(Generic[_K, _L]):
         LoaderGroup
             A loader group instance with updated molecules.
         """
-        all_tasks: list[list[Delayed]] = []
+        all_tasks: list[list[da.Array | Delayed]] = []
         template_map = _normalize_template(template)
         for key, loader in self:
             model = alignment_model(
                 template=loader.normalize_template(template_map[key]),
-                mask=mask,
+                mask=loader.normalize_mask(mask),
                 **align_kwargs,
             )
             _max_shifts_px = np.asarray(max_shifts) / loader.scale
@@ -204,7 +203,7 @@ class LoaderGroup(Generic[_K, _L]):
                     pos=loader.molecules.pos / loader.scale,
                 ),
             )
-            all_tasks.append(tasks)
+            all_tasks.append(list(tasks))
         all_results = da.compute(all_tasks)[0]
         out: list[tuple[_K, _L]] = []
         for (key, loader), results in zip(self, all_results):
@@ -220,7 +219,7 @@ class LoaderGroup(Generic[_K, _L]):
         output_shape: _ShapeType = None,
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
         **align_kwargs,
-    ) -> Self[_K, _L]:
+    ) -> LoaderGroup[_K, _L]:
         """
         Align subtomograms without template image.
 
@@ -264,7 +263,7 @@ class LoaderGroup(Generic[_K, _L]):
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
         label_name: str = "labels",
         **align_kwargs,
-    ) -> Self[_K, _L]:
+    ) -> LoaderGroup[_K, _L]:
         """
         Align subtomograms with multiple template images.
 
@@ -311,7 +310,7 @@ class LoaderGroup(Generic[_K, _L]):
                     pos=loader.molecules.pos / loader.scale,
                 ),
             )
-            all_tasks.append(tasks)
+            all_tasks.append(list(tasks))
         all_results = da.compute(all_tasks)[0]
         if isinstance(model, RotationImplemented) and model._n_rotations > 1:
             remainder = len(templates)
@@ -350,19 +349,21 @@ class LoaderGroup(Generic[_K, _L]):
         """
         all_tasks: list[list[Delayed]] = []
         if not hasattr(funcs, "__iter__"):
-            funcs = [funcs]
+            _funcs = [funcs]
+        else:
+            _funcs = funcs
         if schema is None:
-            schema = [fn.__name__ for fn in funcs]
+            schema = [fn.__name__ for fn in _funcs]
         if len(set(schema)) != len(schema):
             raise ValueError("Schema names must be unique.")
         keys: list[str] = []
         for key, loader in self:
             taskset = []
-            for fn in funcs:
+            for fn in _funcs:
                 tasks = loader.construct_mapping_tasks(
                     fn, output_shape=loader.output_shape
                 )
-                taskset.append(tasks)
+                taskset.append(list(tasks))
             all_tasks.append(taskset)
             keys.append(key)
         all_results = da.compute(all_tasks)[0]
@@ -439,19 +440,19 @@ class LoaderGroup(Generic[_K, _L]):
     def filter(
         self,
         predicate: pl.Expr | str | pl.Series | list[bool] | np.ndarray,
-    ) -> Self[_K, _L]:
+    ) -> LoaderGroup[_K, _L]:
         """Filter the molecules in each group."""
         return self.__class__((key, loader.filter(predicate)) for key, loader in self)
 
-    def head(self, n: int = 10) -> Self[_K, _L]:
+    def head(self, n: int = 10) -> LoaderGroup[_K, _L]:
         """Get the first n molecules in each group."""
         return self.__class__((key, loader.head(n)) for key, loader in self)
 
-    def tail(self, n: int = 10) -> Self[_K, _L]:
+    def tail(self, n: int = 10) -> LoaderGroup[_K, _L]:
         """Get the last n molecules in each group."""
         return self.__class__((key, loader.tail(n)) for key, loader in self)
 
-    def sample(self, n: int = 10, seed: int | None = None) -> Self[_K, _L]:
+    def sample(self, n: int = 10, seed: int | None = None) -> LoaderGroup[_K, _L]:
         """Get n random molecules in each group."""
         return self.__class__((key, loader.sample(n, seed)) for key, loader in self)
 
@@ -465,7 +466,7 @@ class LoaderGroupByIterator(Iterable[tuple[_K, _L]]):
         by: _K,
         order: int,
         scale: float,
-        output_shape: tuple[int, ...],
+        output_shape: tuple[int, int, int] | None,
         corner_safe: bool,
     ):
         self._loader = loader

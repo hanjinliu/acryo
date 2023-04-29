@@ -12,6 +12,7 @@ from typing import (
     Any,
     Sequence,
     SupportsIndex,
+    TypeVar,
     Union,
     overload,
 )
@@ -32,6 +33,7 @@ from acryo.alignment import (
 )
 from acryo import _utils
 from acryo._types import nm, pixel
+from acryo._dask import DaskArrayList, DaskTaskList, DaskTaskIterator
 from acryo.molecules import Molecules
 from acryo.loader import _misc
 from acryo.loader._group import LoaderGroup
@@ -44,11 +46,12 @@ if TYPE_CHECKING:
     from acryo.classification import PcaClassifier
     from acryo.alignment._base import MaskType
 
-    _ShapeType = Union[pixel, tuple[pixel, ...], None]
-
+_ShapeType = Union[pixel, tuple[pixel, ...], None]
 TemplateInputType = Union[NDArray[np.float32], ImageProvider]
 MaskInputType = Union[NDArray[np.float32], ImageProvider, ImageConverter, None]
 AggFunction = Callable[[NDArray[np.float32]], Any]
+
+_R = TypeVar("_R")
 
 
 class Unset:
@@ -110,9 +113,7 @@ class LoaderBase(ABC):
         return self._corner_safe
 
     @abstractmethod
-    def construct_loading_tasks(
-        self, output_shape: _ShapeType = None
-    ) -> list[da.Array]:
+    def construct_loading_tasks(self, output_shape: _ShapeType = None) -> DaskArrayList:
         ...
 
     def _get_cached_array(self, shape: tuple[int, int, int] | None) -> da.Array | None:
@@ -163,12 +164,12 @@ class LoaderBase(ABC):
 
     def iter_mapping_tasks(
         self,
-        func: Callable,
+        func: Callable[..., _R],
         *const_args,
         output_shape: _ShapeType = None,
         var_kwarg: dict[str, Iterable[Any]] | None = None,
         **const_kwargs,
-    ) -> Iterator[Delayed]:
+    ) -> DaskTaskIterator[_R]:
         """
         Iterate over delayed mapping tasks using subtomograms.
 
@@ -197,16 +198,16 @@ class LoaderBase(ABC):
                 delayed_f(ar, *const_args, **const_kwargs, **kw)
                 for ar, kw in zip(dask_array, _misc.dict_iterrows(var_kwarg))
             )
-        return it
+        return DaskTaskIterator(it)
 
     def construct_mapping_tasks(
         self,
-        func: Callable,
+        func: Callable[..., _R],
         *const_args,
         output_shape: _ShapeType = None,
         var_kwarg: dict[str, Iterable[Any]] | None = None,
         **const_kwargs,
-    ) -> list[Delayed]:
+    ) -> DaskTaskList[_R]:
         """
         Construct delayed mapping tasks using subtomograms.
 
@@ -222,18 +223,16 @@ class LoaderBase(ABC):
 
         Returns
         -------
-        list of da.delayed.Delayed object
-            List of delayed tasks that are ready for ``da.compute``.
+        DaskTaskList
+            List of delayed tasks that are ready for computation.
         """
-        return list(
-            self.iter_mapping_tasks(
-                func,
-                *const_args,
-                output_shape=output_shape,
-                var_kwarg=var_kwarg,
-                **const_kwargs,
-            )
-        )
+        return self.iter_mapping_tasks(
+            func,
+            *const_args,
+            output_shape=output_shape,
+            var_kwarg=var_kwarg,
+            **const_kwargs,
+        ).tolist()
 
     def _create_cache(self, output_shape: _ShapeType = None) -> da.Array:
         """
@@ -428,8 +427,7 @@ class LoaderBase(ABC):
         subtomogram loader object
             A loader instance of the same type with updated molecules.
         """
-        if np.isscalar(max_shifts):
-            max_shifts = (max_shifts,) * 3
+        max_shifts = _normalize_max_shifts(max_shifts)
         _max_shifts_px = np.asarray(max_shifts) / self.scale
 
         model = alignment_model(
@@ -446,7 +444,7 @@ class LoaderBase(ABC):
                 pos=self.molecules.pos / self.scale,
             ),
         )
-        all_results = da.compute(tasks)[0]
+        all_results = tasks.compute()
         return self._post_align(all_results, model.input_shape)
 
     def _post_align(
@@ -506,12 +504,11 @@ class LoaderBase(ABC):
         """
         if output_shape is None and isinstance(mask, np.ndarray):
             output_shape = mask.shape
-
         with self.cached(output_shape=output_shape):
             template = self.average(output_shape=output_shape)
             out = self.align(
                 template,
-                mask=self.normalize_mask(mask),
+                mask=mask,
                 max_shifts=max_shifts,
                 alignment_model=alignment_model,
                 **align_kwargs,
@@ -572,7 +569,7 @@ class LoaderBase(ABC):
                 pos=self.molecules.pos / self.scale,
             ),
         )
-        all_results = da.compute(tasks)[0]
+        all_results = tasks.compute()
         if isinstance(model, RotationImplemented) and model._n_rotations > 1:
             remainder = len(templates)
         else:
@@ -588,7 +585,6 @@ class LoaderBase(ABC):
         remainder: int = -1,
         label_name: str = "labels",
     ):
-
         local_shifts, local_rot, scores = _misc.allocate(len(results))
         labels = np.zeros(len(results), dtype=np.uint32)
         for i, result in enumerate(results):
@@ -627,8 +623,7 @@ class LoaderBase(ABC):
         This method internally calls the ``landscape`` method of the input alignment
         model.
         """
-        if np.isscalar(max_shifts):
-            max_shifts = (max_shifts,) * 3
+        max_shifts = _normalize_max_shifts(max_shifts)
         _max_shifts_px = tuple(np.asarray(max_shifts) / self.scale)
 
         model = alignment_model(
@@ -638,21 +633,24 @@ class LoaderBase(ABC):
         )
 
         if model.is_multi_templates:
-            task_shape = (model.niter,) + tuple(2 * np.ceil(_max_shifts_px).astype(np.int32) + 1)
+            task_shape = (model.niter,) + tuple(
+                2 * np.ceil(_max_shifts_px).astype(np.int32) + 1
+            )
         else:
             task_shape = tuple(2 * np.ceil(_max_shifts_px).astype(np.int32) + 1)
-        task_arrays: list[da.Array] = [
-            da.from_delayed(task, shape=task_shape, dtype=np.float32)
-            for task in self.iter_mapping_tasks(
+        task_arrays = (
+            self.iter_mapping_tasks(
                 model.landscape,
                 max_shifts=_max_shifts_px,
                 upsample=upsample,
                 var_kwarg=dict(
                     quaternion=self.molecules.quaternion(),
                     pos=self.molecules.pos / self.scale,
-                )
+                ),
             )
-        ]
+            .tolist()
+            .asarrays(shape=task_shape, dtype=np.float32)
+        )
         return da.stack(task_arrays, axis=0)
 
     def apply(
@@ -675,7 +673,7 @@ class LoaderBase(ABC):
         pl.DataFrame
             Result table.
         """
-        all_tasks: list[list[Delayed]] = []
+        all_tasks: list[list[da.Array | Delayed]] = []
         if _is_iterable_of_funcs(func):
             funcs = func
         else:
@@ -688,7 +686,7 @@ class LoaderBase(ABC):
             raise ValueError("Output shape is unknown.")
         for fn in funcs:
             tasks = self.construct_mapping_tasks(fn, output_shape=self.output_shape)
-            all_tasks.append(tasks)
+            all_tasks.append(list(tasks))
         all_results = np.array(da.compute(all_tasks)[0])
         return pl.DataFrame(all_results, schema=schema)
 
@@ -970,7 +968,7 @@ class LoaderBase(ABC):
 
     def normalize_mask(self, mask: MaskInputType) -> MaskType:
         """Resolve any mask input type to a 3D array."""
-        if isinstance(mask, (np.ndarray, type(None))):
+        if isinstance(mask, np.ndarray) or mask is None:
             return mask
         elif isinstance(mask, ImageProvider):
             out = mask(self.scale)
@@ -1051,3 +1049,14 @@ def _is_iterable_of_funcs(x: Any) -> TypeGuard[Iterable[AggFunction]]:
     if not hasattr(x, "__iter__"):
         return False
     return all(callable(f) for f in x)
+
+
+def _normalize_max_shifts(x: nm | tuple[nm, nm, nm]) -> tuple[nm, nm, nm]:
+    if hasattr(x, "__iter__"):
+        tup = tuple(float(x0) for x0 in x)  # type: ignore
+        if len(tup) != 3:
+            raise ValueError(
+                "max_shifts must be a 3-tuple if multiple values are given."
+            )
+        return tup
+    return (float(x),) * 3  # type: ignore

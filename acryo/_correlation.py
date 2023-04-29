@@ -5,9 +5,8 @@ import numpy as np
 from numpy.typing import NDArray
 
 from scipy.signal import fftconvolve
-from scipy import ndimage as ndi
 
-from acryo._fft import ifftn
+from acryo._typed_scipy import ifftn, map_coordinates
 from acryo._types import pixel
 
 # cross correlation
@@ -87,18 +86,21 @@ def subpixel_pcc(
     return shifts, pcc
 
 
+_DType = TypeVar("_DType", bound=np.number)
+
+
 def _upsampled_dft(
-    data: NDArray[np.number],
+    data: NDArray[_DType],
     upsampled_region_size: NDArray[np.integer],
     upsample_factor: int,
     axis_offsets: NDArray[np.float32],
-) -> NDArray[np.number]:
+) -> NDArray[_DType]:
     # if people pass in an integer, expand it to a list of equal-sized sections
     upsampled_region_sizes = [upsampled_region_size] * data.ndim
 
     dim_properties = list(zip(data.shape, upsampled_region_sizes, axis_offsets))
 
-    for (n_items, ups_size, ax_offset) in dim_properties[::-1]:
+    for n_items, ups_size, ax_offset in dim_properties[::-1]:
         kernel = (np.arange(ups_size) - ax_offset)[  # type: ignore
             :, np.newaxis
         ] * np.fft.fftfreq(  # type: ignore
@@ -108,9 +110,6 @@ def _upsampled_dft(
 
         data = np.tensordot(kernel, data, axes=(1, -1))  # type: ignore
     return data
-
-
-_DType = TypeVar("_DType", bound=np.number)
 
 
 def _abs2(a: NDArray[np.complex64]) -> NDArray[np.float32]:
@@ -242,7 +241,7 @@ def subpixel_zncc(
             midpoints.astype(np.float32),
             pad_width_eff,
         )
-        local_response: np.ndarray = ndi.map_coordinates(
+        local_response: np.ndarray = map_coordinates(
             response, coords, order=3, mode="constant", cval=-1.0, prefilter=True
         )
         local_maxima = np.unravel_index(np.argmax(local_response), local_response.shape)

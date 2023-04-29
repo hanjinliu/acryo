@@ -11,7 +11,7 @@ from dask import array as da
 from dask.delayed import delayed
 from scipy import ndimage as ndi
 from scipy.spatial.transform import Rotation
-from acryo._fft import fftn, rfftn, irfftn
+from acryo._typed_scipy import fftn, rfftn, irfftn
 
 if TYPE_CHECKING:
     from acryo._types import degree
@@ -46,7 +46,7 @@ def make_slice_and_pad(
 
 def compose_matrices(
     center: Sequence[float] | np.ndarray,
-    rotators: list[Rotation],
+    rotators: Rotation | list[Rotation],
     output_center: Sequence[float] | np.ndarray | None = None,
 ) -> list[NDArray[np.float32]]:
     """Compose Affine matrices from an array shape and a Rotation object."""
@@ -156,7 +156,7 @@ def prepare_affine(
     output_shape: Sequence[int],
     rot: Rotation,
     order: int = 1,
-):
+) -> tuple[da.Array, NDArray[np.float32]]:
     output_center = np.array(output_shape) / 2 - 0.5
     slices: list[slice] = []
     pads: list[tuple[int, ...]] = []
@@ -186,7 +186,7 @@ def prepare_affine_cornersafe(
     output_shape: Sequence[int],
     rot: Rotation,
     order: int = 1,
-):
+) -> tuple[da.Array, NDArray[np.float32]]:
     max_len = np.sqrt(np.sum(np.asarray(output_shape, dtype=np.float32) ** 2))
     output_center = np.array(output_shape) / 2 - 0.5
     half_len = max_len / 2
@@ -210,23 +210,6 @@ def prepare_affine_cornersafe(
         input = img0
     mtx = compose_matrices(new_center, [rot], output_center=output_center)[0]
     return input, mtx
-
-
-@delayed
-def rotated_crop(subimg: np.ndarray, mtx: np.ndarray, shape, order, mode, cval):
-    if callable(cval):
-        cval = cval(subimg)
-
-    out = ndi.affine_transform(
-        subimg,
-        matrix=mtx,
-        output_shape=shape,
-        order=order,
-        prefilter=order > 1,
-        mode=mode,
-        cval=cval,
-    )
-    return out
 
 
 _delayed_affine_transform = delayed(ndi.affine_transform)
@@ -407,4 +390,4 @@ def deprecated_kwarg(old: str, new: str) -> Callable[[_F], _F]:
 
         return _func
 
-    return _inner
+    return _inner  # type: ignore

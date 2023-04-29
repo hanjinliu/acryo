@@ -12,6 +12,7 @@ from typing import (
     Generic,
     overload,
 )
+import warnings
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 import polars as pl
@@ -21,7 +22,7 @@ from acryo._utils import deprecated_kwarg
 
 if TYPE_CHECKING:
     from typing_extensions import Self, TypeGuard
-    from polars.type_aliases import IntoExpr
+    from polars.type_aliases import IntoExpr, ParquetCompression
     from polars.dataframe.groupby import GroupBy
 
 _CSV_COLUMNS = ["z", "y", "x", "zvec", "yvec", "xvec"]
@@ -284,7 +285,12 @@ class Molecules:
             float_precision=float_precision,
         )
 
-    def to_parquet(self, save_path: PathLike, *, compression="zstd") -> None:
+    def to_parquet(
+        self,
+        save_path: PathLike,
+        *,
+        compression: ParquetCompression = "zstd",
+    ) -> None:
         """
         Save molecules as a parquet file.
 
@@ -299,11 +305,15 @@ class Molecules:
             str(save_path), compression=compression
         )
 
-    def __len__(self) -> int:
+    def count(self) -> int:
         """Return the number of molecules."""
         return self._pos.shape[0]
 
-    def __getitem__(self, key: int | slice | list[int] | np.ndarray) -> Self:
+    def __len__(self) -> int:
+        """Return the number of molecules."""
+        return self.count()
+
+    def __getitem__(self, key: int | slice | list[int] | NDArray[np.integer]) -> Self:
         return self.subset(key)
 
     @property
@@ -312,17 +322,17 @@ class Molecules:
         return self._pos
 
     @property
-    def x(self) -> NDArray[np.float32]:
+    def x(self) -> NDArray[np.float64]:
         """Vectors of x-axis."""
         return self._rotator.apply([0.0, 0.0, 1.0])
 
     @property
-    def y(self) -> NDArray[np.float32]:
+    def y(self) -> NDArray[np.float64]:
         """Vectors of y-axis."""
         return self._rotator.apply([0.0, 1.0, 0.0])
 
     @property
-    def z(self) -> NDArray[np.float32]:
+    def z(self) -> NDArray[np.float64]:
         """Vectors of z-axis."""
         return self._rotator.apply([1.0, 0.0, 0.0])
 
@@ -448,24 +458,56 @@ class Molecules:
 
     def cartesian_at(
         self,
-        index: int | slice | Iterable[int],
+        index,
         shape: tuple[int, int, int],
         scale: nm,
-    ) -> NDArray[np.float32]:
-        if isinstance(index, int):
-            center = np.array(shape) / 2 - 0.5
-            vec_x = self._rotator[index].apply([0.0, 0.0, 1.0])
-            vec_y = self._rotator[index].apply([0.0, 1.0, 0.0])
-            vec_z = cross(vec_x, vec_y)
-            ind_z, ind_y, ind_x = [np.arange(s) - c for s, c in zip(shape, center)]  # type: ignore
-            x_ax: np.ndarray = vec_x[:, np.newaxis] * ind_x
-            y_ax: np.ndarray = vec_y[:, np.newaxis] * ind_y
-            z_ax: np.ndarray = vec_z[:, np.newaxis] * ind_z
+    ):
+        warnings.warn(
+            "`cartesian_at` is deprecated and will be removed in the future. "
+            "Please use `local_coordinates` instead.",
+            DeprecationWarning,
+        )
+        return self.subset(index).local_coordinates(shape, scale, squeeze=True)
 
-            # There will be many points so data type should be converted into 32-bit
-            x_ax = x_ax.astype(np.float32)
-            y_ax = y_ax.astype(np.float32)
-            z_ax = z_ax.astype(np.float32)
+    def local_coordinates(
+        self,
+        shape: tuple[int, int, int],
+        scale: nm = 1.0,
+        *,
+        squeeze: bool = True,
+    ) -> NDArray[np.float32]:
+        """
+        Generate local coordinates at the neighborhood of each molecule.
+
+        Parameters
+        ----------
+        shape : (int, int, int)
+            Shape of the local coordinates.
+        scale : float, default is 1.0
+            Scale of the local coordinates.
+        squeeze : bool, default is True
+            If ture and the number of molecules is 1, the first axis will be removed.
+
+        Returns
+        -------
+        (N, D, Z, Y, X) array
+            World coordinates. ``array[i]`` can be directly used as the coordinates
+            for ``ndi.map_coordinates``.
+        """
+        coords_list: list[NDArray[np.float32]] = []
+        all_vec_x = self.x.astype(np.float32)
+        all_vec_y = self.y.astype(np.float32)
+        for index in range(self.count()):
+            center = [s / 2 - 0.5 for s in shape]
+            vec_x = all_vec_x[index]
+            vec_y = all_vec_y[index]
+            vec_z = cross(vec_x, vec_y)
+            ind_z, ind_y, ind_x = (
+                (np.arange(s, dtype=np.float32) - c) for s, c in zip(shape, center)
+            )  # type: ignore
+            x_ax: NDArray[np.float32] = vec_x[:, np.newaxis] * ind_x
+            y_ax: NDArray[np.float32] = vec_y[:, np.newaxis] * ind_y
+            z_ax: NDArray[np.float32] = vec_z[:, np.newaxis] * ind_z
 
             coords = (
                 z_ax[:, :, np.newaxis, np.newaxis]
@@ -474,21 +516,15 @@ class Molecules:
             )
             shifts = self.pos[index] / scale
             coords += shifts[:, np.newaxis, np.newaxis, np.newaxis]  # unit: pixel
-        elif isinstance(index, slice):
-            start, stop, step = index.indices(len(self))
-            coords = np.stack(
-                [self.cartesian_at(i, shape, scale) for i in range(start, stop, step)],
-                axis=0,
-            )
+
+            coords_list.append(coords)
+
+        if len(coords_list) == 1 and squeeze:
+            return coords_list[0]
         else:
-            coords = np.stack(
-                [self.cartesian_at(i, shape, scale) for i in index],
-                axis=0,
-            )
+            return np.stack(coords_list, axis=0)
 
-        return coords
-
-    def matrix(self) -> NDArray[np.float32]:
+    def matrix(self) -> NDArray[np.float64]:
         """
         Calculate rotation matrices that align molecules in such orientations
         that ``vec`` belong to the object.
@@ -503,7 +539,7 @@ class Molecules:
 
     def euler_angle(
         self, seq: str = "ZXZ", degrees: bool = False
-    ) -> NDArray[np.float32]:
+    ) -> NDArray[np.float64]:
         """
         Calculate Euler angles that transforms a source vector to vectors that
         belong to the object.
@@ -528,7 +564,7 @@ class Molecules:
         seq = _translate_euler(seq)
         return self._rotator.as_euler(seq, degrees=degrees)[..., ::-1]
 
-    def quaternion(self) -> NDArray[np.float32]:
+    def quaternion(self) -> NDArray[np.float64]:
         """
         Calculate quaternions that transforms a source vector to vectors that
         belong to the object.
@@ -540,7 +576,7 @@ class Molecules:
         """
         return self._rotator.as_quat()
 
-    def rotvec(self) -> NDArray[np.float32]:
+    def rotvec(self) -> NDArray[np.float64]:
         """
         Calculate rotation vectors that transforms a source vector to vectors
         that belong to the object.

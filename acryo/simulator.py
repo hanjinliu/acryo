@@ -1,16 +1,18 @@
+# pyright: reportPrivateImportUsage=false
 from __future__ import annotations
 
 from types import MappingProxyType
 from typing import Callable, NamedTuple, Sequence, TYPE_CHECKING, Tuple
 import numpy as np
 from numpy.typing import NDArray
-from scipy import ndimage as ndi
 from scipy.spatial.transform import Rotation
 
 from acryo import _utils
-from acryo._types import nm, pixel
 from acryo.molecules import Molecules
 from acryo.pipe._classes import ImageProvider
+from acryo._types import nm, pixel
+from acryo._dask import DaskTaskPool
+from acryo._typed_scipy import spline_filter, affine_transform
 
 if TYPE_CHECKING:
     from typing_extensions import Self, Literal
@@ -82,7 +84,7 @@ class TomogramSimulator:
     @property
     def components(self) -> MappingProxyType[str, Component]:
         """Return all the components in the tomogram."""
-        return MappingProxyType(self._components)
+        return MappingProxyType(self._components)  # type: ignore
 
     @property
     def order(self) -> Literal[0, 1, 3]:
@@ -221,11 +223,14 @@ class TomogramSimulator:
 
         if colormap is not None:
             return self._simulate_with_color(shape, colormap)
+        if len(shape) != 3:
+            raise ValueError("The shape must be a 3-tuple.")
         return self._simulate(shape)
 
     def _simulate(self, shape: tuple[pixel, pixel, pixel]):
         """Simulate a grayscale tomogram."""
         tomogram = np.zeros(shape, dtype=np.float32)
+        pool = DaskTaskPool.from_func(_delayed_simulate)
         for mol, image in self._components.values():
             if isinstance(image, ImageProvider):
                 img = image(self.scale)
@@ -235,20 +240,16 @@ class TomogramSimulator:
 
             # prefilter here to avoid repeated computation
             if self.order > 1:
-                img = ndi.spline_filter(img, order=self.order, mode="constant")
+                img = spline_filter(
+                    img, order=self.order, output=np.float32, mode="constant"
+                )
 
             for start, stop, mtx in zip(starts, stops, mtxs):
-                sl_src, sl_dst = _prep_slices(start, stop, shape, img.shape)
+                pool.add_task(img, start, stop, mtx, shape, self.order)
 
-                transformed = ndi.affine_transform(
-                    img,
-                    mtx,
-                    mode="constant",
-                    cval=0.0,
-                    order=self.order,
-                    prefilter=False,
-                )
-                tomogram[sl_dst] += transformed[sl_src]  # type: ignore
+        results = pool.compute()
+        for sl, img_fragment in results:
+            tomogram[sl] += img_fragment
 
         return tomogram
 
@@ -271,7 +272,7 @@ class TomogramSimulator:
 
             # prefilter here to avoid repeated computation
             if self.order > 1:
-                img = ndi.spline_filter(img, order=self.order, mode="constant")
+                img = spline_filter(img, order=self.order, mode="constant")
 
             feat = mol.features
             for i, (start, stop, mtx) in enumerate(zip(starts, stops, mtxs)):
@@ -279,7 +280,7 @@ class TomogramSimulator:
                 sl_src, sl_dst = _prep_slices(start, stop, shape, img.shape)
                 sl_dst = (slice(None),) + sl_dst
 
-                transformed = ndi.affine_transform(
+                transformed = affine_transform(
                     img,
                     mtx,
                     mode="constant",
@@ -311,11 +312,11 @@ class TomogramSimulator:
 
             # prefilter here to avoid repeated computation
             if self.order > 1:
-                img = ndi.spline_filter(img, order=self.order, mode="constant")
+                img = spline_filter(img, order=self.order, mode="constant")
 
             for start, stop, mtx in zip(starts, stops, mtxs):
                 sl_src, sl_dst = _prep_slices(start, stop, shape3d, img.shape)
-                transformed = ndi.affine_transform(
+                transformed = affine_transform(
                     img,
                     mtx,
                     mode="constant",
@@ -323,8 +324,8 @@ class TomogramSimulator:
                     order=self.order,
                     prefilter=False,
                 )
-                projected = transformed[sl_src].sum(axis=0)
-                tomogram[sl_dst[1:]] += projected  # type: ignore
+                projected = np.sum(transformed[sl_src], axis=0)
+                tomogram[sl_dst[1:]] += projected
 
         return tomogram
 
@@ -365,7 +366,6 @@ def _eyes(n: int) -> np.ndarray:
 
 
 def _prep_iterators(mol: Molecules, image: np.ndarray, scale: float):
-
     # image slice must be integer so split it into two parts
     pos = mol.pos / scale
     intpos = pos.astype(np.int32)
@@ -383,7 +383,12 @@ def _prep_iterators(mol: Molecules, image: np.ndarray, scale: float):
     return starts, stops, mtxs
 
 
-def _prep_slices(start, stop, tomogram_shape, template_shape):
+def _prep_slices(
+    start: tuple[int, int, int],
+    stop: tuple[int, int, int],
+    tomogram_shape: tuple[int, int, int],
+    template_shape: tuple[int, int, int],
+):
     sl_src_list: list[slice] = []
     sl_dst_list: list[slice] = []
     for s, e, size, tsize in zip(start, stop, tomogram_shape, template_shape):
@@ -402,3 +407,24 @@ def _prep_slices(start, stop, tomogram_shape, template_shape):
     sl_src = tuple(sl_src_list)
     sl_dst = tuple(sl_dst_list)
     return sl_src, sl_dst
+
+
+def _delayed_simulate(
+    img: NDArray[np.float32],
+    start: tuple[int, int, int],
+    stop: tuple[int, int, int],
+    mtx: NDArray[np.float32],
+    shape: tuple[int, int, int],
+    order: int,
+) -> tuple[tuple[slice, ...], NDArray[np.float32]]:
+    sl_src, sl_dst = _prep_slices(start, stop, shape, img.shape)
+
+    transformed = affine_transform(
+        img,
+        mtx,
+        mode="constant",
+        cval=0.0,
+        order=order,
+        prefilter=False,
+    )
+    return sl_dst, transformed[sl_src]

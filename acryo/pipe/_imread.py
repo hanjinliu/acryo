@@ -8,7 +8,7 @@ from acryo._types import nm
 
 
 @provider_function
-def from_file(scale: nm, path: str, original_scale: float = None, tol=0.01):
+def from_file(scale: nm, path: str, original_scale: float | None = None, tol=0.01):
     """
     An image provider function with rescaling.
 

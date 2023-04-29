@@ -13,6 +13,7 @@ from dask import array as da
 from acryo import _utils
 from acryo.molecules import Molecules
 from acryo._types import nm, pixel
+from acryo._dask import DaskArrayList
 from acryo.loader._base import LoaderBase
 from acryo.loader._loader import SubtomogramLoader, Unset
 
@@ -41,7 +42,6 @@ class BatchLoader(LoaderBase):
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
         corner_safe: bool = False,
     ) -> None:
-
         super().__init__(order, scale, output_shape, corner_safe)
         self._images: dict[Hashable, NDArray[np.float32] | da.Array] = {}
         self._molecules: Molecules = Molecules.empty([IMAGE_ID_LABEL])
@@ -165,54 +165,54 @@ class BatchLoader(LoaderBase):
         out._images = _images
         return out
 
-    def construct_loading_tasks(
-        self, output_shape: _ShapeType = None
-    ) -> list[da.Array]:
-        return sum(
-            (
-                loader.construct_loading_tasks(output_shape=output_shape)
-                for loader in self.loaders
-            ),
-            start=[],
+    def construct_loading_tasks(self, output_shape: _ShapeType = None) -> DaskArrayList:
+        return DaskArrayList.concat(
+            loader.construct_loading_tasks(output_shape=output_shape)
+            for loader in self.loaders
         )
 
 
 class LoaderAccessor:
     def __init__(self, collection: BatchLoader):
-        self._collection = weakref.ref(collection)
+        self._loader = weakref.ref(collection)
 
     def __getitem__(self, idx: int) -> SubtomogramLoader:
-        col = self._collection()
-        mole = col.filter(pl.col(IMAGE_ID_LABEL) == idx).molecules
+        ldr = self._get_loader()
+        mole = ldr.filter(pl.col(IMAGE_ID_LABEL) == idx).molecules
         if mole.features.shape[0] == 0:
             raise KeyError(idx)
-        image = col._images[idx]
+        image = ldr._images[idx]
         loader = SubtomogramLoader(
             image,
             mole,
-            col.order,
-            col.scale,
-            col.output_shape,
-            col.corner_safe,
+            ldr.order,
+            ldr.scale,
+            ldr.output_shape,
+            ldr.corner_safe,
         )
         return loader
 
     def __iter__(self) -> Iterator[SubtomogramLoader]:
-        col = self._collection()
-
-        for key, group in col.molecules.groupby(IMAGE_ID_LABEL):
-            image = col._images[key]
+        ldr = self._get_loader()
+        for key, group in ldr.molecules.groupby(IMAGE_ID_LABEL):
+            image = ldr._images[key]
             loader = SubtomogramLoader(
                 image,
                 group,
-                col.order,
-                col.scale,
-                col.output_shape,
-                col.corner_safe,
+                ldr.order,
+                ldr.scale,
+                ldr.output_shape,
+                ldr.corner_safe,
             )
             yield loader
 
     def __len__(self) -> int:
         """Number of loaders."""
-        col = self._collection()
-        return len(col._images)
+        ldr = self._get_loader()
+        return len(ldr._images)
+
+    def _get_loader(self) -> BatchLoader:
+        loader = self._loader()
+        if loader is None:
+            raise RuntimeError("Loader is no longer available.")
+        return loader

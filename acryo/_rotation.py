@@ -3,10 +3,10 @@ import itertools
 from typing import Callable, Sequence
 import numpy as np
 from scipy.spatial.transform import Rotation
-from scipy import ndimage as ndi
 
 from acryo._types import Ranges, RangeLike
 from acryo.molecules import from_euler_xyz_coords
+from acryo._typed_scipy import affine_transform
 
 
 def _normalize_a_range(rng: RangeLike) -> RangeLike:
@@ -39,7 +39,7 @@ def normalize_rotations(rotations: Ranges | Rotation | None) -> np.ndarray:
         Corresponding quaternions in shape (N, 4).
     """
     if isinstance(rotations, Rotation):
-        quat = rotations.as_quat()
+        quats = rotations.as_quat()
     elif rotations is not None:
         _rotations = _normalize_ranges(rotations)
         angles = []
@@ -50,12 +50,12 @@ def normalize_rotations(rotations: Ranges | Rotation | None) -> np.ndarray:
                 n = int(max_rot / step)
                 angles.append(np.linspace(-n * step, n * step, 2 * n + 1))
 
-        quat: list[np.ndarray] = []
+        _quat: list[np.ndarray] = []
         for angs in itertools.product(*angles):
-            quat.append(
+            _quat.append(
                 from_euler_xyz_coords(np.array(angs), "zyx", degrees=True).as_quat()
             )
-        quats = np.stack(quat, axis=0)
+        quats = np.stack(_quat, axis=0)
     else:
         quats = np.array([[0.0, 0.0, 0.0, 1.0]])
 
@@ -81,7 +81,7 @@ def rotate(
     else:
         _cval = cval
 
-    return ndi.affine_transform(
+    return affine_transform(
         image,
         matrix=matrix,
         order=order,

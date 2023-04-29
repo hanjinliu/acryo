@@ -10,7 +10,8 @@ from acryo._correlation import (
     zncc_landscape_with_crop,
     pcc_landscape,
 )
-from acryo._fft import ifftn
+from acryo._typed_scipy import ifftn
+from acryo._types import pixel
 
 
 class PCCAlignment(TomographyInput):
@@ -20,7 +21,7 @@ class PCCAlignment(TomographyInput):
         self,
         subvolume: NDArray[np.complex64],
         template: NDArray[np.complex64],
-        max_shifts: tuple[float, float, float],
+        max_shifts: tuple[pixel, pixel, pixel],
         quaternion: NDArray[np.float32],
         pos: NDArray[np.float32],
     ) -> tuple[NDArray[np.float32], NDArray[np.float32], float]:
@@ -56,7 +57,7 @@ class ZNCCAlignment(TomographyInput):
         self,
         subvolume: NDArray[np.complex64],
         template: NDArray[np.complex64],
-        max_shifts: tuple[float, float, float],
+        max_shifts: tuple[pixel, pixel, pixel],
         quaternion: NDArray[np.float32],
         pos: NDArray[np.float32],
     ) -> tuple[NDArray[np.float32], NDArray[np.float32], float]:
