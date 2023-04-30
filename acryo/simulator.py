@@ -344,8 +344,8 @@ class TomogramSimulator:
             ycoords = pos_scaled.dot(ey) + (shape[0] - 1) / 2
             coords = np.stack((ycoords, xcoords), axis=1)
             glob_rotator = axes_to_rotator(cross(ex, ey), ey)
-            for yx in coords:
-                pool.add_task(yx, shape, img, mol.rotator.inv() * glob_rotator)
+            for i, yx in enumerate(coords):
+                pool.add_task(yx, shape, img, mol.rotator[i], glob_rotator)
 
         results = pool.compute()
         for sl, img_fragment in results:
@@ -353,6 +353,55 @@ class TomogramSimulator:
                 projection[sl] += img_fragment
 
         return projection
+
+    def simulate_tilt_series(
+        self,
+        degrees: Iterable[float],
+        shape: tuple[int, int, int],
+    ) -> NDArray[np.float32]:
+        """
+        Simulate a tilt series of the tomogram.
+
+        This method is a simplified version of :meth:`simulate_projection`. Projection
+        angles are restricted to the rotation around the y-axis of the world coordinate
+        and the tomogram will be projected parallel to the z-axis.
+
+        Parameters
+        ----------
+        degrees : iterable of float
+            Rotation angles.
+        shape : (int, int, int)
+            Tomogram shape.
+
+        Returns
+        -------
+        (N, Y, X) array
+            Tilting series image.
+        """
+        rads = np.deg2rad(list(degrees))
+        ntilt = len(rads)
+        ey = np.array([0, 1, 0], dtype=np.float32)
+        rc = (np.array(shape, dtype=np.float32) / 2 - 0.5) * self.scale
+        tilt_series = np.zeros((ntilt, shape[1], shape[2]), dtype=np.float32)
+        pool = DaskTaskPool.from_func(_simulate_projection_one_labeled)
+        for i, rad in enumerate(rads):
+            ex = np.array([np.sin(rad), 0, np.cos(rad)], dtype=np.float32)
+            for mol, image in self._components.values():
+                img = self._get_image(image)
+                pos_scaled = (mol.pos - rc) / self.scale
+                xcoords = pos_scaled.dot(ex) + (shape[2] - 1) / 2
+                ycoords = pos_scaled.dot(ey) + (shape[1] - 1) / 2
+                coords = np.stack((ycoords, xcoords), axis=1)
+                glob_rotator = axes_to_rotator(cross(ex, ey), ey)
+                for ci, yx in enumerate(coords):
+                    pool.add_task(yx, shape[1:], img, mol.rotator[ci], glob_rotator, i)
+
+        results = pool.compute()
+        for sl, img_fragment in results:
+            if img_fragment is not None:
+                tilt_series[sl] += img_fragment
+
+        return tilt_series
 
     def _get_image(
         self, image: NDArray[np.float32] | ImageProvider
@@ -530,7 +579,8 @@ def _simulate_projection_one(
     shape: tuple[int, int],
     image: NDArray[np.float32],
     rotator: Rotation,
-) -> tuple[tuple[slice, ...], NDArray[np.float32] | None]:
+    glob_rotator: Rotation,
+) -> tuple[tuple[slice, slice], NDArray[np.float32] | None]:
     proj_shape = np.array(image.shape[1:], dtype=np.int32)
     min_ = yx - proj_shape.astype(np.float32) / 2 + 0.5
     int_min_ = min_.astype(np.int32)
@@ -539,14 +589,28 @@ def _simulate_projection_one(
     sl_src, sl_dst = _prep_slices(int_min_, int_max_, shape, proj_shape)
 
     if sl_dst is None:
-        return (slice(None),), None
+        return (slice(None), slice(None)), None
 
     center = np.array(image.shape) / 2 - 0.5
     residue = np.array([0, *(min_ - int_min_)])
-    mtx = _compose_affine_matrices(center, rotator, center + residue)[0]
+    mtx = _compose_affine_matrices(
+        center, rotator.inv() * glob_rotator, center + residue
+    )[0]
 
     transformed = affine_transform(
         image, mtx, mode="constant", cval=0.0, order=3, prefilter=False
     )
     projection: NDArray[np.float32] = np.sum(transformed, axis=0)
     return sl_dst, projection[sl_src]
+
+
+def _simulate_projection_one_labeled(
+    yx: NDArray[np.float32],
+    shape: tuple[int, int],
+    image: NDArray[np.float32],
+    rotator: Rotation,
+    glob_rotator: Rotation,
+    idx: int,
+) -> tuple[tuple[int, slice, slice], NDArray[np.float32] | None]:
+    sl, img = _simulate_projection_one(yx, shape, image, rotator, glob_rotator)
+    return (idx,) + sl, img
