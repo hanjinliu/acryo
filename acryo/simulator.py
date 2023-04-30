@@ -307,11 +307,11 @@ class TomogramSimulator:
         pool = DaskTaskPool.from_func(_simulate_projection_one)
         for mol, image in self._components.values():
             img = self._get_image(image)
-            xcoords = (mol.pos / self.scale - rc).dot(ex) + (shape[1] - 1) / 2
-            ycoords = (mol.pos / self.scale - rc).dot(ey) + (shape[0] - 1) / 2
+            xcoords = (mol.pos - rc).dot(ex) / self.scale + (shape[1] - 1) / 2
+            ycoords = (mol.pos - rc).dot(ey) / self.scale + (shape[0] - 1) / 2
             glob_rotator = axes_to_rotator(cross(ex, ey), ey)
             for x, y in zip(xcoords, ycoords):
-                pool.add_task(x, y, shape, img, mol.rotator * glob_rotator)
+                pool.add_task(x, y, shape, img, mol.rotator.inv() * glob_rotator)
 
         results = pool.compute()
         for sl, img_fragment in results:
