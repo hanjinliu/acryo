@@ -2,7 +2,15 @@
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import Callable, NamedTuple, Sequence, TYPE_CHECKING, Tuple, TypeVar
+from typing import (
+    Callable,
+    Iterable,
+    NamedTuple,
+    Sequence,
+    TYPE_CHECKING,
+    Tuple,
+    TypeVar,
+)
 import numpy as np
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
@@ -294,24 +302,50 @@ class TomogramSimulator:
     def simulate_projection(
         self,
         shape: tuple[int, int],
+        center: tuple[float, float, float],
         xaxis: tuple[float, float, float],
         yaxis: tuple[float, float, float],
-        center: tuple[float, float, float],
     ) -> NDArray[np.float32]:
+        """
+        Simulate a projection of the tomogram in any direction.
+
+        Projection plane and the projection range are defined by the given parameters.
+        ``shape`` and ``center`` define the range of the projection plane. Technically,
+        ``center`` will be the scale-considered center of the assumed 3D tomogram image.
+        ``xaxis`` and ``yaxis`` define the coordinate system of the projection plane.
+
+        Parameters
+        ----------
+        shape : (int, int)
+            Output shape of the projection.
+        center : (float, float, float)
+            Center of the projection plane in world coordinate system.
+        xaxis : (float, float, float)
+            X-axis of the projection plane in world coordinate system.
+        yaxis : (float, float, float)
+            Y-axis of the projection plane in world coordinate system.
+
+        Returns
+        -------
+        2D array
+            Simulated projection image.
+        """
         projection = np.zeros(shape, dtype=np.float32)
         ex = np.asarray(xaxis, dtype=np.float32) / np.linalg.norm(xaxis)
         ey = np.asarray(yaxis, dtype=np.float32) / np.linalg.norm(yaxis)
         if np.abs(np.dot(ex, ey)) > 1e-6:
-            raise ValueError(f"xaxis {xaxis!r} and yaxis {xaxis!r} are not orthogonal.")
+            raise ValueError(f"xaxis {xaxis!r} and yaxis {yaxis!r} are not orthogonal.")
         rc = np.asarray(center, dtype=np.float32)
         pool = DaskTaskPool.from_func(_simulate_projection_one)
         for mol, image in self._components.values():
             img = self._get_image(image)
-            xcoords = (mol.pos - rc).dot(ex) / self.scale + (shape[1] - 1) / 2
-            ycoords = (mol.pos - rc).dot(ey) / self.scale + (shape[0] - 1) / 2
+            pos_scaled = (mol.pos - rc) / self.scale
+            xcoords = pos_scaled.dot(ex) + (shape[1] - 1) / 2
+            ycoords = pos_scaled.dot(ey) + (shape[0] - 1) / 2
+            coords = np.stack((ycoords, xcoords), axis=1)
             glob_rotator = axes_to_rotator(cross(ex, ey), ey)
-            for x, y in zip(xcoords, ycoords):
-                pool.add_task(x, y, shape, img, mol.rotator.inv() * glob_rotator)
+            for yx in coords:
+                pool.add_task(yx, shape, img, mol.rotator.inv() * glob_rotator)
 
         results = pool.compute()
         for sl, img_fragment in results:
@@ -339,10 +373,10 @@ def _compose_affine_matrices(
     output_center: np.ndarray | None = None,
 ) -> NDArray[np.float32]:
     """Compose Affine matrices from an array shape and a Rotation object."""
-
-    dz, dy, dx = center
     if output_center is None:
         raise NotImplementedError
+
+    dz, dy, dx = center
 
     # center to corner
     translation_0 = np.array(
@@ -385,7 +419,7 @@ def _prep_iterators(mol: Molecules, shape: tuple[int, int, int], scale: float):
     return starts, stops, mtxs
 
 
-_T = TypeVar("_T", bound=Tuple[int, ...])
+_T = TypeVar("_T", bound=Iterable[int])
 
 
 def _prep_slices(
@@ -492,30 +526,24 @@ def _simulate_2d_one(
 
 
 def _simulate_projection_one(
-    x: float,
-    y: float,
+    yx: NDArray[np.float32],
     shape: tuple[int, int],
     image: NDArray[np.float32],
     rotator: Rotation,
 ) -> tuple[tuple[slice, ...], NDArray[np.float32] | None]:
-    proj_shape: tuple[int, int] = image.shape[1:]
-    ymin = int(y - proj_shape[0] // 2)
-    xmin = int(x - proj_shape[1] // 2)
-    ymax = ymin + proj_shape[0]
-    xmax = xmin + proj_shape[1]
+    proj_shape = np.array(image.shape[1:], dtype=np.int32)
+    min_ = yx - proj_shape.astype(np.float32) / 2 + 0.5
+    int_min_ = min_.astype(np.int32)
+    int_max_ = int_min_ + proj_shape
 
-    sl_src, sl_dst = _prep_slices((ymin, xmin), (ymax, xmax), shape, proj_shape)
+    sl_src, sl_dst = _prep_slices(int_min_, int_max_, shape, proj_shape)
 
     if sl_dst is None:
         return (slice(None),), None
 
     center = np.array(image.shape) / 2 - 0.5
-    residue = np.array([0, y - int(y), x - int(x)])
-    mtx = _compose_affine_matrices(
-        center,
-        rotator,
-        center + residue,
-    )[0]
+    residue = np.array([0, *(min_ - int_min_)])
+    mtx = _compose_affine_matrices(center, rotator, center + residue)[0]
 
     transformed = affine_transform(
         image, mtx, mode="constant", cval=0.0, order=3, prefilter=False
