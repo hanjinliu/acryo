@@ -16,7 +16,7 @@ from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
 
 from acryo import _utils
-from acryo.molecules import Molecules, axes_to_rotator, cross
+from acryo.molecules import Molecules, axes_to_rotator
 from acryo.pipe._classes import ImageProvider
 from acryo._types import nm, pixel
 from acryo._dask import DaskTaskPool
@@ -614,3 +614,8 @@ def _simulate_projection_one_labeled(
 ) -> tuple[tuple[int, slice, slice], NDArray[np.float32] | None]:
     sl, img = _simulate_projection_one(yx, shape, image, rotator, glob_rotator)
     return (idx,) + sl, img
+
+
+def cross(x: np.ndarray, y: np.ndarray, axis=None) -> np.ndarray:
+    """Vector outer product in zyx coordinate."""
+    return -np.cross(x, y, axis=axis)  # type: ignore

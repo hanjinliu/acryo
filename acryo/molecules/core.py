@@ -2,14 +2,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import (
     Any,
-    Hashable,
     Iterable,
     TYPE_CHECKING,
-    Iterator,
     Sequence,
-    TypeVar,
     Union,
-    Generic,
     overload,
 )
 import warnings
@@ -19,11 +15,17 @@ import polars as pl
 from scipy.spatial.transform import Rotation
 from acryo._types import nm
 from acryo._utils import deprecated_kwarg
+from acryo.molecules._group import MoleculeGroup
+from acryo.molecules._cut import MoleculeCutGroup
+from acryo.molecules._rotation import (
+    axes_to_rotator,
+    from_euler_xyz_coords,
+    translate_euler,
+)
 
 if TYPE_CHECKING:
     from typing_extensions import Self, TypeGuard
     from polars.type_aliases import IntoExpr, ParquetCompression
-    from polars.dataframe.groupby import GroupBy
 
 _CSV_COLUMNS = ["z", "y", "x", "zvec", "yvec", "xvec"]
 PathLike = Union[str, Path, bytes]
@@ -561,7 +563,7 @@ class Molecules:
         (N, 3) ndarray
             Euler angles.
         """
-        seq = _translate_euler(seq)
+        seq = translate_euler(seq)
         return self._rotator.as_euler(seq, degrees=degrees)[..., ::-1]
 
     def quaternion(self) -> NDArray[np.float64]:
@@ -923,6 +925,18 @@ class Molecules:
         df = self.to_dataframe()
         return MoleculeGroup(df.groupby(by, *more_by, maintain_order=True))
 
+    def cutby(self, by: str, bins: list[float]):
+        cat_label = "__category"
+        if cat_label in self.features.columns:
+            raise ValueError(f"Feature name {cat_label!r} should not be used.")
+        feature = self.features[by]
+        result = feature.cut(bins=bins, category_label=cat_label)
+        cat = result[cat_label]
+        df = self.to_dataframe().with_columns(cat)
+        return MoleculeCutGroup(
+            df.groupby(cat_label, maintain_order=True), label=cat_label
+        )
+
     def filter(
         self,
         predicate: pl.Expr | str | pl.Series | list[bool] | np.ndarray,
@@ -991,89 +1005,11 @@ class Molecules:
         )
 
 
-_K = TypeVar("_K", bound=Hashable)
-
-
-class MoleculeGroup(Generic[_K]):
-    """A groupby-like object for molecules."""
-
-    def __init__(self, group: GroupBy[pl.DataFrame]):
-        self._group = group
-
-    def __iter__(self) -> Iterator[tuple[_K, Molecules]]:
-        for key, df in self._group:
-            mole = Molecules.from_dataframe(df)
-            yield key, mole  # type: ignore
-
-    @property
-    def features(self) -> GroupBy:
-        """Return the groupby object."""
-        return self._group
-
-
 def _is_boolean_array(a: Any) -> TypeGuard[NDArray[np.bool_]]:
     if isinstance(a, pl.Series):
         return a.dtype is pl.Boolean
     else:
         return getattr(a, "dtype", None) == "bool"
-
-
-def _translate_euler(seq: str) -> str:
-    table = str.maketrans({"x": "z", "z": "x", "X": "Z", "Z": "X"})
-    return seq[::-1].translate(table)
-
-
-def from_euler_xyz_coords(
-    angles: ArrayLike, seq: str = "ZXZ", degrees: bool = False
-) -> Rotation:
-    """Create a rotator using zyx-coordinate system, from Euler angles."""
-    seq = _translate_euler(seq)
-    angles = np.asarray(angles)
-    return Rotation.from_euler(seq, angles[..., ::-1], degrees)
-
-
-def _normalize(a: np.ndarray) -> np.ndarray:
-    """Normalize vectors to length 1. Input must be (N, 3)."""
-    return a / np.sqrt(np.sum(a**2, axis=1))[:, np.newaxis]
-
-
-def _extract_orthogonal(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    """Extract component of b orthogonal to a."""
-    a_norm = _normalize(a)
-    return b - np.sum(a_norm * b, axis=1)[:, np.newaxis] * a_norm
-
-
-def axes_to_rotator(z, y) -> Rotation:
-    ref = _normalize(np.atleast_2d(y))
-
-    n = ref.shape[0]
-    yx = np.arctan2(ref[:, 2], ref[:, 1])
-    zy = np.arctan(-ref[:, 0] / np.abs(ref[:, 1]))
-
-    rot_vec_yx = np.zeros((n, 3))
-    rot_vec_yx[:, 0] = yx
-    rot_yx = Rotation.from_rotvec(rot_vec_yx)
-
-    rot_vec_zy = np.zeros((n, 3))
-    rot_vec_zy[:, 2] = zy
-    rot_zy = Rotation.from_rotvec(rot_vec_zy)
-
-    rot1 = rot_yx * rot_zy
-
-    if z is None:
-        return rot1
-
-    vec = _normalize(np.atleast_2d(_extract_orthogonal(ref, z)))
-
-    vec_trans = rot1.apply(vec, inverse=True)  # in zx-plane
-
-    thetas = np.arctan2(vec_trans[..., 0], vec_trans[..., 2]) - np.pi / 2
-
-    rot_vec_zx = np.zeros((n, 3))
-    rot_vec_zx[:, 1] = thetas
-    rot2 = Rotation.from_rotvec(rot_vec_zx)
-
-    return rot1 * rot2
 
 
 def cross(x: ArrayLike, y: ArrayLike, axis=None) -> np.ndarray:
