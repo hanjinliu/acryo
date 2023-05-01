@@ -26,7 +26,7 @@ from acryo._utils import (
     lowpass_filter_ft,
 )
 from acryo._typed_scipy import ifftn, spline_filter, affine_transform, map_coordinates
-from acryo._dask import DaskTaskPool
+from acryo._dask import DaskTaskPool, compute
 from ._bound import ParametrizedModel
 
 if TYPE_CHECKING:
@@ -647,8 +647,6 @@ class RotationImplemented(BaseAlignmentModel):
             )
             cval = float(np.percentile(self._template, 1))
             if self._n_templates > 1:
-                # all_templates: list[da.Array] = []
-                # all_masks: list[da.Array] = []
                 inputs_templates: list[NDArray[np.float32]] = [
                     spline_filter(
                         tmp * self._mask,
@@ -666,37 +664,9 @@ class RotationImplemented(BaseAlignmentModel):
                         pool_template.add_task(
                             tmp, mat, order=3, cval=cval, prefilter=False
                         )
-                        # all_templates.append(
-                        #     da.from_delayed(
-                        #         self._transform_template_delayed(
-                        #             tmp, mat, order=3, cval=cval, prefilter=False
-                        #         ),
-                        #         shape=tmp.shape,
-                        #         dtype=tmp.dtype,
-                        #     )
-                        # )
                     pool_mask.add_tasks(
                         ntmp, self._mask, mat, order=3, mode="nearest", prefilter=False
                     )
-
-                    # all_masks.extend(
-                    #     [
-                    #         delayed_affine(
-                    #             self._mask,
-                    #             mat,
-                    #             order=3,
-                    #             mode="nearest",
-                    #             prefilter=False,
-                    #         )
-                    #     ]
-                    #     * len(inputs_templates)
-                    # )
-                template_input = np.stack(pool_template.compute(), axis=0)
-                mask_input = np.stack(pool_mask.compute(), axis=0)
-                # template_input, mask_input = da.compute(
-                #     da.stack(all_templates, axis=0), da.stack(all_masks, axis=0)
-                # )
-
             else:
                 template_masked = spline_filter(
                     self._template * self._mask,
@@ -713,8 +683,15 @@ class RotationImplemented(BaseAlignmentModel):
                     pool_mask.add_task(
                         self._mask, mat, order=3, mode="nearest", prefilter=False
                     )
-                template_input = np.stack(pool_template.compute(), axis=0)
-                mask_input = np.stack(pool_mask.compute(), axis=0)
+
+            _templates, _masks = compute(
+                (
+                    pool_template.asarrays(self.input_shape, dtype=np.complex64),
+                    pool_mask.asarrays(self.input_shape, dtype=np.float32),
+                )
+            )
+            template_input = np.stack(_templates, axis=0)
+            mask_input = np.stack(_masks, axis=0)
         else:
             pool = DaskTaskPool.from_func(self.pre_transform)
             if self._n_templates > 1:
