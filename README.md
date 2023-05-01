@@ -22,6 +22,8 @@ pip install acryo -U
 
 ```bash
 git clone git+https://github.com/hanjinliu/acryo.git
+cd acryo
+pip install -e .
 ```
 
 ### Features
@@ -29,7 +31,7 @@ git clone git+https://github.com/hanjinliu/acryo.git
 1. Out-of-core and parallel processing during subtomogram averaging/alignment to make full use of CPU.
 2. Extensible and ready-to-use alignment models.
 3. Manage subtomogram loading tasks from single or multiple tomograms in the same API.
-4. Tomogram simulation.
+4. Tomogram and tilt series simulation.
 5. Masked PCA clustering.
 
 ### Code Snippet

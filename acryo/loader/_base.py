@@ -852,17 +852,19 @@ class LoaderBase(ABC):
             if template is None:
                 template = self.average(shape)
             model = ZNCCAlignment(template, _mask, cutoff=cutoff, tilt_range=tilt_range)
-            tasks: list[da.Array] = []
-            for task in self.iter_mapping_tasks(
-                model.masked_difference,
-                output_shape=shape,
-                var_kwarg=dict(quaternion=self.molecules.quaternion()),
-            ):
-                tasks.append(da.from_delayed(task, shape=shape, dtype=np.float32))
 
             # PCA requires aggregation along the first axis.
             # Rechunk to improve performance.
-            stack = da.stack(tasks, axis=0).rechunk(("auto",) + shape)  # type: ignore
+            stack = (
+                self.iter_mapping_tasks(
+                    model.masked_difference,
+                    output_shape=shape,
+                    var_kwarg=dict(quaternion=self.molecules.quaternion()),
+                )
+                .tolist()
+                .tostack(shape=shape, dtype=np.float32)
+                .rechunk(("auto",) + shape)  # type: ignore
+            )
 
             clf = PcaClassifier(
                 stack,
