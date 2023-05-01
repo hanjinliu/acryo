@@ -10,20 +10,13 @@ Subpackages
    acryo.alignment
    acryo.classification
    acryo.loader
+   acryo.molecules
    acryo.pick
    acryo.pipe
    acryo.testing
 
 Submodules
 ----------
-
-acryo.molecules module
-----------------------
-
-.. automodule:: acryo.molecules
-   :members:
-   :undoc-members:
-   :show-inheritance:
 
 acryo.simulator module
 ----------------------

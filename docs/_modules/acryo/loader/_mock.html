@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo.loader._mock &mdash; acryo 0.2.1 documentation</title>
+  <title>acryo.loader._mock &mdash; acryo 0.3.0 documentation</title>
       <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -14,7 +14,7 @@
         <script src="../../../_static/jquery.js"></script>
         <script src="../../../_static/underscore.js"></script>
         <script src="../../../_static/doctools.js"></script>
-        <script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+        <script src="https://unpkg.com/mermaid@9.4.0/dist/mermaid.min.js"></script>
         <script>mermaid.initialize({startOnLoad:true});</script>
     <script src="../../../_static/js/theme.js"></script>
     <link rel="index" title="Index" href="../../../genindex.html" />
@@ -26,14 +26,18 @@
     <nav data-toggle="wy-nav-shift" class="wy-nav-side">
       <div class="wy-side-scroll">
         <div class="wy-side-nav-search" >
-            <a href="../../../index.html" class="icon icon-home"> acryo
+
+
+
+          <a href="../../../index.html" class="icon icon-home">
+            acryo
           </a>
               <div class="version">
-                0.2.1
+                0.3.0
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
-    <input type="text" name="q" placeholder="Search docs" />
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
     <input type="hidden" name="check_keywords" value="yes" />
     <input type="hidden" name="area" value="default" />
   </form>
@@ -60,9 +64,9 @@
         <div class="rst-content">
           <div role="navigation" aria-label="Page navigation">
   <ul class="wy-breadcrumbs">
-      <li><a href="../../../index.html" class="icon icon-home"></a> &raquo;</li>
-          <li><a href="../../index.html">Module code</a> &raquo;</li>
-      <li>acryo.loader._mock</li>
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">acryo.loader._mock</li>
       <li class="wy-breadcrumbs-aside">
       </li>
   </ul>
@@ -72,9 +76,10 @@
            <div itemprop="articleBody">
 
   <h1>Source code for acryo.loader._mock</h1><div class="highlight"><pre>
-<span></span><span class="kn">from</span> <span class="nn">__future__</span> <span class="kn">import</span> <span class="n">annotations</span>
+<span></span><span class="c1"># pyright: reportPrivateImportUsage=false</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="kn">import</span> <span class="n">annotations</span>
 
-<span class="kn">from</span> <span class="nn">._base</span> <span class="kn">import</span> <span class="n">LoaderBase</span><span class="p">,</span> <span class="n">Unset</span>
+<span class="kn">from</span> <span class="nn">._base</span> <span class="kn">import</span> <span class="n">LoaderBase</span>
 <span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">TYPE_CHECKING</span><span class="p">,</span> <span class="n">Iterable</span><span class="p">,</span> <span class="n">Sequence</span>
 <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
 <span class="kn">from</span> <span class="nn">numpy.typing</span> <span class="kn">import</span> <span class="n">NDArray</span>
@@ -83,19 +88,19 @@
 <span class="kn">from</span> <span class="nn">scipy.spatial.transform</span> <span class="kn">import</span> <span class="n">Rotation</span>
 
 <span class="kn">from</span> <span class="nn">acryo</span> <span class="kn">import</span> <span class="n">_utils</span>
-<span class="kn">from</span> <span class="nn">acryo._types</span> <span class="kn">import</span> <span class="n">nm</span><span class="p">,</span> <span class="n">pixel</span>
-<span class="kn">from</span> <span class="nn">acryo._fft</span> <span class="kn">import</span> <span class="n">fftn</span><span class="p">,</span> <span class="n">ifftn</span>
+<span class="kn">from</span> <span class="nn">acryo._types</span> <span class="kn">import</span> <span class="n">nm</span>
+<span class="kn">from</span> <span class="nn">acryo._typed_scipy</span> <span class="kn">import</span> <span class="n">fftn</span><span class="p">,</span> <span class="n">ifftn</span><span class="p">,</span> <span class="n">spline_filter</span><span class="p">,</span> <span class="n">affine_transform</span>
+<span class="kn">from</span> <span class="nn">acryo._dask</span> <span class="kn">import</span> <span class="n">DaskArrayList</span><span class="p">,</span> <span class="n">DaskTaskPool</span>
 <span class="kn">from</span> <span class="nn">acryo.molecules</span> <span class="kn">import</span> <span class="n">Molecules</span>
 <span class="kn">from</span> <span class="nn">acryo.pipe._classes</span> <span class="kn">import</span> <span class="n">ImageProvider</span>
 
 <span class="k">if</span> <span class="n">TYPE_CHECKING</span><span class="p">:</span>
     <span class="kn">from</span> <span class="nn">typing_extensions</span> <span class="kn">import</span> <span class="n">Self</span>
-    <span class="kn">from</span> <span class="nn">dask.delayed</span> <span class="kn">import</span> <span class="n">Delayed</span>
     <span class="kn">from</span> <span class="nn">._base</span> <span class="kn">import</span> <span class="n">_ShapeType</span>
 
 
 <div class="viewcode-block" id="MockLoader"><a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.MockLoader">[docs]</a><span class="k">class</span> <span class="nc">MockLoader</span><span class="p">(</span><span class="n">LoaderBase</span><span class="p">):</span>
-    <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    A subtomogram loader from a virtual tomogram.</span>
 
 <span class="sd">    This loader is for testing purpose only. The tomogram does not actually exist</span>
@@ -126,16 +131,15 @@
         <span class="n">template</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span> <span class="o">|</span> <span class="n">ImageProvider</span><span class="p">,</span>
         <span class="n">molecules</span><span class="p">:</span> <span class="n">Molecules</span><span class="p">,</span>
         <span class="n">noise</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.0</span><span class="p">,</span>
-        <span class="n">degrees</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">degrees</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">|</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">central_axis</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">),</span>
         <span class="n">order</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">3</span><span class="p">,</span>
         <span class="n">scale</span><span class="p">:</span> <span class="n">nm</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">,</span>
-        <span class="n">output_shape</span><span class="p">:</span> <span class="n">pixel</span> <span class="o">|</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pixel</span><span class="p">,</span> <span class="n">pixel</span><span class="p">,</span> <span class="n">pixel</span><span class="p">]</span> <span class="o">|</span> <span class="n">Unset</span> <span class="o">=</span> <span class="n">Unset</span><span class="p">(),</span>
         <span class="n">corner_safe</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
         <span class="k">if</span> <span class="n">noise</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">:</span>
             <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Noise must be non-negative.&quot;</span><span class="p">)</span>
-        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">order</span><span class="p">,</span> <span class="n">scale</span><span class="p">,</span> <span class="n">output_shape</span><span class="p">,</span> <span class="n">corner_safe</span><span class="p">)</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">order</span><span class="p">,</span> <span class="n">scale</span><span class="p">,</span> <span class="n">corner_safe</span><span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_template</span> <span class="o">=</span> <span class="n">template</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_noise</span> <span class="o">=</span> <span class="n">noise</span>
         <span class="k">if</span> <span class="n">degrees</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
@@ -149,20 +153,23 @@
             <span class="bp">self</span><span class="o">.</span><span class="n">_degrees</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">degrees</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_molecules</span> <span class="o">=</span> <span class="n">molecules</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_central_axis</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">central_axis</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">template</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_output_shape</span> <span class="o">=</span> <span class="n">template</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">scale</span><span class="p">)</span><span class="o">.</span><span class="n">shape</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_output_shape</span> <span class="o">=</span> <span class="n">template</span><span class="o">.</span><span class="n">shape</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_output_shape</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">3</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Template must be 3D.&quot;</span><span class="p">)</span>
 
     <span class="nd">@property</span>
     <span class="k">def</span> <span class="nf">molecules</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Molecules</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;All the molecules&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;All the molecules&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_molecules</span>
 
-<div class="viewcode-block" id="MockLoader.construct_loading_tasks"><a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.MockLoader.construct_loading_tasks">[docs]</a>    <span class="k">def</span> <span class="nf">construct_loading_tasks</span><span class="p">(</span>
-        <span class="bp">self</span><span class="p">,</span> <span class="n">output_shape</span><span class="p">:</span> <span class="n">_ShapeType</span> <span class="o">=</span> <span class="kc">None</span>
-    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">da</span><span class="o">.</span><span class="n">Array</span><span class="p">]:</span>
+<div class="viewcode-block" id="MockLoader.construct_loading_tasks"><a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.MockLoader.construct_loading_tasks">[docs]</a>    <span class="k">def</span> <span class="nf">construct_loading_tasks</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">output_shape</span><span class="p">:</span> <span class="n">_ShapeType</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">DaskArrayList</span><span class="p">:</span>
         <span class="c1"># TODO: this implementation is not efficent. Radon transformation is not</span>
         <span class="c1"># actually needed. Apply missing wedge mask directly to the template, and</span>
-        <span class="c1"># apply inverse-Radon only to the noise. The linearity of Radon </span>
+        <span class="c1"># apply inverse-Radon only to the noise. The linearity of Radon</span>
         <span class="c1"># transformation guarantees that the result is correct.</span>
-        <span class="n">tasks</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">Delayed</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
         <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_template</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
             <span class="n">template</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_template</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">scale</span><span class="p">)</span>
         <span class="k">else</span><span class="p">:</span>
@@ -170,46 +177,48 @@
         <span class="k">if</span> <span class="n">output_shape</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
             <span class="n">output_shape</span> <span class="o">=</span> <span class="n">template</span><span class="o">.</span><span class="n">shape</span>
         <span class="k">elif</span> <span class="n">output_shape</span> <span class="o">!=</span> <span class="n">template</span><span class="o">.</span><span class="n">shape</span><span class="p">:</span>
-            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Mismatched output shape and template shape.&quot;</span><span class="p">)</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Mismatched output shape </span><span class="si">{</span><span class="n">output_shape</span><span class="si">!r}</span><span class="s2"> and template shape &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">template</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2">.&quot;</span>
+            <span class="p">)</span>
 
         <span class="c1"># spline prefilter in advance</span>
         <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">order</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
-            <span class="n">template</span> <span class="o">=</span> <span class="n">ndi</span><span class="o">.</span><span class="n">spline_filter</span><span class="p">(</span>
+            <span class="n">template</span> <span class="o">=</span> <span class="n">spline_filter</span><span class="p">(</span>
                 <span class="n">template</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">order</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;constant&quot;</span><span class="p">,</span> <span class="n">output</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span>
             <span class="p">)</span>
         <span class="n">center</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">template</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span> <span class="o">-</span> <span class="mf">0.5</span>
         <span class="n">matrices</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">molecules</span><span class="o">.</span><span class="n">affine_matrix</span><span class="p">(</span>
             <span class="n">center</span><span class="p">,</span> <span class="n">center</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">molecules</span><span class="o">.</span><span class="n">pos</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">scale</span>
         <span class="p">)</span>
-        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">mtx</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">matrices</span><span class="p">):</span>
-            <span class="n">img</span> <span class="o">=</span> <span class="n">_utils</span><span class="o">.</span><span class="n">delayed_affine</span><span class="p">(</span>
-                <span class="n">template</span><span class="p">,</span> <span class="n">mtx</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">order</span><span class="p">,</span> <span class="n">prefilter</span><span class="o">=</span><span class="kc">False</span>
-            <span class="p">)</span>
-            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_degrees</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-                <span class="n">tasks</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">img</span><span class="p">)</span>
-            <span class="k">else</span><span class="p">:</span>
-                <span class="n">task</span> <span class="o">=</span> <span class="n">simulate_noise</span><span class="p">(</span>
-                    <span class="n">img</span><span class="p">,</span>
+        <span class="n">pool</span> <span class="o">=</span> <span class="n">DaskTaskPool</span><span class="o">.</span><span class="n">from_func</span><span class="p">(</span><span class="n">affine_transform</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">mtx</span> <span class="ow">in</span> <span class="n">matrices</span><span class="p">:</span>
+            <span class="n">pool</span><span class="o">.</span><span class="n">add_task</span><span class="p">(</span><span class="n">template</span><span class="p">,</span> <span class="n">mtx</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">order</span><span class="p">,</span> <span class="n">prefilter</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="n">task_list</span> <span class="o">=</span> <span class="n">pool</span><span class="o">.</span><span class="n">asarrays</span><span class="p">(</span><span class="n">shape</span><span class="o">=</span><span class="n">template</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_degrees</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">task_list</span> <span class="o">=</span> <span class="n">DaskArrayList</span><span class="p">(</span>
+                <span class="n">simulate_noise</span><span class="p">(</span>
+                    <span class="n">task</span><span class="p">,</span>
                     <span class="bp">self</span><span class="o">.</span><span class="n">_central_axis</span><span class="p">,</span>
                     <span class="bp">self</span><span class="o">.</span><span class="n">_degrees</span><span class="p">,</span>
                     <span class="bp">self</span><span class="o">.</span><span class="n">_noise</span><span class="p">,</span>
                     <span class="n">seed</span><span class="o">=</span><span class="n">i</span><span class="p">,</span>
                 <span class="p">)</span>
-                <span class="n">tasks</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">task</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">tasks</span></div>
+                <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">task</span> <span class="ow">in</span> <span class="n">task_list</span><span class="o">.</span><span class="n">enumerate</span><span class="p">()</span>
+            <span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">task_list</span></div>
 
 <div class="viewcode-block" id="MockLoader.replace"><a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.MockLoader.replace">[docs]</a>    <span class="k">def</span> <span class="nf">replace</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">molecules</span><span class="p">:</span> <span class="n">Molecules</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-        <span class="n">output_shape</span><span class="p">:</span> <span class="n">pixel</span> <span class="o">|</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pixel</span><span class="p">,</span> <span class="n">pixel</span><span class="p">,</span> <span class="n">pixel</span><span class="p">]</span> <span class="o">|</span> <span class="n">Unset</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">output_shape</span><span class="p">:</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>  <span class="c1"># just for compatibility</span>
         <span class="n">order</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">scale</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">corner_safe</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
         <span class="k">if</span> <span class="n">molecules</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
             <span class="n">molecules</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">molecules</span>
-        <span class="k">if</span> <span class="n">output_shape</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-            <span class="n">output_shape</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">output_shape</span>
         <span class="k">if</span> <span class="n">order</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
             <span class="n">order</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">order</span>
         <span class="k">if</span> <span class="n">scale</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
@@ -221,7 +230,6 @@
             <span class="n">molecules</span><span class="o">=</span><span class="n">molecules</span><span class="p">,</span>
             <span class="n">noise</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_noise</span><span class="p">,</span>
             <span class="n">degrees</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_degrees</span><span class="p">,</span>
-            <span class="n">output_shape</span><span class="o">=</span><span class="n">output_shape</span><span class="p">,</span>
             <span class="n">order</span><span class="o">=</span><span class="n">order</span><span class="p">,</span>
             <span class="n">scale</span><span class="o">=</span><span class="n">scale</span><span class="p">,</span>
             <span class="n">corner_safe</span><span class="o">=</span><span class="n">corner_safe</span><span class="p">,</span>
@@ -229,14 +237,14 @@
 
 
 <span class="k">def</span> <span class="nf">simulate_noise</span><span class="p">(</span>
-    <span class="n">img</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
+    <span class="n">img</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span> <span class="o">|</span> <span class="n">da</span><span class="o">.</span><span class="n">Array</span><span class="p">,</span>
     <span class="n">central_axis</span><span class="p">,</span>
     <span class="n">degrees</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
     <span class="n">noise</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
     <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
-<span class="p">):</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">da</span><span class="o">.</span><span class="n">Array</span><span class="p">:</span>
     <span class="c1"># img: spline filtered</span>
-    <span class="n">matrices</span><span class="p">,</span> <span class="n">output_shape</span> <span class="o">=</span> <span class="n">normalize_radon_input</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">central_axis</span><span class="p">,</span> <span class="n">degrees</span><span class="p">)</span>
+    <span class="n">matrices</span><span class="p">,</span> <span class="n">output_shape</span> <span class="o">=</span> <span class="n">normalize_radon_input</span><span class="p">(</span><span class="n">img</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">central_axis</span><span class="p">,</span> <span class="n">degrees</span><span class="p">)</span>
     <span class="n">sino</span><span class="p">:</span> <span class="n">da</span><span class="o">.</span><span class="n">Array</span> <span class="o">=</span> <span class="n">da</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span>
         <span class="p">[</span>
             <span class="n">da</span><span class="o">.</span><span class="n">from_delayed</span><span class="p">(</span>
@@ -268,9 +276,9 @@
 
 
 <span class="k">def</span> <span class="nf">normalize_radon_input</span><span class="p">(</span>
-    <span class="bp">self</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
+    <span class="n">shape</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span>
     <span class="n">central_axis</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
-    <span class="n">degrees</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span> <span class="o">|</span> <span class="nb">float</span><span class="p">,</span>
+    <span class="n">degrees</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
 <span class="p">):</span>
     <span class="n">radians</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">deg2rad</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">degrees</span><span class="p">))</span>
 
@@ -281,10 +289,10 @@
         <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Central axis must be a 3D vector&quot;</span><span class="p">)</span>
 
     <span class="c1"># construct Affine transform matrices</span>
-    <span class="n">height</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">shape</span><span class="p">)))</span>
-    <span class="n">output_shape</span> <span class="o">=</span> <span class="p">(</span><span class="n">height</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="bp">self</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span>
+    <span class="n">height</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">shape</span><span class="p">)))</span>
+    <span class="n">output_shape</span> <span class="o">=</span> <span class="p">(</span><span class="n">height</span><span class="p">,</span> <span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">shape</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span>
     <span class="n">params</span> <span class="o">=</span> <span class="n">_get_rotation_matrices_for_radon_3d</span><span class="p">(</span>
-        <span class="n">radians</span><span class="p">,</span> <span class="n">central_axis</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">output_shape</span>
+        <span class="n">radians</span><span class="p">,</span> <span class="n">central_axis</span><span class="p">,</span> <span class="n">shape</span><span class="p">,</span> <span class="n">output_shape</span>
     <span class="p">)</span>
 
     <span class="k">return</span> <span class="n">params</span><span class="p">,</span> <span class="n">output_shape</span>
@@ -292,7 +300,7 @@
 
 <span class="nd">@delayed</span>
 <span class="k">def</span> <span class="nf">radon_single</span><span class="p">(</span><span class="n">img</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">mtx</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">order</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">3</span><span class="p">,</span> <span class="n">output_shape</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
-    <span class="sd">&quot;&quot;&quot;Radon transform of 2D image.&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Radon transform of 2D image.&quot;&quot;&quot;</span>
     <span class="n">img_rot</span> <span class="o">=</span> <span class="n">ndi</span><span class="o">.</span><span class="n">affine_transform</span><span class="p">(</span>
         <span class="n">img</span><span class="p">,</span> <span class="n">mtx</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="n">order</span><span class="p">,</span> <span class="n">output_shape</span><span class="o">=</span><span class="n">output_shape</span><span class="p">,</span> <span class="n">prefilter</span><span class="o">=</span><span class="kc">False</span>
     <span class="p">)</span>

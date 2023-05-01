@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo.loader._loader &mdash; acryo 0.2.1 documentation</title>
+  <title>acryo.loader._loader &mdash; acryo 0.3.0 documentation</title>
       <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -14,7 +14,7 @@
         <script src="../../../_static/jquery.js"></script>
         <script src="../../../_static/underscore.js"></script>
         <script src="../../../_static/doctools.js"></script>
-        <script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+        <script src="https://unpkg.com/mermaid@9.4.0/dist/mermaid.min.js"></script>
         <script>mermaid.initialize({startOnLoad:true});</script>
     <script src="../../../_static/js/theme.js"></script>
     <link rel="index" title="Index" href="../../../genindex.html" />
@@ -26,14 +26,18 @@
     <nav data-toggle="wy-nav-shift" class="wy-nav-side">
       <div class="wy-side-scroll">
         <div class="wy-side-nav-search" >
-            <a href="../../../index.html" class="icon icon-home"> acryo
+
+
+
+          <a href="../../../index.html" class="icon icon-home">
+            acryo
           </a>
               <div class="version">
-                0.2.1
+                0.3.0
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
-    <input type="text" name="q" placeholder="Search docs" />
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
     <input type="hidden" name="check_keywords" value="yes" />
     <input type="hidden" name="area" value="default" />
   </form>
@@ -60,9 +64,9 @@
         <div class="rst-content">
           <div role="navigation" aria-label="Page navigation">
   <ul class="wy-breadcrumbs">
-      <li><a href="../../../index.html" class="icon icon-home"></a> &raquo;</li>
-          <li><a href="../../index.html">Module code</a> &raquo;</li>
-      <li>acryo.loader._loader</li>
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">acryo.loader._loader</li>
       <li class="wy-breadcrumbs-aside">
       </li>
   </ul>
@@ -77,27 +81,30 @@
 <span class="kn">from</span> <span class="nn">__future__</span> <span class="kn">import</span> <span class="n">annotations</span>
 <span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="p">(</span>
     <span class="n">TYPE_CHECKING</span><span class="p">,</span>
+    <span class="n">Callable</span><span class="p">,</span>
     <span class="n">NamedTuple</span><span class="p">,</span>
     <span class="n">Any</span><span class="p">,</span>
 <span class="p">)</span>
 <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">from</span> <span class="nn">scipy</span> <span class="kn">import</span> <span class="n">ndimage</span> <span class="k">as</span> <span class="n">ndi</span>
 <span class="kn">from</span> <span class="nn">dask</span> <span class="kn">import</span> <span class="n">array</span> <span class="k">as</span> <span class="n">da</span>
 
 <span class="kn">from</span> <span class="nn">acryo._types</span> <span class="kn">import</span> <span class="n">nm</span><span class="p">,</span> <span class="n">pixel</span>
 <span class="kn">from</span> <span class="nn">acryo._reader</span> <span class="kn">import</span> <span class="n">imread</span>
 <span class="kn">from</span> <span class="nn">acryo.molecules</span> <span class="kn">import</span> <span class="n">Molecules</span>
 <span class="kn">from</span> <span class="nn">acryo</span> <span class="kn">import</span> <span class="n">_utils</span>
-<span class="kn">from</span> <span class="nn">acryo.loader._base</span> <span class="kn">import</span> <span class="n">LoaderBase</span><span class="p">,</span> <span class="n">Unset</span>
+<span class="kn">from</span> <span class="nn">acryo.loader</span> <span class="kn">import</span> <span class="n">_misc</span>
+<span class="kn">from</span> <span class="nn">acryo.loader._base</span> <span class="kn">import</span> <span class="n">LoaderBase</span><span class="p">,</span> <span class="n">Unset</span><span class="p">,</span> <span class="n">_ShapeType</span>
+<span class="kn">from</span> <span class="nn">acryo._dask</span> <span class="kn">import</span> <span class="n">DaskTaskPool</span><span class="p">,</span> <span class="n">DaskArrayList</span>
 
 <span class="k">if</span> <span class="n">TYPE_CHECKING</span><span class="p">:</span>
     <span class="kn">from</span> <span class="nn">typing_extensions</span> <span class="kn">import</span> <span class="n">Self</span>
     <span class="kn">from</span> <span class="nn">numpy.typing</span> <span class="kn">import</span> <span class="n">NDArray</span>
     <span class="kn">from</span> <span class="nn">acryo.classification</span> <span class="kn">import</span> <span class="n">PcaClassifier</span>
-    <span class="kn">from</span> <span class="nn">dask.delayed</span> <span class="kn">import</span> <span class="n">Delayed</span>
 
 
 <div class="viewcode-block" id="SubtomogramLoader"><a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.SubtomogramLoader">[docs]</a><span class="k">class</span> <span class="nc">SubtomogramLoader</span><span class="p">(</span><span class="n">LoaderBase</span><span class="p">):</span>
-    <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    A class for efficient loading of subtomograms.</span>
 
 <span class="sd">    A ``SubtomogramLoader`` instance is basically composed of two elements,</span>
@@ -196,16 +203,16 @@
 
     <span class="nd">@property</span>
     <span class="k">def</span> <span class="nf">image</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span> <span class="o">|</span> <span class="n">da</span><span class="o">.</span><span class="n">Array</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Return tomogram image.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return tomogram image.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_image</span>
 
     <span class="nd">@property</span>
     <span class="k">def</span> <span class="nf">molecules</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Molecules</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Return the molecules of the subtomogram loader.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the molecules of the subtomogram loader.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_molecules</span>
 
     <span class="k">def</span> <span class="fm">__len__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Return the number of subtomograms.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the number of subtomograms.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">molecules</span><span class="o">.</span><span class="n">pos</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
 
 <div class="viewcode-block" id="SubtomogramLoader.replace"><a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.SubtomogramLoader.replace">[docs]</a>    <span class="k">def</span> <span class="nf">replace</span><span class="p">(</span>
@@ -216,7 +223,7 @@
         <span class="n">scale</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">corner_safe</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Return a new instance with different parameter(s).&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return a new instance with different parameter(s).&quot;&quot;&quot;</span>
         <span class="k">if</span> <span class="n">molecules</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
             <span class="n">molecules</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">molecules</span>
         <span class="k">if</span> <span class="n">output_shape</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
@@ -237,7 +244,7 @@
         <span class="p">)</span></div>
 
 <div class="viewcode-block" id="SubtomogramLoader.binning"><a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.SubtomogramLoader.binning">[docs]</a>    <span class="k">def</span> <span class="nf">binning</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">binsize</span><span class="p">:</span> <span class="n">pixel</span> <span class="o">=</span> <span class="mi">2</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">compute</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Return a new instance with binned image.</span>
 
 <span class="sd">        This method also properly translates the molecule coordinates.</span>
@@ -271,9 +278,9 @@
 
 <div class="viewcode-block" id="SubtomogramLoader.construct_loading_tasks"><a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.SubtomogramLoader.construct_loading_tasks">[docs]</a>    <span class="k">def</span> <span class="nf">construct_loading_tasks</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
-        <span class="n">output_shape</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pixel</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">da</span><span class="o">.</span><span class="n">Array</span><span class="p">]:</span>
-        <span class="sd">&quot;&quot;&quot;</span>
+        <span class="n">output_shape</span><span class="p">:</span> <span class="n">_ShapeType</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">DaskArrayList</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Construct a list of subtomogram lazy loader.</span>
 
 <span class="sd">        Returns</span>
@@ -281,8 +288,10 @@
 <span class="sd">        list of Delayed object</span>
 <span class="sd">            Each object returns a subtomogram on execution by ``da.compute``.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">output_shape</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_output_shape</span><span class="p">(</span><span class="n">output_shape</span><span class="p">)</span>
         <span class="k">if</span> <span class="p">(</span><span class="n">cached</span> <span class="o">:=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_cached_array</span><span class="p">(</span><span class="n">output_shape</span><span class="p">))</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-            <span class="k">return</span> <span class="p">[</span><span class="n">cached</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">))]</span>
+            <span class="k">return</span> <span class="n">DaskArrayList</span><span class="p">(</span><span class="n">cached</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">)))</span>
+
         <span class="n">image</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">image</span>
         <span class="n">scale</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">scale</span>
         <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">):</span>
@@ -292,7 +301,7 @@
             <span class="n">_prep</span> <span class="o">=</span> <span class="n">_utils</span><span class="o">.</span><span class="n">prepare_affine_cornersafe</span>
         <span class="k">else</span><span class="p">:</span>
             <span class="n">_prep</span> <span class="o">=</span> <span class="n">_utils</span><span class="o">.</span><span class="n">prepare_affine</span>
-        <span class="n">tasks</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">Delayed</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">pool</span> <span class="o">=</span> <span class="n">DaskTaskPool</span><span class="o">.</span><span class="n">from_func</span><span class="p">(</span><span class="n">_rotated_crop</span><span class="p">)</span>
         <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">)):</span>
             <span class="n">subvol</span><span class="p">,</span> <span class="n">mtx</span> <span class="o">=</span> <span class="n">_prep</span><span class="p">(</span>
                 <span class="n">image</span><span class="p">,</span>
@@ -300,25 +309,20 @@
                 <span class="n">output_shape</span><span class="o">=</span><span class="n">output_shape</span><span class="p">,</span>
                 <span class="n">rot</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">molecules</span><span class="o">.</span><span class="n">rotator</span><span class="p">[</span><span class="n">i</span><span class="p">],</span>
             <span class="p">)</span>
-            <span class="n">task</span> <span class="o">=</span> <span class="n">da</span><span class="o">.</span><span class="n">from_delayed</span><span class="p">(</span>
-                <span class="n">_utils</span><span class="o">.</span><span class="n">rotated_crop</span><span class="p">(</span>
-                    <span class="n">subvol</span><span class="p">,</span>
-                    <span class="n">mtx</span><span class="p">,</span>
-                    <span class="n">shape</span><span class="o">=</span><span class="n">output_shape</span><span class="p">,</span>
-                    <span class="n">order</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">order</span><span class="p">,</span>
-                    <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;constant&quot;</span><span class="p">,</span>
-                    <span class="n">cval</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">,</span>
-                <span class="p">),</span>
+            <span class="n">pool</span><span class="o">.</span><span class="n">add_task</span><span class="p">(</span>
+                <span class="n">subvol</span><span class="p">,</span>
+                <span class="n">mtx</span><span class="p">,</span>
                 <span class="n">shape</span><span class="o">=</span><span class="n">output_shape</span><span class="p">,</span>
-                <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span>
+                <span class="n">order</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">order</span><span class="p">,</span>
+                <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;constant&quot;</span><span class="p">,</span>
+                <span class="n">cval</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">,</span>
             <span class="p">)</span>
-            <span class="n">tasks</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">task</span><span class="p">)</span>
 
-        <span class="k">return</span> <span class="n">tasks</span></div></div>
+        <span class="k">return</span> <span class="n">pool</span><span class="o">.</span><span class="n">asarrays</span><span class="p">(</span><span class="n">shape</span><span class="o">=</span><span class="n">output_shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span></div></div>
 
 
 <span class="k">class</span> <span class="nc">ClassificationResult</span><span class="p">(</span><span class="n">NamedTuple</span><span class="p">):</span>
-    <span class="sd">&quot;&quot;&quot;Tuple of classification results.&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Tuple of classification results.&quot;&quot;&quot;</span>
 
     <span class="n">loader</span><span class="p">:</span> <span class="n">SubtomogramLoader</span>
     <span class="n">classifier</span><span class="p">:</span> <span class="n">PcaClassifier</span>
@@ -341,7 +345,7 @@
     <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">output_shape</span><span class="p">,</span> <span class="n">Unset</span><span class="p">):</span>
         <span class="n">_output_shape</span> <span class="o">=</span> <span class="n">output_shape</span>
     <span class="k">else</span><span class="p">:</span>
-        <span class="n">_output_shape</span> <span class="o">=</span> <span class="n">_utils</span><span class="o">.</span><span class="n">normalize_shape</span><span class="p">(</span><span class="n">output_shape</span><span class="p">,</span> <span class="n">ndim</span><span class="o">=</span><span class="n">ndim</span><span class="p">)</span>
+        <span class="n">_output_shape</span> <span class="o">=</span> <span class="n">_misc</span><span class="o">.</span><span class="n">normalize_shape</span><span class="p">(</span><span class="n">output_shape</span><span class="p">,</span> <span class="n">ndim</span><span class="o">=</span><span class="n">ndim</span><span class="p">)</span>
 
     <span class="c1"># check scale</span>
     <span class="n">_scale</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span>
@@ -350,6 +354,29 @@
 
     <span class="n">_corner_safe</span> <span class="o">=</span> <span class="nb">bool</span><span class="p">(</span><span class="n">corner_safe</span><span class="p">)</span>
     <span class="k">return</span> <span class="n">order</span><span class="p">,</span> <span class="n">_output_shape</span><span class="p">,</span> <span class="n">_scale</span><span class="p">,</span> <span class="n">_corner_safe</span>
+
+
+<span class="k">def</span> <span class="nf">_rotated_crop</span><span class="p">(</span>
+    <span class="n">subimg</span><span class="p">,</span>
+    <span class="n">mtx</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
+    <span class="n">shape</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span>
+    <span class="n">order</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="n">mode</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">cval</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]],</span> <span class="nb">float</span><span class="p">],</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
+    <span class="k">if</span> <span class="n">callable</span><span class="p">(</span><span class="n">cval</span><span class="p">):</span>
+        <span class="n">cval</span> <span class="o">=</span> <span class="n">cval</span><span class="p">(</span><span class="n">subimg</span><span class="p">)</span>
+
+    <span class="n">out</span> <span class="o">=</span> <span class="n">ndi</span><span class="o">.</span><span class="n">affine_transform</span><span class="p">(</span>
+        <span class="n">subimg</span><span class="p">,</span>
+        <span class="n">matrix</span><span class="o">=</span><span class="n">mtx</span><span class="p">,</span>
+        <span class="n">output_shape</span><span class="o">=</span><span class="n">shape</span><span class="p">,</span>
+        <span class="n">order</span><span class="o">=</span><span class="n">order</span><span class="p">,</span>
+        <span class="n">prefilter</span><span class="o">=</span><span class="n">order</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">,</span>
+        <span class="n">mode</span><span class="o">=</span><span class="n">mode</span><span class="p">,</span>
+        <span class="n">cval</span><span class="o">=</span><span class="n">cval</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>  <span class="c1"># type: ignore</span>
 </pre></div>
 
            </div>

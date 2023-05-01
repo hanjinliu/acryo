@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo.testing.core &mdash; acryo 0.2.1 documentation</title>
+  <title>acryo.testing.core &mdash; acryo 0.3.0 documentation</title>
       <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -14,7 +14,7 @@
         <script src="../../../_static/jquery.js"></script>
         <script src="../../../_static/underscore.js"></script>
         <script src="../../../_static/doctools.js"></script>
-        <script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+        <script src="https://unpkg.com/mermaid@9.4.0/dist/mermaid.min.js"></script>
         <script>mermaid.initialize({startOnLoad:true});</script>
     <script src="../../../_static/js/theme.js"></script>
     <link rel="index" title="Index" href="../../../genindex.html" />
@@ -26,14 +26,18 @@
     <nav data-toggle="wy-nav-shift" class="wy-nav-side">
       <div class="wy-side-scroll">
         <div class="wy-side-nav-search" >
-            <a href="../../../index.html" class="icon icon-home"> acryo
+
+
+
+          <a href="../../../index.html" class="icon icon-home">
+            acryo
           </a>
               <div class="version">
-                0.2.1
+                0.3.0
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
-    <input type="text" name="q" placeholder="Search docs" />
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
     <input type="hidden" name="check_keywords" value="yes" />
     <input type="hidden" name="area" value="default" />
   </form>
@@ -60,9 +64,9 @@
         <div class="rst-content">
           <div role="navigation" aria-label="Page navigation">
   <ul class="wy-breadcrumbs">
-      <li><a href="../../../index.html" class="icon icon-home"></a> &raquo;</li>
-          <li><a href="../../index.html">Module code</a> &raquo;</li>
-      <li>acryo.testing.core</li>
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">acryo.testing.core</li>
       <li class="wy-breadcrumbs-aside">
       </li>
   </ul>
@@ -75,9 +79,8 @@
 <span></span><span class="kn">from</span> <span class="nn">__future__</span> <span class="kn">import</span> <span class="n">annotations</span>
 
 <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
-<span class="kn">from</span> <span class="nn">scipy</span> <span class="kn">import</span> <span class="n">ndimage</span> <span class="k">as</span> <span class="n">ndi</span>
 
-<span class="kn">from</span> <span class="nn">acryo._fft</span> <span class="kn">import</span> <span class="n">fftn</span><span class="p">,</span> <span class="n">ifftn</span>
+<span class="kn">from</span> <span class="nn">acryo._typed_scipy</span> <span class="kn">import</span> <span class="n">fftn</span><span class="p">,</span> <span class="n">ifftn</span><span class="p">,</span> <span class="n">affine_transform</span>
 <span class="kn">from</span> <span class="nn">acryo.molecules</span> <span class="kn">import</span> <span class="n">Molecules</span>
 <span class="kn">from</span> <span class="nn">acryo._utils</span> <span class="kn">import</span> <span class="n">compose_matrices</span>
 <span class="kn">from</span> <span class="nn">acryo._rotation</span> <span class="kn">import</span> <span class="n">normalize_rotations</span>
@@ -85,7 +88,7 @@
 
 
 <div class="viewcode-block" id="TomogramGenerator"><a class="viewcode-back" href="../../../apidoc/acryo.testing.html#acryo.testing.core.TomogramGenerator">[docs]</a><span class="k">class</span> <span class="nc">TomogramGenerator</span><span class="p">:</span>
-    <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    A tester class for subtomogram averaging and alignment.</span>
 
 <span class="sd">    Given a template image, this class can create tomogram by assembling</span>
@@ -150,7 +153,7 @@
             <span class="n">mtx_iterator</span> <span class="o">=</span> <span class="nb">iter</span><span class="p">(</span><span class="n">matrices</span><span class="p">)</span>
             <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span> <span class="ow">in</span> <span class="n">wrange</span><span class="p">(</span><span class="n">gy</span><span class="p">,</span> <span class="n">gx</span><span class="p">):</span>
                 <span class="n">mtx</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">mtx_iterator</span><span class="p">)</span>
-                <span class="n">mols</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">]</span> <span class="o">=</span> <span class="n">ndi</span><span class="o">.</span><span class="n">affine_transform</span><span class="p">(</span><span class="n">mols</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">],</span> <span class="n">mtx</span><span class="p">)</span>
+                <span class="n">mols</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">]</span> <span class="o">=</span> <span class="n">affine_transform</span><span class="p">(</span><span class="n">mols</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">],</span> <span class="n">mtx</span><span class="p">)</span>
 
         <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span> <span class="ow">in</span> <span class="n">wrange</span><span class="p">(</span><span class="n">gy</span><span class="p">,</span> <span class="n">gx</span><span class="p">):</span>
             <span class="n">mols</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">]</span> <span class="o">+=</span> <span class="n">rng</span><span class="o">.</span><span class="n">normal</span><span class="p">(</span><span class="n">scale</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">noise_sigma</span><span class="p">,</span> <span class="n">size</span><span class="o">=</span><span class="n">template</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
@@ -181,7 +184,7 @@
 <span class="k">def</span> <span class="nf">_missing_wedge_mask</span><span class="p">(</span>
     <span class="n">shape</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span> <span class="n">tilt_range</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">degree</span><span class="p">,</span> <span class="n">degree</span><span class="p">]</span>
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
-    <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Create a missing-wedge binary mask image.</span>
 
 <span class="sd">    Mask created by this function should be multiplied to Fourier transformed</span>

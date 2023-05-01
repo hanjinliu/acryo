@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo.loader._batch &mdash; acryo 0.2.1 documentation</title>
+  <title>acryo.loader._batch &mdash; acryo 0.3.0 documentation</title>
       <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -14,7 +14,7 @@
         <script src="../../../_static/jquery.js"></script>
         <script src="../../../_static/underscore.js"></script>
         <script src="../../../_static/doctools.js"></script>
-        <script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+        <script src="https://unpkg.com/mermaid@9.4.0/dist/mermaid.min.js"></script>
         <script>mermaid.initialize({startOnLoad:true});</script>
     <script src="../../../_static/js/theme.js"></script>
     <link rel="index" title="Index" href="../../../genindex.html" />
@@ -26,14 +26,18 @@
     <nav data-toggle="wy-nav-shift" class="wy-nav-side">
       <div class="wy-side-scroll">
         <div class="wy-side-nav-search" >
-            <a href="../../../index.html" class="icon icon-home"> acryo
+
+
+
+          <a href="../../../index.html" class="icon icon-home">
+            acryo
           </a>
               <div class="version">
-                0.2.1
+                0.3.0
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
-    <input type="text" name="q" placeholder="Search docs" />
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
     <input type="hidden" name="check_keywords" value="yes" />
     <input type="hidden" name="area" value="default" />
   </form>
@@ -60,9 +64,9 @@
         <div class="rst-content">
           <div role="navigation" aria-label="Page navigation">
   <ul class="wy-breadcrumbs">
-      <li><a href="../../../index.html" class="icon icon-home"></a> &raquo;</li>
-          <li><a href="../../index.html">Module code</a> &raquo;</li>
-      <li>acryo.loader._batch</li>
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">acryo.loader._batch</li>
       <li class="wy-breadcrumbs-aside">
       </li>
   </ul>
@@ -87,6 +91,7 @@
 <span class="kn">from</span> <span class="nn">acryo</span> <span class="kn">import</span> <span class="n">_utils</span>
 <span class="kn">from</span> <span class="nn">acryo.molecules</span> <span class="kn">import</span> <span class="n">Molecules</span>
 <span class="kn">from</span> <span class="nn">acryo._types</span> <span class="kn">import</span> <span class="n">nm</span><span class="p">,</span> <span class="n">pixel</span>
+<span class="kn">from</span> <span class="nn">acryo._dask</span> <span class="kn">import</span> <span class="n">DaskArrayList</span>
 <span class="kn">from</span> <span class="nn">acryo.loader._base</span> <span class="kn">import</span> <span class="n">LoaderBase</span>
 <span class="kn">from</span> <span class="nn">acryo.loader._loader</span> <span class="kn">import</span> <span class="n">SubtomogramLoader</span><span class="p">,</span> <span class="n">Unset</span>
 
@@ -99,7 +104,7 @@
 
 
 <div class="viewcode-block" id="BatchLoader"><a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.BatchLoader">[docs]</a><span class="k">class</span> <span class="nc">BatchLoader</span><span class="p">(</span><span class="n">LoaderBase</span><span class="p">):</span>
-    <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Collection of tomograms and their molecules.</span>
 
 <span class="sd">    A `BatchLoader` is similar to a list of `SubtomogramLoader` objects, but with</span>
@@ -115,19 +120,18 @@
         <span class="n">output_shape</span><span class="p">:</span> <span class="n">pixel</span> <span class="o">|</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pixel</span><span class="p">,</span> <span class="n">pixel</span><span class="p">,</span> <span class="n">pixel</span><span class="p">]</span> <span class="o">|</span> <span class="n">Unset</span> <span class="o">=</span> <span class="n">Unset</span><span class="p">(),</span>
         <span class="n">corner_safe</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-
         <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">order</span><span class="p">,</span> <span class="n">scale</span><span class="p">,</span> <span class="n">output_shape</span><span class="p">,</span> <span class="n">corner_safe</span><span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_images</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="n">Hashable</span><span class="p">,</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span> <span class="o">|</span> <span class="n">da</span><span class="o">.</span><span class="n">Array</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_molecules</span><span class="p">:</span> <span class="n">Molecules</span> <span class="o">=</span> <span class="n">Molecules</span><span class="o">.</span><span class="n">empty</span><span class="p">([</span><span class="n">IMAGE_ID_LABEL</span><span class="p">])</span>
 
     <span class="nd">@property</span>
     <span class="k">def</span> <span class="nf">loaders</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">LoaderAccessor</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Interface to access the subtomogram loaders.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Interface to access the subtomogram loaders.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="n">LoaderAccessor</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
 
     <span class="nd">@property</span>
     <span class="k">def</span> <span class="nf">images</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">MappingProxyType</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;All the images in the collection.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;All the images in the collection.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="n">MappingProxyType</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_images</span><span class="p">)</span>
 
 <div class="viewcode-block" id="BatchLoader.add_tomogram"><a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.BatchLoader.add_tomogram">[docs]</a>    <span class="k">def</span> <span class="nf">add_tomogram</span><span class="p">(</span>
@@ -136,7 +140,7 @@
         <span class="n">molecules</span><span class="p">:</span> <span class="n">Molecules</span><span class="p">,</span>
         <span class="n">image_id</span><span class="p">:</span> <span class="n">Hashable</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Add a tomogram and its molecules to the collection.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Add a tomogram and its molecules to the collection.&quot;&quot;&quot;</span>
         <span class="k">if</span> <span class="n">image_id</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
             <span class="n">image_id</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_images</span><span class="p">)</span>
             <span class="k">while</span> <span class="n">image_id</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_images</span><span class="p">:</span>
@@ -177,7 +181,7 @@
 
     <span class="nd">@property</span>
     <span class="k">def</span> <span class="nf">molecules</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Molecules</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Collect all the molecules from all the loaders&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Collect all the molecules from all the loaders&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_molecules</span>
 
 <div class="viewcode-block" id="BatchLoader.replace"><a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.BatchLoader.replace">[docs]</a>    <span class="k">def</span> <span class="nf">replace</span><span class="p">(</span>
@@ -188,7 +192,7 @@
         <span class="n">scale</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">corner_safe</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Return a new instance with different parameter(s).&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return a new instance with different parameter(s).&quot;&quot;&quot;</span>
         <span class="k">if</span> <span class="n">output_shape</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
             <span class="n">output_shape</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">output_shape</span>
         <span class="k">if</span> <span class="n">order</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
@@ -215,7 +219,7 @@
         <span class="k">return</span> <span class="n">out</span></div>
 
 <div class="viewcode-block" id="BatchLoader.binning"><a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.BatchLoader.binning">[docs]</a>    <span class="k">def</span> <span class="nf">binning</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">binsize</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">compute</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Return a new instance with binned images.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return a new instance with binned images.&quot;&quot;&quot;</span>
         <span class="k">if</span> <span class="n">binsize</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
             <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
         <span class="n">tr</span> <span class="o">=</span> <span class="o">-</span><span class="p">(</span><span class="n">binsize</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">scale</span>
@@ -239,57 +243,57 @@
         <span class="n">out</span><span class="o">.</span><span class="n">_images</span> <span class="o">=</span> <span class="n">_images</span>
         <span class="k">return</span> <span class="n">out</span></div>
 
-<div class="viewcode-block" id="BatchLoader.construct_loading_tasks"><a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.BatchLoader.construct_loading_tasks">[docs]</a>    <span class="k">def</span> <span class="nf">construct_loading_tasks</span><span class="p">(</span>
-        <span class="bp">self</span><span class="p">,</span> <span class="n">output_shape</span><span class="p">:</span> <span class="n">_ShapeType</span> <span class="o">=</span> <span class="kc">None</span>
-    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">da</span><span class="o">.</span><span class="n">Array</span><span class="p">]:</span>
-        <span class="k">return</span> <span class="nb">sum</span><span class="p">(</span>
-            <span class="p">(</span>
-                <span class="n">loader</span><span class="o">.</span><span class="n">construct_loading_tasks</span><span class="p">(</span><span class="n">output_shape</span><span class="o">=</span><span class="n">output_shape</span><span class="p">)</span>
-                <span class="k">for</span> <span class="n">loader</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">loaders</span>
-            <span class="p">),</span>
-            <span class="n">start</span><span class="o">=</span><span class="p">[],</span>
+<div class="viewcode-block" id="BatchLoader.construct_loading_tasks"><a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.BatchLoader.construct_loading_tasks">[docs]</a>    <span class="k">def</span> <span class="nf">construct_loading_tasks</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">output_shape</span><span class="p">:</span> <span class="n">_ShapeType</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">DaskArrayList</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">DaskArrayList</span><span class="o">.</span><span class="n">concat</span><span class="p">(</span>
+            <span class="n">loader</span><span class="o">.</span><span class="n">construct_loading_tasks</span><span class="p">(</span><span class="n">output_shape</span><span class="o">=</span><span class="n">output_shape</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">loader</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">loaders</span>
         <span class="p">)</span></div></div>
 
 
 <span class="k">class</span> <span class="nc">LoaderAccessor</span><span class="p">:</span>
     <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">collection</span><span class="p">:</span> <span class="n">BatchLoader</span><span class="p">):</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_collection</span> <span class="o">=</span> <span class="n">weakref</span><span class="o">.</span><span class="n">ref</span><span class="p">(</span><span class="n">collection</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_loader</span> <span class="o">=</span> <span class="n">weakref</span><span class="o">.</span><span class="n">ref</span><span class="p">(</span><span class="n">collection</span><span class="p">)</span>
 
     <span class="k">def</span> <span class="fm">__getitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">idx</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SubtomogramLoader</span><span class="p">:</span>
-        <span class="n">col</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_collection</span><span class="p">()</span>
-        <span class="n">mole</span> <span class="o">=</span> <span class="n">col</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="n">IMAGE_ID_LABEL</span><span class="p">)</span> <span class="o">==</span> <span class="n">idx</span><span class="p">)</span><span class="o">.</span><span class="n">molecules</span>
+        <span class="n">ldr</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_loader</span><span class="p">()</span>
+        <span class="n">mole</span> <span class="o">=</span> <span class="n">ldr</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="n">IMAGE_ID_LABEL</span><span class="p">)</span> <span class="o">==</span> <span class="n">idx</span><span class="p">)</span><span class="o">.</span><span class="n">molecules</span>
         <span class="k">if</span> <span class="n">mole</span><span class="o">.</span><span class="n">features</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
             <span class="k">raise</span> <span class="ne">KeyError</span><span class="p">(</span><span class="n">idx</span><span class="p">)</span>
-        <span class="n">image</span> <span class="o">=</span> <span class="n">col</span><span class="o">.</span><span class="n">_images</span><span class="p">[</span><span class="n">idx</span><span class="p">]</span>
+        <span class="n">image</span> <span class="o">=</span> <span class="n">ldr</span><span class="o">.</span><span class="n">_images</span><span class="p">[</span><span class="n">idx</span><span class="p">]</span>
         <span class="n">loader</span> <span class="o">=</span> <span class="n">SubtomogramLoader</span><span class="p">(</span>
             <span class="n">image</span><span class="p">,</span>
             <span class="n">mole</span><span class="p">,</span>
-            <span class="n">col</span><span class="o">.</span><span class="n">order</span><span class="p">,</span>
-            <span class="n">col</span><span class="o">.</span><span class="n">scale</span><span class="p">,</span>
-            <span class="n">col</span><span class="o">.</span><span class="n">output_shape</span><span class="p">,</span>
-            <span class="n">col</span><span class="o">.</span><span class="n">corner_safe</span><span class="p">,</span>
+            <span class="n">ldr</span><span class="o">.</span><span class="n">order</span><span class="p">,</span>
+            <span class="n">ldr</span><span class="o">.</span><span class="n">scale</span><span class="p">,</span>
+            <span class="n">ldr</span><span class="o">.</span><span class="n">output_shape</span><span class="p">,</span>
+            <span class="n">ldr</span><span class="o">.</span><span class="n">corner_safe</span><span class="p">,</span>
         <span class="p">)</span>
         <span class="k">return</span> <span class="n">loader</span>
 
     <span class="k">def</span> <span class="fm">__iter__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Iterator</span><span class="p">[</span><span class="n">SubtomogramLoader</span><span class="p">]:</span>
-        <span class="n">col</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_collection</span><span class="p">()</span>
-
-        <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">group</span> <span class="ow">in</span> <span class="n">col</span><span class="o">.</span><span class="n">molecules</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="n">IMAGE_ID_LABEL</span><span class="p">):</span>
-            <span class="n">image</span> <span class="o">=</span> <span class="n">col</span><span class="o">.</span><span class="n">_images</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+        <span class="n">ldr</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_loader</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">group</span> <span class="ow">in</span> <span class="n">ldr</span><span class="o">.</span><span class="n">molecules</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="n">IMAGE_ID_LABEL</span><span class="p">):</span>
+            <span class="n">image</span> <span class="o">=</span> <span class="n">ldr</span><span class="o">.</span><span class="n">_images</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
             <span class="n">loader</span> <span class="o">=</span> <span class="n">SubtomogramLoader</span><span class="p">(</span>
                 <span class="n">image</span><span class="p">,</span>
                 <span class="n">group</span><span class="p">,</span>
-                <span class="n">col</span><span class="o">.</span><span class="n">order</span><span class="p">,</span>
-                <span class="n">col</span><span class="o">.</span><span class="n">scale</span><span class="p">,</span>
-                <span class="n">col</span><span class="o">.</span><span class="n">output_shape</span><span class="p">,</span>
-                <span class="n">col</span><span class="o">.</span><span class="n">corner_safe</span><span class="p">,</span>
+                <span class="n">ldr</span><span class="o">.</span><span class="n">order</span><span class="p">,</span>
+                <span class="n">ldr</span><span class="o">.</span><span class="n">scale</span><span class="p">,</span>
+                <span class="n">ldr</span><span class="o">.</span><span class="n">output_shape</span><span class="p">,</span>
+                <span class="n">ldr</span><span class="o">.</span><span class="n">corner_safe</span><span class="p">,</span>
             <span class="p">)</span>
             <span class="k">yield</span> <span class="n">loader</span>
 
     <span class="k">def</span> <span class="fm">__len__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Number of loaders.&quot;&quot;&quot;</span>
-        <span class="n">col</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_collection</span><span class="p">()</span>
-        <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="n">col</span><span class="o">.</span><span class="n">_images</span><span class="p">)</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Number of loaders.&quot;&quot;&quot;</span>
+        <span class="n">ldr</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_loader</span><span class="p">()</span>
+        <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="n">ldr</span><span class="o">.</span><span class="n">_images</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_get_loader</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">BatchLoader</span><span class="p">:</span>
+        <span class="n">loader</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_loader</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">loader</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Loader is no longer available.&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">loader</span>
 </pre></div>
 
            </div>
