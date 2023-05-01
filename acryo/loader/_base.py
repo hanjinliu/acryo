@@ -33,7 +33,7 @@ from acryo.alignment import (
 )
 from acryo import _utils
 from acryo._types import nm, pixel
-from acryo._dask import DaskArrayList, DaskTaskList, DaskTaskIterator
+from acryo._dask import DaskArrayList, DaskTaskList, DaskTaskIterator, compute
 from acryo.molecules import Molecules
 from acryo.loader import _misc
 from acryo.loader._group import LoaderGroup
@@ -42,16 +42,16 @@ from acryo.pipe._classes import ImageProvider, ImageConverter
 
 if TYPE_CHECKING:
     from typing_extensions import Self
-    from dask.delayed import Delayed
     from acryo.classification import PcaClassifier
     from acryo.alignment._base import MaskType
+
+_R = TypeVar("_R")
 
 _ShapeType = Union[pixel, tuple[pixel, ...], None]
 TemplateInputType = Union[NDArray[np.float32], ImageProvider]
 MaskInputType = Union[NDArray[np.float32], ImageProvider, ImageConverter, None]
-AggFunction = Callable[[NDArray[np.float32]], Any]
-
-_R = TypeVar("_R")
+AggFunction = Callable[[NDArray[np.float32]], _R]
+IntoExpr = Union[str, pl.Expr]
 
 
 class Unset:
@@ -431,8 +431,8 @@ class LoaderBase(ABC):
         _max_shifts_px = np.asarray(max_shifts) / self.scale
 
         model = alignment_model(
-            template=self.normalize_template(template),
-            mask=self.normalize_mask(mask),
+            self.normalize_template(template),
+            self.normalize_mask(mask),
             **align_kwargs,
         )
         tasks = self.construct_mapping_tasks(
@@ -597,7 +597,7 @@ class LoaderBase(ABC):
         )
 
         if remainder > 1:
-            labels %= remainder
+            labels %= remainder  # type: ignore
         labels = labels.astype(np.uint8)
 
         feature_list = _misc.get_feature_list(scores, local_shifts, rotator.as_rotvec())
@@ -627,8 +627,8 @@ class LoaderBase(ABC):
         _max_shifts_px = tuple(np.asarray(max_shifts) / self.scale)
 
         model = alignment_model(
-            template=self.normalize_template(template),
-            mask=self.normalize_mask(mask),
+            self.normalize_template(template),
+            self.normalize_mask(mask),
             **align_kwargs,
         )
 
@@ -655,7 +655,7 @@ class LoaderBase(ABC):
 
     def apply(
         self,
-        func: AggFunction | Iterable[AggFunction],
+        func: AggFunction[_R] | Iterable[AggFunction[_R]],
         schema: list[str] | None = None,
     ) -> pl.DataFrame:
         """
@@ -673,7 +673,7 @@ class LoaderBase(ABC):
         pl.DataFrame
             Result table.
         """
-        all_tasks: list[list[da.Array | Delayed]] = []
+        all_tasks: list[DaskTaskList[_R]] = []
         if _is_iterable_of_funcs(func):
             funcs = func
         else:
@@ -686,8 +686,8 @@ class LoaderBase(ABC):
             raise ValueError("Output shape is unknown.")
         for fn in funcs:
             tasks = self.construct_mapping_tasks(fn, output_shape=self.output_shape)
-            all_tasks.append(list(tasks))
-        all_results = np.array(da.compute(all_tasks)[0])
+            all_tasks.append(tasks)
+        all_results = np.array(compute(all_tasks))
         return pl.DataFrame(all_results, schema=schema)
 
     def fsc(
@@ -768,8 +768,7 @@ class LoaderBase(ABC):
 
         if n_set <= 0:
             raise ValueError("'n_set' must be positive.")
-        if dfreq is None:
-            dfreq = 1.5 / min(output_shape)
+        dfq = 1.5 / min(output_shape) if dfreq is None else dfreq
         img = self.average_split(
             n_set=n_set,
             seed=seed,
@@ -782,7 +781,7 @@ class LoaderBase(ABC):
         for i in range(n_set):
             img0, img1 = img[i]
             freq, fsc = _utils.fourier_shell_correlation(
-                img0 * _mask, img1 * _mask, dfreq=dfreq
+                img0 * _mask, img1 * _mask, dfreq=dfq
             )
             fsc_all[f"FSC-{i}"] = fsc
 
@@ -930,25 +929,27 @@ class LoaderBase(ABC):
         return out
 
     @overload
-    def groupby(self, by: str | pl.Expr) -> LoaderGroup[str, Self]:
+    def groupby(self, by: IntoExpr) -> LoaderGroup[str, Self]:
         ...
 
     @overload
     def groupby(
-        self, by: Sequence[str | pl.Expr]
+        self, by: Sequence[IntoExpr] | tuple[IntoExpr, ...]
     ) -> LoaderGroup[tuple[str, ...], Self]:
         ...
 
-    def groupby(self, by):
+    def groupby(self, by: IntoExpr | Sequence[IntoExpr] | tuple[IntoExpr, ...]):
         """
         Group loader by given feature column(s).
 
         >>> for key, loader in loader.groupby("score"):
         ...     print(key, loader)
         """
-        if not isinstance(by, (str, pl.Expr)):
-            by = tuple(by)
-        return LoaderGroup._from_loader(self, by)
+        if isinstance(by, (str, pl.Expr)):
+            _by = by
+        else:
+            _by = tuple(by)
+        return LoaderGroup._from_loader(self, _by)
 
     def _get_output_shape(self, output_shape: _ShapeType) -> tuple[pixel, ...]:
         if output_shape is None:

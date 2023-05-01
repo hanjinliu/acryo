@@ -190,21 +190,37 @@ def compute(arg: _DaskComputable[_R]) -> list[_R]:
 def compute(
     arg: tuple[_DaskComputable[_R], _DaskComputable[_R1]]
 ) -> tuple[list[_R], list[_R1]]:
-    ...  # fmt: skip
+    ...
 
 
 @overload
 def compute(
     arg: tuple[_DaskComputable[_R], _DaskComputable[_R1], _DaskComputable[_R2]]
 ) -> tuple[list[_R], list[_R1], list[_R2]]:
-    ...  # fmt: skip
+    ...
 
 
-def compute(arg: _DaskComputable[_R] | tuple[_DaskComputable[_R], ...]):
+@overload
+def compute(
+    arg: Sequence[_DaskComputable[_R]],
+) -> list[list[_R]]:
+    ...
+
+
+def compute(
+    arg: _DaskComputable | tuple[_DaskComputable, ...] | Sequence[_DaskComputable]
+):
     """Compute dask tasks"""
     from dask import compute
 
     if isinstance(arg, _DaskComputable):
         return arg.compute()
 
-    return tuple(compute([a._as_dask_list() for a in arg])[0])
+    elif isinstance(arg, tuple):
+        return tuple(compute([a._as_dask_list() for a in arg])[0])
+
+    elif isinstance(arg, list):
+        return compute([a._as_dask_list() for a in arg])[0]
+
+    else:
+        raise TypeError(f"Invalid type: {type(arg)}")

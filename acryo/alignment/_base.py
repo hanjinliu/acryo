@@ -39,9 +39,7 @@ MaskType = Union[
     Callable[[NDArray[np.float32]], NDArray[np.float32]],
     None,
 ]
-AlignmentFactory = Callable[
-    [TemplateType, Union[NDArray[np.float32], None]], "BaseAlignmentModel"
-]
+AlignmentFactory = Callable[[TemplateType, MaskType], "BaseAlignmentModel"]
 
 
 class AlignmentResult(NamedTuple):
@@ -151,6 +149,11 @@ class BaseAlignmentModel(ABC):
     def input_shape(self) -> tuple[int, ...]:
         """Return the array shape of input images and template."""
         return self._template.shape[-self._ndim :]
+
+    @property
+    def has_rotation(self) -> bool:
+        """If the alignment model has rotation optimization."""
+        return False
 
     @classmethod
     def with_params(

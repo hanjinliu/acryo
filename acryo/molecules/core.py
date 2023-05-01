@@ -25,10 +25,11 @@ from acryo.molecules._rotation import (
 
 if TYPE_CHECKING:
     from typing_extensions import Self, TypeGuard
-    from polars.type_aliases import IntoExpr, ParquetCompression
+    from polars.type_aliases import ParquetCompression
 
 _CSV_COLUMNS = ["z", "y", "x", "zvec", "yvec", "xvec"]
 PathLike = Union[str, Path, bytes]
+IntoExpr = Union[str, pl.Expr]
 
 
 class Molecules:
@@ -913,14 +914,22 @@ class Molecules:
         return self.__class__(pos, Rotation.from_quat(rot), features=feat)
 
     @overload
-    def groupby(self, by: str | pl.Expr) -> MoleculeGroup[str]:
+    def groupby(self, by: IntoExpr) -> MoleculeGroup[str]:
         ...
 
     @overload
-    def groupby(self, by: Sequence[str | pl.Expr]) -> MoleculeGroup[tuple[str, ...]]:
+    def groupby(
+        self, by: Sequence[IntoExpr] | tuple[IntoExpr, ...]
+    ) -> MoleculeGroup[tuple[str, ...]]:
         ...
 
-    def groupby(self, by: IntoExpr | Iterable[IntoExpr], *more_by: IntoExpr):
+    @overload
+    def groupby(
+        self, by: IntoExpr, *more_by: IntoExpr
+    ) -> MoleculeGroup[tuple[str, ...]]:
+        ...
+
+    def groupby(self, by, *more_by):
         """Group molecules into sub-groups."""
         df = self.to_dataframe()
         return MoleculeGroup(df.groupby(by, *more_by, maintain_order=True))

@@ -3,13 +3,14 @@ from __future__ import annotations
 
 from typing import (
     Generic,
-    Hashable,
     Iterable,
     Iterator,
     Mapping,
+    Sequence,
     TypeVar,
     TYPE_CHECKING,
     Union,
+    overload,
 )
 import numpy as np
 from numpy.typing import NDArray
@@ -19,12 +20,13 @@ from dask import array as da
 from acryo.alignment import (
     BaseAlignmentModel,
     ZNCCAlignment,
-    RotationImplemented,
     AlignmentFactory,
+    AlignmentResult,
 )
 
-from acryo._types import nm
 from acryo import _utils
+from acryo._types import nm
+from acryo._dask import compute, DaskTaskList
 from acryo.loader import _misc
 
 if TYPE_CHECKING:
@@ -32,14 +34,17 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
     from acryo.loader._base import (
         LoaderBase,
+        Unset,
         _ShapeType,
         TemplateInputType,
         MaskInputType,
         AggFunction,
     )
 
+IntoExpr = Union[str, pl.Expr]
 _K = TypeVar("_K", bound=Union[str, tuple[str, ...]])
 _L = TypeVar("_L", bound="LoaderBase")
+_R = TypeVar("_R")
 
 
 class LoaderGroup(Generic[_K, _L]):
@@ -56,8 +61,20 @@ class LoaderGroup(Generic[_K, _L]):
         """All the keys in the group."""
         return [key for key, _ in self._it]
 
+    @overload
     @classmethod
-    def _from_loader(cls, loader: _L, by: _K) -> LoaderGroup[_K, _L]:
+    def _from_loader(cls, loader: _L, by: IntoExpr) -> LoaderGroup[str, _L]:
+        ...
+
+    @overload
+    @classmethod
+    def _from_loader(
+        cls, loader: _L, by: tuple[IntoExpr, ...]
+    ) -> LoaderGroup[tuple[str, ...], _L]:
+        ...
+
+    @classmethod
+    def _from_loader(cls, loader: _L, by: IntoExpr | tuple[IntoExpr, ...]):  # type: ignore[override]
         return cls(
             LoaderGroupByIterator(
                 loader,
@@ -77,13 +94,10 @@ class LoaderGroup(Generic[_K, _L]):
     ) -> dict[_K, NDArray[np.float32]]:
         """Calculate average images."""
         tasks = []
-        keys: list[Hashable] = []
+        keys: list[_K] = []
         for key, loader in self:
             keys.append(key)
-            if output_shape is None:
-                _output_shape = loader.output_shape
-            else:
-                _output_shape = output_shape
+            _output_shape = loader._get_output_shape(output_shape)
             dsk = loader.construct_dask(_output_shape)
             tasks.append(da.mean(dsk, axis=0))
 
@@ -185,12 +199,13 @@ class LoaderGroup(Generic[_K, _L]):
         LoaderGroup
             A loader group instance with updated molecules.
         """
-        all_tasks: list[list[da.Array | Delayed]] = []
+        all_tasks: list[DaskTaskList[AlignmentResult]] = []
         template_map = _normalize_template(template)
+        input_shape: tuple[int, int, int] | None = None
         for key, loader in self:
             model = alignment_model(
-                template=loader.normalize_template(template_map[key]),
-                mask=loader.normalize_mask(mask),
+                loader.normalize_template(template_map[key]),
+                loader.normalize_mask(mask),
                 **align_kwargs,
             )
             _max_shifts_px = np.asarray(max_shifts) / loader.scale
@@ -203,11 +218,16 @@ class LoaderGroup(Generic[_K, _L]):
                     pos=loader.molecules.pos / loader.scale,
                 ),
             )
-            all_tasks.append(list(tasks))
-        all_results = da.compute(all_tasks)[0]
+            all_tasks.append(tasks)
+            input_shape = model.input_shape
+
+        if input_shape is None:
+            raise RuntimeError("LoaderGroup has no loader.")
+
+        all_results = compute(all_tasks)
         out: list[tuple[_K, _L]] = []
         for (key, loader), results in zip(self, all_results):
-            new = loader._post_align(results, model.input_shape)
+            new = loader._post_align(results, input_shape)
             out.append((key, new))
         return self.__class__(out)
 
@@ -291,13 +311,15 @@ class LoaderGroup(Generic[_K, _L]):
         LoaderGroup
             A loader group with updated molecules.
         """
-        all_tasks: list[list[Delayed]] = []
+        all_tasks: list[DaskTaskList[AlignmentResult]] = []
         template_map = _normalize_template(templates)
+        input_shape: tuple[int, int, int] | None = None
+        has_rotation = False
         for key, loader in self:
             _tmps = template_map[key]
             model = alignment_model(
                 template=[loader.normalize_template(t) for t in _tmps],
-                mask=mask,
+                mask=loader.normalize_mask(mask),
                 **align_kwargs,
             )
             _max_shifts_px = np.asarray(max_shifts) / loader.scale
@@ -310,9 +332,15 @@ class LoaderGroup(Generic[_K, _L]):
                     pos=loader.molecules.pos / loader.scale,
                 ),
             )
-            all_tasks.append(list(tasks))
-        all_results = da.compute(all_tasks)[0]
-        if isinstance(model, RotationImplemented) and model._n_rotations > 1:
+            all_tasks.append(tasks)
+            input_shape = model.input_shape
+            has_rotation = model.has_rotation
+
+        if input_shape is None:
+            raise RuntimeError("LoaderGroup has no loader.")
+
+        all_results = compute(all_tasks)
+        if has_rotation:
             remainder = len(templates)
         else:
             remainder = -1
@@ -320,7 +348,7 @@ class LoaderGroup(Generic[_K, _L]):
         for (key, loader), results in zip(self, all_results):
             new = loader._post_align_multi_templates(
                 results,
-                model.input_shape,
+                input_shape,
                 remainder,
                 label_name,
             )
@@ -329,7 +357,7 @@ class LoaderGroup(Generic[_K, _L]):
 
     def apply(
         self,
-        funcs: AggFunction | list[AggFunction],
+        funcs: AggFunction[_R] | Sequence[AggFunction[_R]],
         schema: list[str] | None = None,
     ) -> dict[_K, pl.DataFrame]:
         """
@@ -348,7 +376,7 @@ class LoaderGroup(Generic[_K, _L]):
             Result tables for each group.
         """
         all_tasks: list[list[Delayed]] = []
-        if not hasattr(funcs, "__iter__"):
+        if not isinstance(funcs, Sequence):
             _funcs = [funcs]
         else:
             _funcs = funcs
@@ -356,13 +384,14 @@ class LoaderGroup(Generic[_K, _L]):
             schema = [fn.__name__ for fn in _funcs]
         if len(set(schema)) != len(schema):
             raise ValueError("Schema names must be unique.")
-        keys: list[str] = []
+        keys: list[_K] = []
         for key, loader in self:
+            output_shape = loader.output_shape
+            if not isinstance(output_shape, tuple):
+                raise ValueError("LoaderGroup has no output shape.")
             taskset = []
             for fn in _funcs:
-                tasks = loader.construct_mapping_tasks(
-                    fn, output_shape=loader.output_shape
-                )
+                tasks = loader.construct_mapping_tasks(fn, output_shape=output_shape)
                 taskset.append(list(tasks))
             all_tasks.append(taskset)
             keys.append(key)
@@ -374,7 +403,7 @@ class LoaderGroup(Generic[_K, _L]):
 
     def fsc(
         self,
-        mask: TemplateInputType = None,
+        mask: TemplateInputType | None = None,
         seed: int | None = 0,
         n_set: int = 1,
         dfreq: float = 0.05,
@@ -463,10 +492,10 @@ class LoaderGroupByIterator(Iterable[tuple[_K, _L]]):
     def __init__(
         self,
         loader: _L,
-        by: _K,
+        by: IntoExpr | Sequence[IntoExpr],
         order: int,
         scale: float,
-        output_shape: tuple[int, int, int] | None,
+        output_shape: tuple[int, int, int] | Unset | None,
         corner_safe: bool,
     ):
         self._loader = loader
@@ -494,7 +523,7 @@ class LoaderGroupByIterator(Iterable[tuple[_K, _L]]):
             if cached is not None:
                 sl = mole.features[index_col_name].to_numpy()
                 loader._CACHE.cache_array(cached[sl], id(_loader))
-            yield key, _loader
+            yield key, _loader  # type: ignore
 
 
 _T = TypeVar("_T")

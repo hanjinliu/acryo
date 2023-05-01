@@ -5,7 +5,7 @@
 
 `acryo` is an extensible cryo-EM/ET toolkit for Python.
 
-The purpose of this library is to make data analysis of cryo-EM/ET more safe, efficient and reproducible.
+The purpose of this library is to make data analysis of cryo-EM/ET safer, efficient, reproducible and customizable for everyone.
 Scientists can avoid the error-prone CLI-based data handling, such as writing out the results to the files every time and manage all the result just by the file names.
 
 [📘 Documentation](https://hanjinliu.github.io/acryo/)
