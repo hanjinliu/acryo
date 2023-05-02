@@ -9,17 +9,25 @@ if TYPE_CHECKING:
     Mode = Literal["constant", "nearest", "mirror", "wrap", "reflect"]
 
     def fftn(
-        img: NDArray[np.float32] | NDArray[np.complex64], axes=None
+        img: NDArray[np.float32] | NDArray[np.complex64], s=None, axes=None
     ) -> NDArray[np.complex64]:
         ...
 
-    def ifftn(img: NDArray[np.complex64], axes=None) -> NDArray[np.complex64]:
+    def ifftn(img: NDArray[np.complex64], s=None, axes=None) -> NDArray[np.complex64]:
         ...
 
-    def rfftn(img: NDArray[np.float32]) -> NDArray[np.complex64]:
+    def rfftn(img: NDArray[np.float32], s=None, axes=None) -> NDArray[np.complex64]:
         ...
 
-    def irfftn(img: NDArray[np.complex64]) -> NDArray[np.float32]:
+    def irfftn(img: NDArray[np.complex64], s=None, axes=None) -> NDArray[np.float32]:
+        ...
+
+    def convolve(
+        in1: NDArray[np.float32],
+        in2: NDArray[np.float32],
+        mode: Literal["full", "valid", "same"] = "full",
+        method: Literal["auto", "fft", "direct"] = "auto",
+    ) -> NDArray[np.float32]:
         ...
 
     def spline_filter(
@@ -57,6 +65,7 @@ if TYPE_CHECKING:
 else:
     from scipy.fft import rfftn, irfftn, fftn, ifftn
     from scipy.ndimage import spline_filter, affine_transform, map_coordinates
+    from scipy.signal import convolve
 
 __all__ = [
     "fftn",
@@ -66,4 +75,5 @@ __all__ = [
     "spline_filter",
     "affine_transform",
     "map_coordinates",
+    "convolve",
 ]

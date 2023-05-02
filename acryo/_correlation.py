@@ -3,10 +3,9 @@ from functools import lru_cache
 from typing import Sequence, TypeVar
 import numpy as np
 from numpy.typing import NDArray
+from scipy.fft import next_fast_len
 
-from scipy.signal import fftconvolve
-
-from acryo._typed_scipy import ifftn, map_coordinates
+from acryo._typed_scipy import rfftn, irfftn, ifftn, map_coordinates
 from acryo._types import pixel
 
 # cross correlation
@@ -101,11 +100,9 @@ def _upsampled_dft(
     dim_properties = list(zip(data.shape, upsampled_region_sizes, axis_offsets))
 
     for n_items, ups_size, ax_offset in dim_properties[::-1]:
-        kernel = (np.arange(ups_size) - ax_offset)[  # type: ignore
+        kernel = (np.arange(ups_size, dtype=np.float32) - ax_offset)[
             :, np.newaxis
-        ] * np.fft.fftfreq(  # type: ignore
-            n_items, upsample_factor
-        )
+        ] * np.fft.fftfreq(n_items, upsample_factor).astype(np.float32)
         kernel = np.exp(-2j * np.pi * kernel)
 
         data = np.tensordot(kernel, data, axes=(1, -1))  # type: ignore
@@ -132,23 +129,17 @@ def crop_by_max_shifts(power: NDArray[_DType], left, right) -> NDArray[_DType]:
 def ncc_landscape(
     img0: NDArray[np.float32],
     img1: NDArray[np.float32],
-    max_shifts: tuple[float, ...] | None = None,
+    max_shifts: tuple[float, ...],
 ) -> NDArray[np.float32]:
-    ndim = img1.ndim
     if max_shifts is not None:
         max_shifts = tuple(max_shifts)
-    pad_width, sl = _get_padding_params(img0.shape, img1.shape, max_shifts)
-    padimg = np.pad(img0[sl], pad_width=pad_width, mode="constant", constant_values=0)
+    pad_width = _get_padding_width(max_shifts)
+    padimg = np.pad(img0, pad_width=pad_width, mode="constant", constant_values=0)
 
-    corr: NDArray[np.float32] = fftconvolve(
-        padimg, img1[(slice(None, None, -1),) * ndim], mode="valid"
-    )[
-        (slice(1, -1, None),) * ndim
-    ]  # type: ignore
+    corr = fftconvolve(padimg, img1[::-1, ::-1, ::-1])[1:-1, 1:-1, 1:-1]
 
-    _win_sum = _window_sum_2d if ndim == 2 else _window_sum_3d
-    win_sum1 = _win_sum(padimg, img1.shape)
-    win_sum2 = _win_sum(padimg**2, img1.shape)
+    win_sum1 = _window_sum_3d(padimg, img1.shape)
+    win_sum2 = _window_sum_3d(padimg**2, img1.shape)
 
     template_mean = np.mean(img1, dtype=np.float32)
     template_volume = np.prod(img1.shape)
@@ -169,16 +160,10 @@ def ncc_landscape_no_pad(
     img: NDArray[np.float32],
     template: NDArray[np.float32],
 ) -> NDArray[np.float32]:
-    ndim = template.ndim
-    corr: NDArray[np.float32] = fftconvolve(
-        img, template[(slice(None, None, -1),) * ndim], mode="valid"
-    )[
-        (slice(1, -1, None),) * ndim
-    ]  # type: ignore
+    corr = fftconvolve(img, template[::-1, ::-1, ::-1])[1:-1, 1:-1, 1:-1]
 
-    _win_sum = _window_sum_2d if ndim == 2 else _window_sum_3d
-    win_sum1 = _win_sum(img, template.shape)
-    win_sum2 = _win_sum(img**2, template.shape)
+    win_sum1 = _window_sum_3d(img, template.shape)
+    win_sum2 = _window_sum_3d(img**2, template.shape)
 
     template_mean = np.mean(template)
     template_volume = np.prod(template.shape)
@@ -198,15 +183,12 @@ def ncc_landscape_no_pad(
 def zncc_landscape_with_crop(
     img0: NDArray[np.float32],
     img1: NDArray[np.float32],
-    max_shifts: tuple[float, ...] | None = None,
+    max_shifts: tuple[float, ...],
 ):
     response = ncc_landscape(img0 - img0.mean(), img1 - img1.mean(), max_shifts)
-    if max_shifts is None:
-        pad_width_eff = (3,) * img1.ndim
-    else:
-        pad_width_eff = tuple(
-            (s - int(m) * 2 - 1) // 2 for m, s in zip(max_shifts, response.shape)
-        )
+    pad_width_eff = tuple(
+        (s - int(m) * 2 - 1) // 2 for m, s in zip(max_shifts, response.shape)
+    )
     sl_res = tuple(slice(w, -w, None) for w in pad_width_eff)
     return response[sl_res]
 
@@ -215,19 +197,16 @@ def subpixel_zncc(
     img0: NDArray[np.float32],
     img1: NDArray[np.float32],
     upsample_factor: int,
-    max_shifts: pixel | tuple[pixel, ...] | None = None,
+    max_shifts: pixel | tuple[pixel, ...],
 ) -> tuple[np.ndarray, float]:
     img0 -= img0.mean()
     img1 -= img1.mean()
     if isinstance(max_shifts, (int, float)):
         max_shifts = (max_shifts,) * img0.ndim
     response = ncc_landscape(img0, img1, max_shifts)
-    if max_shifts is None:
-        pad_width_eff = (3,) * img1.ndim
-    else:
-        pad_width_eff = tuple(
-            (s - int(m) * 2 - 1) // 2 for m, s in zip(max_shifts, response.shape)
-        )
+    pad_width_eff = tuple(
+        (s - int(m) * 2 - 1) // 2 for m, s in zip(max_shifts, response.shape)
+    )
     sl_res = tuple(slice(w, -w, None) for w in pad_width_eff)
     response_center = response[sl_res]
     maxima = np.unravel_index(np.argmax(response_center), response_center.shape)
@@ -256,25 +235,24 @@ def subpixel_zncc(
     return np.asarray(shifts, dtype=np.float32), zncc
 
 
-# Identical to skimage.feature.template, but compatible between numpy and cupy.
-def _window_sum_2d(image, window_shape):
+def _window_sum_2d(image: NDArray[np.float32], window_shape: tuple[int, int, int]):
     window_sum = np.cumsum(image, axis=0)
-    window_sum = window_sum[window_shape[0] : -1] - window_sum[: -window_shape[0] - 1]  # type: ignore
+    window_sum = window_sum[window_shape[0] : -1] - window_sum[: -window_shape[0] - 1]
     window_sum = np.cumsum(window_sum, axis=1)
     window_sum = (
         window_sum[:, window_shape[1] : -1] - window_sum[:, : -window_shape[1] - 1]
-    )  # type: ignore
+    )
 
     return window_sum
 
 
-def _window_sum_3d(image, window_shape):
+def _window_sum_3d(image: NDArray[np.float32], window_shape: tuple[int, int, int]):
     window_sum = _window_sum_2d(image, window_shape)
     window_sum = np.cumsum(window_sum, axis=2)
     window_sum = (
         window_sum[:, :, window_shape[2] : -1]
         - window_sum[:, :, : -window_shape[2] - 1]
-    )  # type: ignore
+    )
 
     return window_sum
 
@@ -288,51 +266,33 @@ def _safe_sqrt(a: np.ndarray, fill: float = 0.0):
 
 
 @lru_cache(maxsize=12)
-def _get_padding_params(
-    shape0: tuple[int, ...],
-    shape1: tuple[int, ...],
-    max_shifts: tuple[int, ...] | None,
-) -> tuple[list[tuple[int, ...]], tuple[slice, ...] | slice]:
-    if max_shifts is None:
-        pad_width = [(w, w) for w in shape1]
-        sl = slice(None)
-    else:
-        pad_width: list[tuple[int, ...]] = []
-        _sl: list[slice] = []
-        for w, s0, s1 in zip(max_shifts, shape0, shape1):
-            w_int = int(np.ceil(w + 3 - (s0 - s1) / 2))
-            if w_int >= 0:
-                pad_width.append((w_int,) * 2)
-                _sl.append(slice(None))
-            else:
-                pad_width.append((0,) * 2)
-                _sl.append(slice(-w_int, w_int, None))
-        sl = tuple(_sl)
+def _get_padding_width(max_shifts: tuple[int, ...]) -> list[tuple[int, ...]]:
+    pad_width: list[tuple[int, ...]] = []
+    for w in max_shifts:
+        w_int = int(np.ceil(w + 3))
+        pad_width.append((w_int,) * 2)
 
-    return pad_width, sl
+    return pad_width
 
 
 def _create_mesh(
     upsample_factor: int,
     maxima: Sequence[np.intp],
-    max_shifts: Sequence[pixel] | None,
+    max_shifts: Sequence[pixel],
     midpoints: NDArray[np.float32],
     pad_width_eff: Sequence[pixel],
 ):
-    if max_shifts is not None:
-        shifts = np.array(maxima, dtype=np.float32) - midpoints
-        _max_shifts = np.array(max_shifts, dtype=np.float32)  # type: ignore
-        left = -shifts - _max_shifts
-        right = -shifts + _max_shifts
-        local_shifts = tuple(
-            [
-                int(np.round(max(shiftl, -1) * upsample_factor)),
-                int(np.round(min(shiftr, 1) * upsample_factor)),
-            ]
-            for shiftl, shiftr in zip(left, right)
-        )
-    else:
-        local_shifts = ([-upsample_factor, upsample_factor],) * len(maxima)
+    shifts = np.array(maxima, dtype=np.float32) - midpoints
+    _max_shifts = np.array(max_shifts, dtype=np.float32)  # type: ignore
+    left = -shifts - _max_shifts
+    right = -shifts + _max_shifts
+    local_shifts = tuple(
+        [
+            int(np.round(max(shiftl, -1) * upsample_factor)),
+            int(np.round(min(shiftr, 1) * upsample_factor)),
+        ]
+        for shiftl, shiftr in zip(left, right)
+    )
     mesh = np.meshgrid(
         *[
             np.arange(s0, s1 + 1) / upsample_factor + m + w
@@ -341,3 +301,37 @@ def _create_mesh(
         indexing="ij",
     )
     return np.stack(mesh, axis=0)
+
+
+def fftconvolve(in1: NDArray[np.float32], in2: NDArray[np.float32]):
+    s1 = in1.shape
+    s2 = in2.shape
+
+    # shape = in1.shape
+    shape = [s1[i] + s2[i] - 1 for i in range(in1.ndim)]
+
+    ret = _freq_domain_conv(in1, in2, shape)
+
+    return _apply_conv_mode(ret, s1, s2)
+
+
+def _freq_domain_conv(in1: NDArray[np.float32], in2: NDArray[np.float32], shape):
+    fshape = [next_fast_len(shape[a], False) for a in range(in1.ndim)]
+
+    sp1 = rfftn(in1, fshape)
+    sp2 = rfftn(in2, fshape)
+    ret = irfftn(sp1 * sp2, fshape)
+
+    fslice = tuple([slice(sz) for sz in shape])
+    ret = ret[fslice]
+
+    return ret
+
+
+def _apply_conv_mode(ret: NDArray[np.float32], s1, s2):
+    shape_valid = np.asarray([s1[a] - s2[a] + 1 for a in range(ret.ndim)])
+    currshape = np.array(ret.shape)
+    startind = (currshape - shape_valid) // 2
+    endind = startind + shape_valid
+    myslice = [slice(startind[k], endind[k]) for k in range(len(endind))]
+    return ret[tuple(myslice)]

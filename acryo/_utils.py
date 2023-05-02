@@ -289,14 +289,15 @@ def _get_indices(shape: tuple[int, ...]) -> NDArray[np.float32]:
 
 
 # lowpass filter
-# Modified from skimage.filters._fft_based
+
+
 def lowpass_filter_ft(
     img: NDArray[np.float32], cutoff: float, order: int = 2
 ) -> NDArray[np.complex64]:
     """Apply a low-pass filter and return the result in Fourier space."""
     if cutoff >= 0.5 * np.sqrt(img.ndim) or cutoff <= 0:
         return fftn(img)
-    weight = _get_ND_butterworth_filter(
+    weight = nd_butterworth_weight(
         img.shape,
         cutoff,
         order,
@@ -311,7 +312,7 @@ def lowpass_filter(
     """Apply a low-pass filter and return the result in real space."""
     if cutoff >= 0.5 * np.sqrt(img.ndim) or cutoff <= 0:
         return img
-    weight = _get_ND_butterworth_filter(
+    weight = nd_butterworth_weight(
         img.shape,
         cutoff,
         order,
@@ -327,7 +328,7 @@ def highpass_filter_ft(
     """Apply a high-pass filter and return the result in Fourier space."""
     if cutoff >= 0.5 * np.sqrt(img.ndim) or cutoff <= 0:
         return np.zeros_like(img)
-    weight = 1 - _get_ND_butterworth_filter(
+    weight = 1 - nd_butterworth_weight(
         img.shape,
         cutoff,
         order,
@@ -342,7 +343,7 @@ def highpass_filter(
     """Apply a high-pass filter and return the result in real space."""
     if cutoff >= 0.5 * np.sqrt(img.ndim) or cutoff <= 0:
         return np.zeros_like(img)
-    weight = 1 - _get_ND_butterworth_filter(
+    weight = 1 - nd_butterworth_weight(
         img.shape,
         cutoff,
         order,
@@ -352,8 +353,9 @@ def highpass_filter(
     return out.real
 
 
+# Modified from skimage.filters._fft_based
 @lru_cache(maxsize=4)
-def _get_ND_butterworth_filter(
+def nd_butterworth_weight(
     shape: tuple[int, ...],
     cutoff: float,
     order: int,
