@@ -8,7 +8,6 @@ from functools import lru_cache, reduce, wraps
 import numpy as np
 from numpy.typing import NDArray
 from dask import array as da
-from dask.delayed import delayed
 from scipy import ndimage as ndi
 from scipy.spatial.transform import Rotation
 from acryo._typed_scipy import fftn, rfftn, irfftn
@@ -210,23 +209,6 @@ def prepare_affine_cornersafe(
         input = img0
     mtx = compose_matrices(new_center, [rot], output_center=output_center)[0]
     return input, mtx
-
-
-_delayed_affine_transform = delayed(ndi.affine_transform)
-
-
-def delayed_affine(
-    input: np.ndarray,
-    matrix: np.ndarray,
-    order: int = 3,
-    mode: str = "constant",
-    cval: float = 0.0,
-    prefilter: bool = True,
-) -> da.Array:
-    out = _delayed_affine_transform(
-        input, matrix, order=order, mode=mode, cval=cval, prefilter=prefilter
-    )
-    return da.from_delayed(out, shape=input.shape, dtype=input.dtype)  # type: ignore
 
 
 def missing_wedge_mask(

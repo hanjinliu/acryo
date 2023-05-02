@@ -8,11 +8,11 @@ from typing import (
     Any,
 )
 import numpy as np
-from scipy import ndimage as ndi
 from dask import array as da
 
 from acryo._types import nm, pixel
 from acryo._reader import imread
+from acryo._typed_scipy import affine_transform
 from acryo.molecules import Molecules
 from acryo import _utils
 from acryo.loader import _misc
@@ -236,7 +236,6 @@ class SubtomogramLoader(LoaderBase):
                 mtx,
                 shape=output_shape,
                 order=self.order,
-                mode="constant",
                 cval=np.mean,
             )
 
@@ -283,19 +282,18 @@ def _rotated_crop(
     mtx: NDArray[np.float32],
     shape: tuple[int, int, int],
     order: int,
-    mode: str,
     cval: float | Callable[[NDArray[np.float32]], float],
 ) -> NDArray[np.float32]:
     if callable(cval):
         cval = cval(subimg)
 
-    out = ndi.affine_transform(
+    out = affine_transform(
         subimg,
         matrix=mtx,
         output_shape=shape,
         order=order,
         prefilter=order > 1,
-        mode=mode,
+        mode="constant",
         cval=cval,
     )
-    return out  # type: ignore
+    return out
