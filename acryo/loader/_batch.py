@@ -12,6 +12,7 @@ from dask import array as da
 
 from acryo import _utils
 from acryo.molecules import Molecules
+from acryo.backend import Backend
 from acryo._types import nm, pixel
 from acryo._dask import DaskArrayList
 from acryo.loader._base import LoaderBase
@@ -165,9 +166,14 @@ class BatchLoader(LoaderBase):
         out._images = _images
         return out
 
-    def construct_loading_tasks(self, output_shape: _ShapeType = None) -> DaskArrayList:
+    def construct_loading_tasks(
+        self,
+        output_shape: _ShapeType = None,
+        backend: Backend | None = None,
+    ) -> DaskArrayList:
+        _backend = backend or Backend()
         return DaskArrayList.concat(
-            loader.construct_loading_tasks(output_shape=output_shape)
+            loader.construct_loading_tasks(output_shape=output_shape, backend=_backend)
             for loader in self.loaders
         )
 

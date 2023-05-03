@@ -14,6 +14,7 @@ from acryo._types import nm, pixel
 from acryo._reader import imread
 from acryo._typed_scipy import affine_transform
 from acryo.molecules import Molecules
+from acryo.backend import Backend
 from acryo import _utils
 from acryo.loader import _misc
 from acryo.loader._base import LoaderBase, Unset, _ShapeType
@@ -201,6 +202,7 @@ class SubtomogramLoader(LoaderBase):
     def construct_loading_tasks(
         self,
         output_shape: _ShapeType = None,
+        backend: Backend | None = None,
     ) -> DaskArrayList:
         """
         Construct a list of subtomogram lazy loader.
@@ -214,16 +216,17 @@ class SubtomogramLoader(LoaderBase):
         if (cached := self._get_cached_array(output_shape)) is not None:
             return DaskArrayList(cached[i] for i in range(len(self)))
 
+        _backend = backend or Backend()
         image = self.image
         scale = self.scale
         if isinstance(image, np.ndarray):
-            image = da.from_array(image)
+            image = da.from_array(image, asarray=_backend.asarray)
 
         if self.corner_safe:
             _prep = _utils.prepare_affine_cornersafe
         else:
             _prep = _utils.prepare_affine
-        pool = DaskTaskPool.from_func(_rotated_crop)
+        pool = DaskTaskPool.from_func(_backend.rotated_crop)
         for i in range(len(self)):
             subvol, mtx = _prep(
                 image,
@@ -236,7 +239,7 @@ class SubtomogramLoader(LoaderBase):
                 mtx,
                 shape=output_shape,
                 order=self.order,
-                cval=np.mean,
+                cval=_backend._xp_.mean,
             )
 
         return pool.asarrays(shape=output_shape, dtype=np.float32)

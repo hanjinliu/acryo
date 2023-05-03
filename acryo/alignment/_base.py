@@ -27,6 +27,7 @@ from acryo._utils import (
 )
 from acryo._typed_scipy import ifftn, spline_filter, affine_transform, map_coordinates
 from acryo._dask import DaskTaskPool, compute
+from acryo.backend import Backend
 from ._bound import ParametrizedModel
 
 if TYPE_CHECKING:
@@ -171,6 +172,7 @@ class BaseAlignmentModel(ABC):
         max_shifts: tuple[float, ...],
         quaternion: NDArray[np.float32],
         pos: NDArray[np.float32],
+        backend: Backend,
     ) -> tuple[NDArray[np.float32], NDArray[np.float32], float]:
         """
         Optimization of shift and rotation of subvolume.
@@ -252,6 +254,7 @@ class BaseAlignmentModel(ABC):
         max_shifts: tuple[float, float, float],
         quaternion: NDArray[np.float32] | None = None,
         pos: NDArray[np.float32] | None = None,
+        backend: Backend | None = None,
     ) -> AlignmentResult:
         """
         Align an image using current alignment parameters.
@@ -268,6 +271,7 @@ class BaseAlignmentModel(ABC):
         AlignmentResult
             Result of alignment.
         """
+        _backend = backend or Backend()
         if quaternion is None:
             _quat = self._DUMMY_QUAT
         else:
@@ -288,6 +292,7 @@ class BaseAlignmentModel(ABC):
             max_shifts,
             _quat,
             _pos,
+            _backend,
         )
 
     def fit(
@@ -295,6 +300,7 @@ class BaseAlignmentModel(ABC):
         img: NDArray[np.float32],
         max_shifts: tuple[float, float, float],
         cval: float | None = None,
+        backend: Backend | None = None,
     ) -> tuple[NDArray[np.float32], AlignmentResult]:
         """
         Fit image to template based on the alignment model.
@@ -313,11 +319,14 @@ class BaseAlignmentModel(ABC):
         np.ndarray, AlignmentResult
             Transformed input image and the alignment result.
         """
-        result = self.align(img, max_shifts=max_shifts, quaternion=None, pos=None)
+        _backend = backend or Backend()
+        result = self.align(
+            img, max_shifts=max_shifts, quaternion=None, pos=None, backend=_backend
+        )
         mtx = result.affine_matrix(img.shape)
         _cval = _normalize_cval(cval, img)
-        img_trans = affine_transform(img, mtx, cval=_cval)
-        return img_trans, result
+        img_trans = _backend.affine_transform(img, mtx, cval=_cval)
+        return _backend.asnumpy(img_trans), result
 
     def landscape(
         self,
@@ -430,6 +439,7 @@ class BaseAlignmentModel(ABC):
         max_shifts: tuple[float, float, float],
         quaternion: NDArray[np.float32],
         pos: NDArray[np.float32],
+        backend: Backend,
     ) -> AlignmentResult:
         out = self._optimize(
             self.pre_transform(subvolume * mask),
@@ -437,6 +447,7 @@ class BaseAlignmentModel(ABC):
             max_shifts=max_shifts,
             quaternion=quaternion,
             pos=pos,
+            backend=backend,
         )
         return AlignmentResult(0, *out)
 
@@ -448,6 +459,7 @@ class BaseAlignmentModel(ABC):
         max_shifts: tuple[float, float, float],
         quaternion: NDArray[np.float32],
         pos: NDArray[np.float32],
+        backend: Backend,
     ) -> AlignmentResult:
         all_shifts: list[np.ndarray] = []
         all_quat: list[np.ndarray] = []
@@ -459,6 +471,7 @@ class BaseAlignmentModel(ABC):
                 max_shifts=max_shifts,
                 quaternion=quaternion,
                 pos=pos,
+                backend=backend,
             )
             all_shifts.append(shift)
             all_quat.append(quat)
@@ -490,6 +503,9 @@ def optimize(self: BaseAlignmentModel, *args, **kwargs):
         "`optimize` is deprecated. It is now a private method.", DeprecationWarning
     )
     return self._optimize(*args, **kwargs)
+
+
+BaseAlignmentModel.optimize = optimize  # type: ignore
 
 
 class RotationImplemented(BaseAlignmentModel):
@@ -556,6 +572,7 @@ class RotationImplemented(BaseAlignmentModel):
         img: NDArray[np.float32],
         max_shifts: tuple[subpixel, subpixel, subpixel],
         cval: float | None = None,
+        backend: Backend | None = None,
     ) -> tuple[NDArray[np.float32], AlignmentResult]:
         """
         Fit image to template based on the alignment model.
@@ -577,6 +594,7 @@ class RotationImplemented(BaseAlignmentModel):
         np.ndarray, AlignmentResult
             Transformed input image and the alignment result.
         """
+        _backend = backend or Backend()
         pool = DaskTaskPool.from_func(self._optimize)
         pos = np.zeros(3, dtype=np.float32)
         for quat, tmp, mask in zip(
@@ -588,6 +606,7 @@ class RotationImplemented(BaseAlignmentModel):
                 max_shifts,
                 quat,
                 pos=pos,
+                backend=_backend,
             )
         results = pool.compute()
         scores = [x[2] for x in results]
@@ -602,8 +621,8 @@ class RotationImplemented(BaseAlignmentModel):
 
         mtx = result.affine_matrix(img.shape)
         _img_cval = _normalize_cval(cval, img)
-        img_trans = affine_transform(img, mtx, cval=_img_cval)
-        return img_trans, result
+        img_trans = _backend.affine_transform(img, mtx, cval=_img_cval)
+        return _backend.asnumpy(img_trans), result
 
     def _transform_template(
         self,
