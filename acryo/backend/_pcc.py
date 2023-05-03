@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import TypeVar
+import math
 import numpy as np
 from numpy.typing import NDArray
 
@@ -33,27 +34,23 @@ def subpixel_pcc(
     max_shifts: tuple[float, ...] | NDArray[np.number],
     backend: Backend,
 ) -> tuple[NDArray[np.float32], float]:
-    if isinstance(max_shifts, (int, float)):
-        max_shifts = (max_shifts,) * f0.ndim
     product = f0 * f1.conj()
     power = _abs2(backend.ifftn(product))
-    if max_shifts is not None:
-        max_shifts = backend.asarray(max_shifts)
-        power = crop_by_max_shifts(power, max_shifts, max_shifts, backend)
+    _max_shifts = backend.asarray(max_shifts)
+    _int_shifts = _max_shifts.astype(np.int32)
+    power = crop_by_max_shifts(power, _int_shifts, _int_shifts, backend)
 
     maxima = backend.unravel_index(backend.argmax(power), power.shape)
-    midpoints = backend.array(
-        [backend._xp_.fix(axis_size / 2) for axis_size in power.shape]
-    )
+    midpoints = backend.array([np.fix(axis_size / 2) for axis_size in power.shape])
 
     shifts = backend.asarray(maxima, dtype=np.float32)
     shifts[shifts > midpoints] -= backend.array(power.shape)[shifts > midpoints]
     # Initial shift estimate in upsampled grid
-    shifts = backend._xp_.fix(shifts * upsample_factor) / upsample_factor
+    shifts = backend.fix(shifts * upsample_factor) / upsample_factor
     if upsample_factor > 1:
         upsampled_region_size = backend._xp_.ceil(upsample_factor * 1.5)
         # Center of output array at dftshift + 1
-        dftshift = backend._xp_.fix(upsampled_region_size / 2.0)
+        dftshift = backend.fix(upsampled_region_size / 2.0)
         # Matrix multiply DFT around the current shift estimate
         sample_region_offset = dftshift - shifts * upsample_factor
         # Locate maximum and map back to original pixel grid
@@ -67,22 +64,20 @@ def subpixel_pcc(
             )
         )
 
-        if max_shifts is not None:
-            _upsampled_left_shifts = (shifts + max_shifts) * upsample_factor
-            _upsampled_right_shifts = (max_shifts - shifts) * upsample_factor
+        if _max_shifts is not None:
+            _lshift = (shifts + _max_shifts) * upsample_factor
+            _rshift = (_max_shifts - shifts) * upsample_factor
             power = crop_by_max_shifts(
-                power, _upsampled_left_shifts, _upsampled_right_shifts, backend
+                power, _lshift.astype(np.int32), _rshift.astype(np.int32), backend
             )
 
         maxima = backend.unravel_index(backend.argmax(power), power.shape)
         maxima = backend.asarray(maxima, dtype=np.float32) - dftshift
         shifts = shifts + maxima / upsample_factor
-        pcc = backend._xp_.sqrt(
-            power[tuple(int(backend._xp_.round(m)) for m in maxima)]
-        )
+        pcc = math.sqrt(power[tuple(int(round(m)) for m in maxima)])  # type: ignore
     else:
-        pcc = backend._xp_.sqrt(power[maxima])
-    return shifts, pcc
+        pcc = math.sqrt(power[maxima])  # type: ignore
+    return backend.asnumpy(shifts), pcc
 
 
 _DType = TypeVar("_DType", bound=np.number)
@@ -101,12 +96,10 @@ def _upsampled_dft(
     dim_properties = list(zip(data.shape, upsampled_region_sizes, axis_offsets))
 
     for n_items, ups_size, ax_offset in dim_properties[::-1]:
-        kernel = (backend._xp_.arange(ups_size, dtype=np.float32) - ax_offset)[
-            :, np.newaxis
-        ] * backend.fftfreq(n_items, upsample_factor).astype(np.float32)
-        kernel = backend._xp_.exp(-2j * np.pi * kernel)
-
-        data = backend._xp_.tensordot(kernel, data, axes=(1, -1))  # type: ignore
+        freq = backend.fftfreq(n_items, upsample_factor).astype(np.float32)
+        nth = backend.arange(ups_size, dtype=np.float32) - ax_offset
+        kernel = backend.exp(-2j * np.pi * (nth[:, np.newaxis] * freq))  # type: ignore
+        data = backend.tensordot(kernel, data, axes=(1, -1))
     return data
 
 
@@ -116,8 +109,8 @@ def _abs2(a: AnyArray[np.complex64]) -> AnyArray[np.float32]:
 
 def crop_by_max_shifts(
     power: AnyArray[_DType],
-    left: tuple[int, int, int],
-    right: tuple[int, int, int],
+    left: AnyArray[np.intp],
+    right: AnyArray[np.intp],
     backend: Backend,
 ) -> AnyArray[_DType]:
     shifted_power = backend.fftshift(power)

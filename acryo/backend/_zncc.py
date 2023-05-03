@@ -20,7 +20,7 @@ def ncc_landscape(
     if max_shifts is not None:
         max_shifts = tuple(max_shifts)
     pad_width = _get_padding_width(max_shifts)
-    padimg = np.pad(img0, pad_width=pad_width, mode="constant", constant_values=0)
+    padimg = backend.pad(img0, pad_width=pad_width, mode="constant", constant_values=0)
     return ncc_landscape_no_pad(padimg, img1, backend=backend)
 
 
@@ -35,7 +35,7 @@ def ncc_landscape_no_pad(
     win_sum2 = _window_sum_3d(img0**2, img1.shape, backend=backend)
 
     template_mean = img1.mean()
-    template_volume = np.prod(img1.shape)
+    template_volume = np.prod(img1.shape, dtype=np.float32)
     template_ssd = backend.sum((img1 - template_mean) ** 2)
 
     var = (win_sum2 - win_sum1**2 / template_volume) * template_ssd
@@ -100,20 +100,16 @@ def subpixel_zncc(
             response, coords, order=3, mode="constant", cval=-1.0, prefilter=True
         )
         local_maxima = backend.unravel_index(
-            np.argmax(local_response), local_response.shape
+            backend.argmax(local_response), local_response.shape
         )
         zncc = local_response[local_maxima]
-        shifts = (
-            backend.asnumpy(maxima)
-            - midpoints
-            + backend.asnumpy(local_maxima) / upsample_factor
-            - 1
-        )
+        loc_shift = backend.asnumpy(local_maxima) / upsample_factor - 1
+        shifts = backend.asnumpy(maxima - midpoints) + loc_shift
     else:
         zncc = response[maxima]
-        shifts = backend.asnumpy(maxima) - midpoints
+        shifts = backend.asnumpy(maxima - midpoints)
 
-    return shifts, zncc
+    return shifts, zncc  # type: ignore
 
 
 def _window_sum_2d(
@@ -121,9 +117,9 @@ def _window_sum_2d(
     window_shape: tuple[int, int, int],
     backend: Backend,
 ) -> AnyArray[np.float32]:
-    window_sum = np.cumsum(image, axis=0)
+    window_sum = backend.cumsum(image, axis=0)
     window_sum = window_sum[window_shape[0] : -1] - window_sum[: -window_shape[0] - 1]
-    window_sum = np.cumsum(window_sum, axis=1)
+    window_sum = backend.cumsum(window_sum, axis=1)
     window_sum = (
         window_sum[:, window_shape[1] : -1] - window_sum[:, : -window_shape[1] - 1]
     )
@@ -166,9 +162,9 @@ def _get_padding_width(max_shifts: tuple[int, ...]) -> list[tuple[int, ...]]:
 
 def _create_mesh(
     upsample_factor: int,
-    maxima: Sequence[np.intp],
+    maxima: AnyArray[np.intp],
     max_shifts: Sequence[pixel],
-    midpoints: NDArray[np.float32],
+    midpoints: AnyArray[np.float32],
     pad_width_eff: Sequence[pixel],
     backend: Backend,
 ):
@@ -178,16 +174,16 @@ def _create_mesh(
     right = -shifts + _max_shifts
     local_shifts = tuple(
         [
-            int(backend._xp_.round(max(shiftl, -1) * upsample_factor)),
-            int(backend._xp_.round(min(shiftr, 1) * upsample_factor)),
+            int(round(max(float(shiftl), -1.0) * upsample_factor)),
+            int(round(min(float(shiftr), 1.0) * upsample_factor)),
         ]
         for shiftl, shiftr in zip(left, right)
     )
     mesh = backend.meshgrid(
         *[
-            np.arange(s0, s1 + 1) / upsample_factor + m + w
+            backend.arange(s0, s1 + 1) / upsample_factor + m + w
             for (s0, s1), m, w in zip(local_shifts, maxima, pad_width_eff)
-        ],
+        ],  # type: ignore
         indexing="ij",
     )
     return backend.stack(mesh, axis=0)
@@ -205,7 +201,9 @@ def fftconvolve(
     shape = [s1[i] + s2[i] - 1 for i in range(in1.ndim)]
 
     # convolve in the frequency domain
-    fshape = [next_fast_len(shape[a], False) for a in range(in1.ndim)]
+    fshape: tuple[int, ...] = tuple(
+        next_fast_len(shape[a], False) for a in range(in1.ndim)
+    )  # type: ignore
 
     sp1 = backend.rfftn(in1, fshape)
     sp2 = backend.rfftn(in2, fshape)

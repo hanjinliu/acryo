@@ -44,11 +44,13 @@ class PCCAlignment(TomographyInput):
     ) -> NDArray[np.float32]:
         """Compute landscape."""
         mw = self._get_missing_wedge_mask(quaternion, backend)
-        return pcc_landscape(
-            subvolume * mw,
-            template * mw,
-            max_shifts=max_shifts,
-            backend=backend,
+        return backend.asnumpy(
+            pcc_landscape(
+                subvolume * mw,
+                template * mw,
+                max_shifts=max_shifts,
+                backend=backend,
+            )
         )
 
 
@@ -57,8 +59,8 @@ class ZNCCAlignment(TomographyInput):
 
     def _optimize(
         self,
-        subvolume: NDArray[np.complex64],
-        template: NDArray[np.complex64],
+        subvolume: AnyArray[np.complex64],
+        template: AnyArray[np.complex64],
         max_shifts: tuple[pixel, pixel, pixel],
         quaternion: NDArray[np.float32],
         pos: NDArray[np.float32],
@@ -77,8 +79,8 @@ class ZNCCAlignment(TomographyInput):
 
     def _landscape(
         self,
-        subvolume: NDArray[np.complex64],
-        template: NDArray[np.complex64],
+        subvolume: AnyArray[np.complex64],
+        template: AnyArray[np.complex64],
         max_shifts: tuple[float, float, float],
         quaternion: NDArray[np.float32],
         pos: NDArray[np.float32],
@@ -86,9 +88,11 @@ class ZNCCAlignment(TomographyInput):
     ) -> NDArray[np.float32]:
         """Compute landscape."""
         mw = self._get_missing_wedge_mask(quaternion, backend)
-        return zncc_landscape_with_crop(
-            backend.ifftn(subvolume * mw).real,
-            backend.ifftn(template * mw).real,
-            max_shifts=max_shifts,
-            backend=backend,
+        return backend.asnumpy(
+            zncc_landscape_with_crop(
+                backend.ifftn(subvolume * mw).real,
+                backend.ifftn(template * mw).real,
+                max_shifts=max_shifts,
+                backend=backend,
+            )
         )

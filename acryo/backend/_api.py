@@ -1,7 +1,16 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Any, Callable, Literal, Generic, Sequence, TypeVar, overload
+from typing import (
+    Any,
+    Callable,
+    Iterator,
+    Literal,
+    Generic,
+    Sequence,
+    TypeVar,
+    overload,
+)
 import numpy as np
 from numpy.typing import NDArray
 from . import _bandpass, _missing_wedge
@@ -18,17 +27,23 @@ class AnyArray(Generic[_T]):
     Type representing a ndarray of numpy or cupy (or any other array
     that has similar API).
     """
-    def __add__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...  # type: ignore
-    def __sub__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...  # type: ignore
-    def __mul__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...  # type: ignore
-    def __truediv__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...  # type: ignore
+    def __pos__(self) -> AnyArray[_T]: ...
+    def __neg__(self) -> AnyArray[_T]: ...
+    def __invert__(self) -> AnyArray[_T]: ...
+    def __add__(self, other: Any) -> AnyArray[_T]: ...  # type: ignore
+    def __sub__(self, other: Any) -> AnyArray[_T]: ...  # type: ignore
+    def __mul__(self, other: Any) -> AnyArray[_T]: ...  # type: ignore
+    def __truediv__(self, other: Any) -> AnyArray[np.float_]: ...  # type: ignore
+    def __floordiv__(self, other: Any) -> AnyArray[np.intp]: ...  # type: ignore
     def __gt__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...  # type: ignore
     def __lt__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...  # type: ignore
     def __ge__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...  # type: ignore
     def __le__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...  # type: ignore
     def __eq__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...  # type: ignore
+    def __pow__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...  # type: ignore
     def __getitem__(self, key) -> AnyArray[_T]: ...  # type: ignore
-    def __iter__(self) -> AnyArray[_T]: ...  # type: ignore
+    def __setitem__(self, key, value) -> None: ...  # type: ignore
+    def __iter__(self) -> Iterator[_T]: ...  # type: ignore
     @property
     def real(self) -> AnyArray[np.float32]: ...  # type: ignore
     @property
@@ -41,7 +56,7 @@ class AnyArray(Generic[_T]):
     @property
     def dtype(self) -> np.dtype[_T]: ...  # type: ignore
     def dot(self, other: AnyArray[_T]) -> AnyArray[_T]: ...  # type: ignore
-    def astype(self, dtype: _T1) -> AnyArray[_T1]: ...  # type: ignore
+    def astype(self, dtype: type[_T1]) -> AnyArray[_T1]: ...  # type: ignore
     @overload
     def mean(self, axis: None = None) -> _T: ...  # type: ignore
     @overload
@@ -94,7 +109,7 @@ class Backend:
             return np.asarray(x)
         return self._xp_.asnumpy(x)  # type: ignore
 
-    def array(self, x, dtype: _T | None = None) -> AnyArray[_T]:
+    def array(self, x, dtype: type[_T] | None = None) -> AnyArray[_T]:
         return self._xp_.array(x, dtype)  # type: ignore
 
     def asarray(self, x, dtype=None) -> AnyArray[np.float32]:
@@ -102,23 +117,28 @@ class Backend:
         return self._xp_.asarray(x, dtype)  # type: ignore
 
     @overload
-    def arange(self, *args, dtype: _T, **kwargs) -> AnyArray[_T]:
+    def arange(self, *args, dtype: type[_T], **kwargs) -> AnyArray[_T]:
         ...
 
     @overload
     def arange(self, *args, dtype: None = None, **kwargs) -> AnyArray:
         ...
 
-    def arange(self, *args, dtype: _T | None = None, **kwargs) -> AnyArray[_T]:
+    def arange(self, *args, dtype=None, **kwargs):
         """Return evenly spaced values within a given interval."""
         return self._xp_.arange(*args, dtype=dtype, **kwargs)  # type: ignore
 
-    def zeros(self, shape: int | tuple[int, ...], dtype: _T) -> AnyArray[_T]:
+    def zeros(
+        self, shape: int | tuple[int, ...], dtype: type[_T] | np.dtype[_T] | None = None
+    ) -> AnyArray[_T]:
         """Return a new array of given shape and type, filled with zeros."""
         return self._xp_.zeros(shape, dtype)  # type: ignore
 
     def full(
-        self, shape: int | tuple[int, ...], fill_value: Any, dtype: _T
+        self,
+        shape: int | tuple[int, ...],
+        fill_value: Any,
+        dtype: type[_T] | np.dtype[_T] | None = None,
     ) -> AnyArray[_T]:
         """Return a new array of given shape and type, filled with fill_value."""
         return self._xp_.full(shape, fill_value, dtype=dtype)  # type: ignore
@@ -141,6 +161,26 @@ class Backend:
     def sqrt(self, x: AnyArray[_T]) -> AnyArray[_T]:
         """Return the non-negative square-root of an array."""
         return self._xp_.sqrt(x)  # type: ignore
+
+    def exp(self, x: AnyArray[_T]) -> AnyArray[_T]:
+        """Return the exponential of an array."""
+        return self._xp_.exp(x)  # type: ignore
+
+    def pad(
+        self,
+        x: AnyArray[_T],
+        pad_width: int | Sequence[int] | Sequence[tuple[int, int]],
+        mode: str = "constant",
+        constant_values: float = 0.0,
+    ) -> AnyArray[_T]:
+        """Pad an array."""
+        return self._xp_.pad(x, pad_width, mode=mode, constant_values=constant_values)  # type: ignore
+
+    def tensordot(
+        self, a: AnyArray[_T], b: AnyArray[_T], axes: int | tuple[int, ...] = 2
+    ) -> AnyArray[_T]:
+        """Return tensor dot product of two arrays."""
+        return self._xp_.tensordot(a, b, axes)  # type: ignore
 
     @overload
     def max(self, x: AnyArray[_T], axis: None = None) -> _T:
@@ -202,6 +242,10 @@ class Backend:
     def argmax(self, x, axis=None):  # type: ignore
         return self._xp_.argmax(x, axis=axis)  # type: ignore
 
+    def fix(self, x: AnyArray[_T]) -> AnyArray[_T]:
+        """Round to nearest integer towards zero."""
+        return self._xp_.fix(x)  # type: ignore
+
     def fftn(
         self,
         x: AnyArray[np.float32] | AnyArray[np.complex64],
@@ -231,10 +275,10 @@ class Backend:
 
     def irfftn(
         self,
-        x: AnyArray[np.float32],
+        x: AnyArray[np.complex64],
         s: tuple[int, int, int] | None = None,
         axes: int | tuple[int, ...] | None = None,
-    ) -> AnyArray[np.complex64]:
+    ) -> AnyArray[np.float32]:
         """N-dimensional inverse FFT of real part."""
         return self._fft_.irfftn(x, s, axes)  # type: ignore
 
