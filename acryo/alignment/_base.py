@@ -8,7 +8,6 @@ from typing import (
     Iterable,
     NamedTuple,
     Sequence,
-    TYPE_CHECKING,
     Union,
 )
 from typing_extensions import Self
@@ -23,9 +22,6 @@ from acryo._utils import compose_matrices
 from acryo._dask import DaskTaskPool, compute
 from acryo.backend import Backend, AnyArray, NUMPY_BACKEND
 from ._bound import ParametrizedModel
-
-if TYPE_CHECKING:
-    pass
 
 
 TemplateType = Union[NDArray[np.float32], Sequence[NDArray[np.float32]]]
@@ -328,7 +324,7 @@ class BaseAlignmentModel(ABC):
             img, max_shifts=max_shifts, quaternion=None, pos=None, backend=_backend
         )
         mtx = result.affine_matrix(img.shape)
-        _cval = _normalize_cval(cval, img)
+        _cval = _normalize_cval(cval, img, _backend)
         img_trans = _backend.affine_transform(img, mtx, cval=_cval)
         return _backend.asnumpy(img_trans), result
 
@@ -551,6 +547,7 @@ class RotationImplemented(BaseAlignmentModel):
         max_shifts: tuple[subpixel, subpixel, subpixel],
         quaternion: NDArray[np.float32] | None,
         pos: NDArray[np.float32] | None,
+        backend: Backend | None = None,
     ) -> AlignmentResult:
         """
         Align an image using current alignment parameters.
@@ -624,7 +621,7 @@ class RotationImplemented(BaseAlignmentModel):
         )
 
         mtx = result.affine_matrix(img.shape)
-        _img_cval = _normalize_cval(cval, img)
+        _img_cval = _normalize_cval(cval, img, _backend)
         img_trans = _backend.affine_transform(img, mtx, cval=_img_cval)
         return _backend.asnumpy(img_trans), result
 
@@ -637,18 +634,15 @@ class RotationImplemented(BaseAlignmentModel):
         prefilter: bool = True,
         backend: Backend = NUMPY_BACKEND,
     ) -> NDArray[np.complex64]:
-        _cval = _normalize_cval(cval, temp)
-
-        return self.pre_transform(
-            backend.affine_transform(
-                temp, matrix=matrix, cval=_cval, order=order, prefilter=prefilter
-            ),
-            backend,
+        _cval = _normalize_cval(cval, temp, backend)
+        temp_transformed = backend.affine_transform(
+            temp, matrix=matrix, cval=_cval, order=order, prefilter=prefilter
         )
+        return self.pre_transform(temp_transformed, backend)
 
     def _get_template_and_mask_input(
         self,
-        backend: Backend | None,
+        backend: Backend | None = None,
     ) -> tuple[NDArray[np.complex64], NDArray[np.float32]]:
         """
         Returns proper template image for alignment.
@@ -742,7 +736,8 @@ class RotationImplemented(BaseAlignmentModel):
 
             else:
                 # NOTE: dask.compute is always called once inside this method.
-                template_input = pool.add_task(self._template * self._mask).compute()[0]
+                template_masked = self._template * self._mask
+                template_input = pool.add_task(template_masked, _backend).compute()[0]
                 mask_input = self._mask
 
         return _backend.asnumpy(template_input), _backend.asnumpy(mask_input)
@@ -876,9 +871,11 @@ class TomographyInput(RotationImplemented):
         )
 
 
-def _normalize_cval(cval: float | None, img: np.ndarray) -> float:
+def _normalize_cval(
+    cval: float | None, img: AnyArray[np.float32], backend: Backend
+) -> float:
     if cval is None:
-        _cval = float(np.percentile(img, 1))
+        _cval = float(backend.percentile(img, 1))
     else:
         _cval = cval
     return _cval
@@ -889,14 +886,15 @@ def _create_mesh_for_landscape(
     shape: tuple[int, int, int],
     max_shifts: tuple[float, float, float],
     upsample: int,
-) -> NDArray[np.float32]:
-    upsampled_max_shifts = (np.asarray(max_shifts) * upsample).astype(np.int32)
-    center = np.array(shape) / 2 - 0.5
-    mesh = np.meshgrid(
+    backend: Backend,
+) -> AnyArray[np.float32]:
+    upsampled_max_shifts = (backend.asarray(max_shifts) * upsample).astype(np.int32)
+    center = backend.array(shape) / 2 - 0.5
+    mesh = backend.meshgrid(
         *[
-            np.arange(-width, width + 1) / upsample + c
+            backend.arange(-width, width + 1) / upsample + c
             for c, width in zip(center, upsampled_max_shifts)
         ],
         indexing="ij",
     )
-    return np.stack(mesh, axis=0)
+    return backend.stack(mesh, axis=0)

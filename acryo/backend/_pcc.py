@@ -41,7 +41,7 @@ def subpixel_pcc(
         max_shifts = backend.asarray(max_shifts)
         power = crop_by_max_shifts(power, max_shifts, max_shifts, backend)
 
-    maxima = backend.unravel_index(backend._xp_.argmax(power), power.shape)
+    maxima = backend.unravel_index(backend.argmax(power), power.shape)
     midpoints = backend.array(
         [backend._xp_.fix(axis_size / 2) for axis_size in power.shape]
     )
@@ -63,6 +63,7 @@ def subpixel_pcc(
                 upsampled_region_size,
                 upsample_factor,
                 sample_region_offset,
+                backend,
             )
         )
 
@@ -73,7 +74,7 @@ def subpixel_pcc(
                 power, _upsampled_left_shifts, _upsampled_right_shifts, backend
             )
 
-        maxima = backend.unravel_index(backend._xp_.argmax(power), power.shape)
+        maxima = backend.unravel_index(backend.argmax(power), power.shape)
         maxima = backend.asarray(maxima, dtype=np.float32) - dftshift
         shifts = shifts + maxima / upsample_factor
         pcc = backend._xp_.sqrt(

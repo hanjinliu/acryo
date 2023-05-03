@@ -23,6 +23,7 @@ def lowpass_filter_ft(
         cutoff,
         order,
         real=False,
+        backend=backend,
     )
     return weight * backend.fftn(img)
 
@@ -41,6 +42,7 @@ def lowpass_filter(
         cutoff,
         order,
         real=True,
+        backend=backend,
     )
     out = backend.irfftn(weight * backend.rfftn(img))
     return out.real

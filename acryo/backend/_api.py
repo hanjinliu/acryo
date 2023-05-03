@@ -14,6 +14,10 @@ _T1 = TypeVar("_T1", bound=np.generic)
 
 # fmt: off
 class AnyArray(Protocol[_T]):
+    """
+    Type representing a ndarray of numpy or cupy (or any other array
+    that has similar API).
+    """
     def __add__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...
     def __sub__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...
     def __mul__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...
@@ -77,7 +81,7 @@ class Backend:
     def asnumpy(self, x) -> NDArray[np.float32]:
         """Convert to numpy array."""
         if self._xp_ is np:
-            return x
+            return np.asarray(x)
         return self._xp_.asnumpy(x)  # type: ignore
 
     def array(self, x, dtype: _T | None = None) -> AnyArray[_T]:
@@ -100,7 +104,93 @@ class Backend:
         return self._xp_.arange(*args, dtype=dtype, **kwargs)  # type: ignore
 
     def zeros(self, shape: int | tuple[int, ...], dtype: _T) -> AnyArray[_T]:
+        """Return a new array of given shape and type, filled with zeros."""
         return self._xp_.zeros(shape, dtype)  # type: ignore
+
+    def full(
+        self, shape: int | tuple[int, ...], fill_value: Any, dtype: _T
+    ) -> AnyArray[_T]:
+        """Return a new array of given shape and type, filled with fill_value."""
+        return self._xp_.full(shape, fill_value, dtype=dtype)  # type: ignore
+
+    @overload
+    def sum(self, x: AnyArray[_T], axis: None = None) -> _T:
+        ...
+
+    @overload
+    def sum(self, x: AnyArray[_T], axis: int | tuple[int, ...]) -> AnyArray[_T]:
+        ...
+
+    def sum(self, x, axis=None):
+        """Return the sum of array elements over a given axis."""
+        return self._xp_.sum(x, axis=axis)
+
+    def cumsum(self, x: AnyArray[_T], axis: int | None = None) -> AnyArray[_T]:
+        return self._xp_.cumsum(x, axis=axis)  # type: ignore
+
+    def sqrt(self, x: AnyArray[_T]) -> AnyArray[_T]:
+        """Return the non-negative square-root of an array."""
+        return self._xp_.sqrt(x)  # type: ignore
+
+    @overload
+    def max(self, x: AnyArray[_T], axis: None = None) -> _T:
+        ...
+
+    @overload
+    def max(self, x: AnyArray[_T], axis: int | tuple[int, ...]) -> AnyArray[_T]:
+        ...
+
+    def max(self, x, axis=None):
+        """Return the maximum of an array or maximum along an axis."""
+        return self._xp_.max(x, axis=axis)
+
+    @overload
+    def min(self, x: AnyArray[_T], axis: None = None) -> _T:
+        ...
+
+    @overload
+    def min(self, x: AnyArray[_T], axis: int | tuple[int, ...]) -> AnyArray[_T]:
+        ...
+
+    def min(self, x, axis=None):
+        """Return the minimum of an array or minimum along an axis."""
+        return self._xp_.min(x, axis=axis)
+
+    @overload
+    def percentile(self, x: AnyArray[_T], q: float, axis: None = None) -> _T:
+        ...
+
+    @overload
+    def percentile(
+        self, x: AnyArray[_T], q: float, axis: int | tuple[int, ...]
+    ) -> AnyArray[_T]:
+        ...
+
+    def percentile(self, x, q, axis=None):
+        """Compute the q-th percentile of the data along the specified axis."""
+        return self._xp_.percentile(x, q, axis=axis)
+
+    @overload
+    def argmin(self, x: AnyArray[_T], axis: None = None) -> np.intp:
+        ...
+
+    @overload
+    def argmin(self, x: AnyArray[_T], axis: int | tuple[int, ...]) -> AnyArray[np.intp]:
+        ...
+
+    def argmin(self, x, axis=None):
+        return self._xp_.argmin(x, axis=axis)  # type: ignore
+
+    @overload
+    def argmax(self, x: AnyArray[_T], axis: None = None) -> np.intp:
+        ...
+
+    @overload
+    def argmax(self, x: AnyArray[_T], axis: int | tuple[int, ...]) -> AnyArray[np.intp]:
+        ...
+
+    def argmax(self, x, axis=None):
+        return self._xp_.argmax(x, axis=axis)  # type: ignore
 
     def fftn(
         self,
@@ -230,7 +320,9 @@ class Backend:
         output: _T = np.float64,
         mode: str = "mirror",
     ) -> AnyArray[_T]:
-        return self._ndi_.spline_filter(input, order=order, output=output, mode=mode)
+        return self._ndi_.spline_filter(
+            self.asarray(input), order=order, output=output, mode=mode
+        )
 
     def map_coordinates(
         self,
@@ -267,11 +359,11 @@ class Backend:
         )
         return out
 
-    def lowpass_filter_ft(self, img, cutoff, order) -> AnyArray[np.complex64]:
+    def lowpass_filter_ft(self, img, cutoff, order: int = 2) -> AnyArray[np.complex64]:
         """Lowpass filter in Fourier space."""
         return _bandpass.lowpass_filter_ft(self, self.asarray(img), cutoff, order)
 
-    def lowpass_filter(self, img, cutoff, order) -> AnyArray[np.float32]:
+    def lowpass_filter(self, img, cutoff, order: int = 2) -> AnyArray[np.float32]:
         """Lowpass filter in real space."""
         return _bandpass.lowpass_filter(self, self.asarray(img), cutoff, order)
 
