@@ -235,18 +235,15 @@ class BaseAlignmentModel(ABC):
             - single template image ... 3D
             - many template images ... 4D
         """
-        _backend = backend or Backend()
+        xp = backend or Backend()
         if self._n_templates > 1:
             template_input = np.stack(
-                [
-                    self.pre_transform(tmp * self._mask, _backend)
-                    for tmp in self._template
-                ],
+                [self.pre_transform(tmp * self._mask, xp) for tmp in self._template],
                 axis=0,
             )
         else:
-            template_input = self.pre_transform(self._template * self._mask, _backend)
-        return _backend.asnumpy(template_input), _backend.asnumpy(self._mask)
+            template_input = self.pre_transform(self._template * self._mask, xp)
+        return xp.asnumpy(template_input), xp.asnumpy(self._mask)
 
     def align(
         self,
@@ -271,7 +268,7 @@ class BaseAlignmentModel(ABC):
         AlignmentResult
             Result of alignment.
         """
-        _backend = backend or Backend()
+        xp = backend or Backend()
         if quaternion is None:
             _quat = self._DUMMY_QUAT
         else:
@@ -292,7 +289,7 @@ class BaseAlignmentModel(ABC):
             max_shifts,
             _quat,
             _pos,
-            _backend,
+            xp,
         )
 
     def fit(
@@ -319,14 +316,14 @@ class BaseAlignmentModel(ABC):
         np.ndarray, AlignmentResult
             Transformed input image and the alignment result.
         """
-        _backend = backend or Backend()
+        xp = backend or Backend()
         result = self.align(
-            img, max_shifts=max_shifts, quaternion=None, pos=None, backend=_backend
+            img, max_shifts=max_shifts, quaternion=None, pos=None, backend=xp
         )
         mtx = result.affine_matrix(img.shape)
-        _cval = _normalize_cval(cval, img, _backend)
-        img_trans = _backend.affine_transform(img, mtx, cval=_cval)
-        return _backend.asnumpy(img_trans), result
+        _cval = _normalize_cval(cval, img, xp)
+        img_trans = xp.affine_transform(img, mtx, cval=_cval)
+        return xp.asnumpy(img_trans), result
 
     def landscape(
         self,
@@ -353,7 +350,7 @@ class BaseAlignmentModel(ABC):
             N (if single template) or N+1 (if multi-template) dimensional array of
             correlation landscape.
         """
-        _backend = backend or Backend()
+        xp = backend or Backend()
         if quaternion is None:
             _quat = self._DUMMY_QUAT
         else:
@@ -375,23 +372,19 @@ class BaseAlignmentModel(ABC):
             max_shifts,
             _quat,
             _pos,
-            _backend,
+            xp,
         )
 
         if upsample > 1:
             if not self._is_multiple():
-                coords = _create_mesh_for_landscape(
-                    lds.shape, max_shifts, upsample, _backend
-                )
-                lds_upsampled = _backend.map_coordinates(
+                coords = _build_mesh(lds.shape, max_shifts, upsample, xp)
+                lds_upsampled = xp.map_coordinates(
                     lds, coords, order=3, mode="constant", cval=0.0, prefilter=True
                 )
             else:
-                coords = _create_mesh_for_landscape(
-                    lds.shape[1:], max_shifts, upsample, _backend
-                )
+                coords = _build_mesh(lds.shape[1:], max_shifts, upsample, xp)
                 all_lds = [
-                    _backend.map_coordinates(
+                    xp.map_coordinates(
                         l, coords, order=3, mode="constant", cval=0.0, prefilter=True
                     )
                     for l in lds
@@ -595,19 +588,19 @@ class RotationImplemented(BaseAlignmentModel):
         np.ndarray, AlignmentResult
             Transformed input image and the alignment result.
         """
-        _backend = backend or Backend()
+        xp = backend or Backend()
         pool = DaskTaskPool.from_func(self._optimize)
         pos = np.zeros(3, dtype=np.float32)
         for quat, tmp, mask in zip(
             self.quaternions, self._template_input, self._mask_input
         ):
             pool.add_task(
-                self.pre_transform(img * mask, _backend),
+                self.pre_transform(img * mask, xp),
                 tmp,
                 max_shifts,
                 quat,
                 pos=pos,
-                backend=_backend,
+                backend=xp,
             )
         results = pool.compute()
         scores = [x[2] for x in results]
@@ -621,9 +614,9 @@ class RotationImplemented(BaseAlignmentModel):
         )
 
         mtx = result.affine_matrix(img.shape)
-        _img_cval = _normalize_cval(cval, img, _backend)
-        img_trans = _backend.affine_transform(img, mtx, cval=_img_cval)
-        return _backend.asnumpy(img_trans), result
+        _img_cval = _normalize_cval(cval, img, xp)
+        img_trans = xp.affine_transform(img, mtx, cval=_img_cval)
+        return xp.asnumpy(img_trans), result
 
     def _transform_template(
         self,
@@ -663,7 +656,7 @@ class RotationImplemented(BaseAlignmentModel):
               the first axis yielded images will be (rot0, temp0),
               (rot0, temp1), ...
         """
-        _backend = backend or Backend()
+        xp = backend or Backend()
         if self._n_rotations > 1:
             rotators = [Rotation.from_quat(r).inv() for r in self.quaternions]
             matrices = compose_matrices(
@@ -672,7 +665,7 @@ class RotationImplemented(BaseAlignmentModel):
             cval = float(np.percentile(self._template, 1))
             if self._n_templates > 1:
                 inputs_templates: list[NDArray[np.float32]] = [
-                    _backend.spline_filter(
+                    xp.spline_filter(
                         tmp * self._mask,
                         order=3,
                         mode="constant",
@@ -681,7 +674,7 @@ class RotationImplemented(BaseAlignmentModel):
                     for tmp in self._template
                 ]
                 pool_template = DaskTaskPool.from_func(self._transform_template)
-                pool_mask = DaskTaskPool.from_func(_backend.affine_transform)
+                pool_mask = DaskTaskPool.from_func(xp.affine_transform)
                 ntmp = len(inputs_templates)
                 for mat in matrices:
                     for tmp in inputs_templates:
@@ -691,20 +684,20 @@ class RotationImplemented(BaseAlignmentModel):
                             order=3,
                             cval=cval,
                             prefilter=False,
-                            backend=_backend,
+                            backend=xp,
                         )
                     pool_mask.add_tasks(
                         ntmp, self._mask, mat, order=3, mode="nearest", prefilter=False
                     )
             else:
-                template_masked = _backend.spline_filter(
+                template_masked = xp.spline_filter(
                     self._template * self._mask,
                     order=3,
                     output=np.float32,
                     mode="constant",
                 )
                 pool_template = DaskTaskPool.from_func(self._transform_template)
-                pool_mask = DaskTaskPool.from_func(_backend.affine_transform)
+                pool_mask = DaskTaskPool.from_func(xp.affine_transform)
                 for mat in matrices:
                     pool_template.add_task(
                         template_masked,
@@ -712,7 +705,7 @@ class RotationImplemented(BaseAlignmentModel):
                         order=3,
                         cval=cval,
                         prefilter=False,
-                        backend=_backend,
+                        backend=xp,
                     )
                     pool_mask.add_task(
                         self._mask, mat, order=3, mode="nearest", prefilter=False
@@ -730,17 +723,17 @@ class RotationImplemented(BaseAlignmentModel):
             pool = DaskTaskPool.from_func(self.pre_transform)
             if self._n_templates > 1:
                 for tmp in self._template:
-                    pool.add_task(tmp * self._mask, _backend)
+                    pool.add_task(tmp * self._mask, xp)
                 template_input = np.stack(pool.compute(), axis=0)
                 mask_input = np.stack([self._mask] * len(self._template), axis=0)
 
             else:
                 # NOTE: dask.compute is always called once inside this method.
                 template_masked = self._template * self._mask
-                template_input = pool.add_task(template_masked, _backend).compute()[0]
+                template_input = pool.add_task(template_masked, xp).compute()[0]
                 mask_input = self._mask
 
-        return _backend.asnumpy(template_input), _backend.asnumpy(mask_input)
+        return xp.asnumpy(template_input), xp.asnumpy(mask_input)
 
     def _is_multiple(self) -> bool:
         return self._n_templates * self._n_rotations > 1
@@ -824,12 +817,11 @@ class TomographyInput(RotationImplemented):
             raise NotImplementedError(
                 "Masked difference is not implemented for multi-template."
             )
-        _backend = backend or Backend()
-        mw: NDArray[np.float32] = self._get_missing_wedge_mask(quaternion, _backend)  # type: ignore
-        template_masked = _backend.ifftn(self._template_input * mw).real
-        img_input = _backend.ifftn(
-            self.pre_transform(image * self._mask, _backend) * mw
-        ).real
+        xp = backend or Backend()
+        image_input = self.pre_transform(image * self._mask, xp)
+        mw = self._get_missing_wedge_mask(quaternion, xp)
+        template_masked = xp.ifftn(self._template_input * mw).real
+        img_input = xp.ifftn(image_input * mw).real
         return img_input - template_masked
 
     def mask_missing_wedge(
@@ -839,10 +831,9 @@ class TomographyInput(RotationImplemented):
         backend: Backend | None = None,
     ) -> NDArray[np.complex64]:
         """Apply missing wedge mask in the frequency domain."""
-        _backend = backend or Backend()
-        return _backend.asnumpy(
-            image * self._get_missing_wedge_mask(quaternion, _backend)
-        )
+        xp = backend or Backend()
+        mask = self._get_missing_wedge_mask(quaternion, xp)
+        return xp.asnumpy(xp.asarray(image) * mask)
 
     def _get_missing_wedge_mask(
         self,
@@ -882,7 +873,7 @@ def _normalize_cval(
 
 
 @lru_cache(maxsize=2)
-def _create_mesh_for_landscape(
+def _build_mesh(
     shape: tuple[int, int, int],
     max_shifts: tuple[float, float, float],
     upsample: int,
