@@ -1,16 +1,44 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Callable, Protocol, TypeVar
+from typing import Callable, Literal, Protocol, Sequence, TypeVar, overload
 import numpy as np
 from numpy.typing import NDArray
-from . import _bandpass
+from . import _bandpass, _missing_wedge
 
-_T = TypeVar("_T", covariant=True)
+from acryo._types import degree
+from scipy.spatial.transform import Rotation
 
+_T = TypeVar("_T", bound=np.generic)
+_T1 = TypeVar("_T1", bound=np.generic)
 
+# fmt: off
 class AnyArray(Protocol[_T]):
-    ...
+    def __add__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...
+    def __sub__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...
+    def __mul__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...
+    def __truediv__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...
+    def __gt__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...
+    def __lt__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...
+    def __ge__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...
+    def __le__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...
+    def __eq__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...
+    def __getitem__(self, key) -> AnyArray[_T]: ...
+    @property
+    def real(self) -> AnyArray[np.float32]: ...
+    @property
+    def imag(self) -> AnyArray[np.float32]: ...
+    def conj(self) -> AnyArray[_T]: ...
+    @property
+    def shape(self) -> tuple[int, ...]: ...
+    @property
+    def ndim(self) -> int: ...
+    @property
+    def dtype(self) -> np.dtype[_T]: ...
+    def dot(self, other: AnyArray[_T]) -> AnyArray[_T]: ...
+    def astype(self, dtype: _T1) -> AnyArray[_T1]: ...
+
+# fmt: on
 
 
 class Backend:
@@ -46,11 +74,127 @@ class Backend:
         """Convert to numpy array."""
         if self._xp_ is np:
             return x
-        return self._xp_.asnumpy(x)
+        return self._xp_.asnumpy(x)  # type: ignore
 
-    def asarray(self, x) -> AnyArray[np.float32]:
+    def array(self, x, dtype: _T | None = None) -> AnyArray[_T]:
+        return self._xp_.array(x, dtype)  # type: ignore
+
+    def asarray(self, x, dtype=None) -> AnyArray[np.float32]:
         """Convert to numpy array."""
-        return self._xp_.asarray(x)
+        return self._xp_.asarray(x, dtype)  # type: ignore
+
+    @overload
+    def arange(self, *args, dtype: _T, **kwargs) -> AnyArray[_T]:
+        ...
+
+    @overload
+    def arange(self, *args, dtype: None = None, **kwargs) -> AnyArray:
+        ...
+
+    def arange(self, *args, dtype: _T | None = None, **kwargs) -> AnyArray[_T]:
+        """Return evenly spaced values within a given interval."""
+        return self._xp_.arange(*args, dtype=dtype, **kwargs)  # type: ignore
+
+    def zeros(self, shape: int | tuple[int, ...], dtype: _T) -> AnyArray[_T]:
+        return self._xp_.zeros(shape, dtype)  # type: ignore
+
+    def fftn(
+        self,
+        x: AnyArray[np.float32] | AnyArray[np.complex64],
+        s: tuple[int, int, int] | None = None,
+        axes: int | tuple[int, ...] | None = None,
+    ) -> AnyArray[np.complex64]:
+        """N-dimensional FFT."""
+        return self._fft_.fftn(x, s, axes)  # type: ignore
+
+    def ifftn(
+        self,
+        x: AnyArray[np.float32] | AnyArray[np.complex64],
+        s: tuple[int, int, int] | None = None,
+        axes: int | tuple[int, ...] | None = None,
+    ) -> AnyArray[np.complex64]:
+        """N-dimensional inverse FFT."""
+        return self._fft_.ifftn(x, s, axes)  # type: ignore
+
+    def rfftn(
+        self,
+        x: AnyArray[np.float32],
+        s: tuple[int, int, int] | None = None,
+        axes: int | tuple[int, ...] | None = None,
+    ) -> AnyArray[np.complex64]:
+        """N-dimensional FFT of real part."""
+        return self._fft_.rfftn(x, s, axes)  # type: ignore
+
+    def irfftn(
+        self,
+        x: AnyArray[np.float32],
+        s: tuple[int, int, int] | None = None,
+        axes: int | tuple[int, ...] | None = None,
+    ) -> AnyArray[np.complex64]:
+        """N-dimensional inverse FFT of real part."""
+        return self._fft_.irfftn(x, s, axes)  # type: ignore
+
+    def fftshift(self, x: AnyArray[_T]) -> AnyArray[_T]:
+        """Shift zero-frequency component to center."""
+        return self._xp_.fft.fftshift(x)  # type: ignore
+
+    def ifftshift(self, x: AnyArray[_T]) -> AnyArray[_T]:
+        """Inverse shift zero-frequency component to center."""
+        return self._xp_.fft.ifftshift(x)
+
+    def fftfreq(self, n: int, d: float = 1.0) -> AnyArray[np.float32]:
+        """Return the Discrete Fourier Transform sample frequencies."""
+        return self._xp_.fft.fftfreq(n, d)
+
+    @overload
+    def meshgrid(
+        self,
+        x0: AnyArray[_T],
+        copy: bool = True,
+        sparse: bool = False,
+        indexing: Literal["xy", "ij"] = "xy",
+    ) -> tuple[AnyArray[_T]]:
+        ...
+
+    @overload
+    def meshgrid(
+        self,
+        x0: AnyArray[_T],
+        x1: AnyArray[_T],
+        copy: bool = True,
+        sparse: bool = False,
+        indexing: Literal["xy", "ij"] = "xy",
+    ) -> tuple[AnyArray[_T], AnyArray[_T]]:
+        ...
+
+    @overload
+    def meshgrid(
+        self,
+        x0: AnyArray[_T],
+        x1: AnyArray[_T],
+        x2: AnyArray[_T],
+        copy: bool = True,
+        sparse: bool = False,
+        indexing: Literal["xy", "ij"] = "xy",
+    ) -> tuple[AnyArray[_T], AnyArray[_T], AnyArray[_T]]:
+        ...
+
+    def meshgrid(
+        self,
+        *xi: AnyArray[_T],
+        copy: bool = True,
+        sparse: bool = False,
+        indexing: str = "xy",
+    ) -> tuple[AnyArray[_T], ...]:
+        """Return coordinate matrices from coordinate vectors."""
+        return self._xp_.meshgrid(*xi, copy=copy, sparse=sparse, indexing=indexing)  # type: ignore
+
+    def unravel_index(self, indices, shape: tuple[int, ...]) -> AnyArray[np.intp]:
+        return self._xp_.unravel_index(indices, shape)
+
+    def stack(self, arrays: Sequence[AnyArray[_T]], axis: int = 0) -> AnyArray[_T]:
+        """Stack arrays in sequence along a new axis."""
+        return self._xp_.stack(arrays, axis=axis)  # type: ignore
 
     def affine_transform(
         self,
@@ -64,7 +208,7 @@ class Backend:
         prefilter: bool = True,
     ) -> AnyArray[np.float32]:
         """Affine transform."""
-        self._ndi_.affine_transform(
+        return self._ndi_.affine_transform(
             self.asarray(img),
             self.asarray(matrix),
             output_shape=output_shape,
@@ -73,7 +217,7 @@ class Backend:
             mode=mode,
             cval=cval,
             prefilter=prefilter,
-        )
+        )  # type: ignore
 
     def rotated_crop(
         self,
@@ -104,6 +248,17 @@ class Backend:
     def lowpass_filter(self, img, cutoff, order) -> AnyArray[np.float32]:
         """Lowpass filter in real space."""
         return _bandpass.lowpass_filter(self, self.asarray(img), cutoff, order)
+
+    def missing_wedge_mask(
+        self,
+        rotator: Rotation,
+        tilt_range: tuple[degree, degree],
+        shape: tuple[int, int, int],
+    ):
+        return _missing_wedge.missing_wedge_mask(self, rotator, tilt_range, shape)
+
+
+NUMPY_BACKEND = Backend("numpy")
 
 
 @contextmanager

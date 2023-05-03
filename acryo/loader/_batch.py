@@ -61,9 +61,24 @@ class BatchLoader(LoaderBase):
         self,
         image: np.ndarray | da.Array,
         molecules: Molecules,
-        image_id: Hashable = None,
+        image_id: Hashable | None = None,
     ) -> Self:
-        """Add a tomogram and its molecules to the collection."""
+        """
+        Add a tomogram and its molecules to the collection.
+
+        Parameters
+        ----------
+        image : np.ndarray or da.Array
+            Tomogram image. This argument is passed directly to the `SubtomogramLoader`
+            constructor.
+        molecules : Molecules
+            Molecules in the tomogram (corresponding to the ``image`` argument). This
+            argument is passed directly to the `SubtomogramLoader` constructor.
+        image_id : Hashable, optional
+            Identifier for the tomogram. If not provided, a unique identifier will be
+            generated. This identifier is used to tag molecules with the tomogram they
+            reside in.
+        """
         if image_id is None:
             image_id = len(self._images)
             while image_id in self._images:

@@ -1,127 +1,13 @@
 from __future__ import annotations
 from functools import lru_cache
-from typing import Sequence, TypeVar
+from typing import Sequence
 import numpy as np
 from numpy.typing import NDArray
 from scipy.fft import next_fast_len
 
-from acryo._typed_scipy import rfftn, irfftn, ifftn, map_coordinates
+from acryo._typed_scipy import rfftn, irfftn, map_coordinates
 from acryo._types import pixel
-
-# cross correlation
-# Modified from skimage/registration/_phase_cross_correlation.py
-
-
-def pcc_landscape(
-    f0: NDArray[np.complex64],
-    f1: NDArray[np.complex64],
-    max_shifts: tuple[float, ...] | None = None,
-):
-    product = f0 * f1.conj()
-    power = _abs2(ifftn(product))
-    power = np.fft.fftshift(power)
-    if max_shifts is not None:
-        centers = tuple(s // 2 for s in power.shape)
-        slices = tuple(
-            slice(max(c - int(shiftl), 0), min(c + int(shiftr) + 1, s), None)
-            for c, shiftl, shiftr, s in zip(
-                centers, max_shifts, max_shifts, power.shape
-            )
-        )
-        power = power[slices]
-    return power
-
-
-def subpixel_pcc(
-    f0: NDArray[np.complex64],
-    f1: NDArray[np.complex64],
-    upsample_factor: int,
-    max_shifts: tuple[float, ...] | NDArray[np.number] | None = None,
-) -> tuple[NDArray[np.float32], float]:
-    if isinstance(max_shifts, (int, float)):
-        max_shifts = (max_shifts,) * f0.ndim
-    product = f0 * f1.conj()
-    power = _abs2(ifftn(product))
-    if max_shifts is not None:
-        max_shifts = np.asarray(max_shifts)
-        power = crop_by_max_shifts(power, max_shifts, max_shifts)
-
-    maxima = np.unravel_index(np.argmax(power), power.shape)
-    midpoints = np.array([np.fix(axis_size / 2) for axis_size in power.shape])
-
-    shifts = np.asarray(maxima, dtype=np.float32)
-    shifts[shifts > midpoints] -= np.array(power.shape)[shifts > midpoints]
-    # Initial shift estimate in upsampled grid
-    shifts = np.fix(shifts * upsample_factor) / upsample_factor
-    if upsample_factor > 1:
-        upsampled_region_size = np.ceil(upsample_factor * 1.5)
-        # Center of output array at dftshift + 1
-        dftshift = np.fix(upsampled_region_size / 2.0)
-        # Matrix multiply DFT around the current shift estimate
-        sample_region_offset = dftshift - shifts * upsample_factor
-        # Locate maximum and map back to original pixel grid
-        power = _abs2(
-            _upsampled_dft(
-                product.conj(),
-                upsampled_region_size,
-                upsample_factor,
-                sample_region_offset,
-            )
-        )
-
-        if max_shifts is not None:
-            _upsampled_left_shifts = (shifts + max_shifts) * upsample_factor
-            _upsampled_right_shifts = (max_shifts - shifts) * upsample_factor
-            power = crop_by_max_shifts(
-                power, _upsampled_left_shifts, _upsampled_right_shifts
-            )
-
-        maxima = np.unravel_index(np.argmax(power), power.shape)
-        maxima = np.asarray(maxima, dtype=np.float32) - dftshift
-        shifts = shifts + maxima / upsample_factor
-        pcc = np.sqrt(power[tuple(int(np.round(m)) for m in maxima)])
-    else:
-        pcc = np.sqrt(power[maxima])
-    return shifts, pcc
-
-
-_DType = TypeVar("_DType", bound=np.number)
-
-
-def _upsampled_dft(
-    data: NDArray[_DType],
-    upsampled_region_size: NDArray[np.integer],
-    upsample_factor: int,
-    axis_offsets: NDArray[np.float32],
-) -> NDArray[_DType]:
-    # if people pass in an integer, expand it to a list of equal-sized sections
-    upsampled_region_sizes = [upsampled_region_size] * data.ndim
-
-    dim_properties = list(zip(data.shape, upsampled_region_sizes, axis_offsets))
-
-    for n_items, ups_size, ax_offset in dim_properties[::-1]:
-        kernel = (np.arange(ups_size, dtype=np.float32) - ax_offset)[
-            :, np.newaxis
-        ] * np.fft.fftfreq(n_items, upsample_factor).astype(np.float32)
-        kernel = np.exp(-2j * np.pi * kernel)
-
-        data = np.tensordot(kernel, data, axes=(1, -1))  # type: ignore
-    return data
-
-
-def _abs2(a: NDArray[np.complex64]) -> NDArray[np.float32]:
-    return a.real**2 + a.imag**2
-
-
-def crop_by_max_shifts(power: NDArray[_DType], left, right) -> NDArray[_DType]:
-    shifted_power = np.fft.fftshift(power)
-    centers = tuple(s // 2 for s in power.shape)
-    slices = tuple(
-        slice(max(c - int(shiftl), 0), min(c + int(shiftr) + 1, s), None)
-        for c, shiftl, shiftr, s in zip(centers, left, right, power.shape)
-    )
-    return np.fft.ifftshift(shifted_power[slices])
-
+from acryo.backend import Backend
 
 # Normalized cross correlation
 
@@ -281,29 +167,34 @@ def _create_mesh(
     max_shifts: Sequence[pixel],
     midpoints: NDArray[np.float32],
     pad_width_eff: Sequence[pixel],
+    backend: Backend,
 ):
-    shifts = np.array(maxima, dtype=np.float32) - midpoints
-    _max_shifts = np.array(max_shifts, dtype=np.float32)  # type: ignore
+    shifts = backend.array(maxima, dtype=np.float32) - midpoints
+    _max_shifts = backend.array(max_shifts, dtype=np.float32)  # type: ignore
     left = -shifts - _max_shifts
     right = -shifts + _max_shifts
     local_shifts = tuple(
         [
-            int(np.round(max(shiftl, -1) * upsample_factor)),
-            int(np.round(min(shiftr, 1) * upsample_factor)),
+            int(backend._xp_.round(max(shiftl, -1) * upsample_factor)),
+            int(backend._xp_.round(min(shiftr, 1) * upsample_factor)),
         ]
         for shiftl, shiftr in zip(left, right)
     )
-    mesh = np.meshgrid(
+    mesh = backend.meshgrid(
         *[
             np.arange(s0, s1 + 1) / upsample_factor + m + w
             for (s0, s1), m, w in zip(local_shifts, maxima, pad_width_eff)
         ],
         indexing="ij",
     )
-    return np.stack(mesh, axis=0)
+    return backend.stack(mesh, axis=0)
 
 
-def fftconvolve(in1: NDArray[np.float32], in2: NDArray[np.float32]):
+def fftconvolve(
+    in1: NDArray[np.float32],
+    in2: NDArray[np.float32],
+    backend: Backend,
+):
     s1 = in1.shape
     s2 = in2.shape
 

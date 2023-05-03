@@ -22,12 +22,11 @@ from acryo._rotation import normalize_rotations
 from acryo._types import Ranges, subpixel, degree
 from acryo._utils import (
     compose_matrices,
-    missing_wedge_mask,
     lowpass_filter_ft,
 )
 from acryo._typed_scipy import ifftn, spline_filter, affine_transform, map_coordinates
 from acryo._dask import DaskTaskPool, compute
-from acryo.backend import Backend
+from acryo.backend import Backend, AnyArray, NUMPY_BACKEND
 from ._bound import ParametrizedModel
 
 if TYPE_CHECKING:
@@ -808,7 +807,7 @@ class TomographyInput(RotationImplemented):
             raise NotImplementedError(
                 "Masked difference is not implemented for multi-template."
             )
-        mw = self._get_missing_wedge_mask(quaternion)
+        mw: NDArray[np.float32] = self._get_missing_wedge_mask(quaternion, NUMPY_BACKEND)  # type: ignore
         ft = self._template_input  # NOTE: ft.ndim == 3
         template_masked = np.real(ifftn(ft * mw))
         img_input = np.real(ifftn(self.pre_transform(image * self._mask) * mw))
@@ -820,11 +819,13 @@ class TomographyInput(RotationImplemented):
         quaternion: NDArray[np.float32],
     ) -> NDArray[np.complex64]:
         """Apply missing wedge mask in the frequency domain."""
-        return image * self._get_missing_wedge_mask(quaternion)
+        return image * self._get_missing_wedge_mask(quaternion, NUMPY_BACKEND)  # type: ignore
 
     def _get_missing_wedge_mask(
-        self, quat: NDArray[np.float32]
-    ) -> NDArray[np.float32] | int:
+        self,
+        quat: NDArray[np.float32],
+        backend: Backend,
+    ) -> AnyArray[np.float32] | int:
         """
         Create a binary mask that covers tomographical missing wedge.
 
@@ -840,7 +841,7 @@ class TomographyInput(RotationImplemented):
         """
         if self._tilt_range is None:
             return 1
-        return missing_wedge_mask(
+        return backend.missing_wedge_mask(
             rotator=Rotation.from_quat(quat),
             tilt_range=self._tilt_range,
             shape=self.input_shape,
