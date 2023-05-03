@@ -5,24 +5,24 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.fft import next_fast_len
 
-from acryo._typed_scipy import rfftn, irfftn, map_coordinates
 from acryo._types import pixel
-from acryo.backend import Backend
+from acryo.backend import Backend, AnyArray
 
 # Normalized cross correlation
 
 
 def ncc_landscape(
-    img0: NDArray[np.float32],
-    img1: NDArray[np.float32],
+    img0: AnyArray[np.float32],
+    img1: AnyArray[np.float32],
     max_shifts: tuple[float, ...],
+    backend: Backend,
 ) -> NDArray[np.float32]:
     if max_shifts is not None:
         max_shifts = tuple(max_shifts)
     pad_width = _get_padding_width(max_shifts)
     padimg = np.pad(img0, pad_width=pad_width, mode="constant", constant_values=0)
 
-    corr = fftconvolve(padimg, img1[::-1, ::-1, ::-1])[1:-1, 1:-1, 1:-1]
+    corr = fftconvolve(padimg, img1[::-1, ::-1, ::-1], backend)[1:-1, 1:-1, 1:-1]
 
     win_sum1 = _window_sum_3d(padimg, img1.shape)
     win_sum2 = _window_sum_3d(padimg**2, img1.shape)
@@ -39,13 +39,13 @@ def ncc_landscape(
     response[mask] = (corr - win_sum1 * template_mean)[mask] / _safe_sqrt(
         var, fill=np.inf
     )[mask]
-    return response
+    return backend.asnumpy(response)
 
 
 def ncc_landscape_no_pad(
-    img: NDArray[np.float32],
-    template: NDArray[np.float32],
-) -> NDArray[np.float32]:
+    img: AnyArray[np.float32],
+    template: AnyArray[np.float32],
+) -> AnyArray[np.float32]:
     corr = fftconvolve(img, template[::-1, ::-1, ::-1])[1:-1, 1:-1, 1:-1]
 
     win_sum1 = _window_sum_3d(img, template.shape)
@@ -67,8 +67,8 @@ def ncc_landscape_no_pad(
 
 
 def zncc_landscape_with_crop(
-    img0: NDArray[np.float32],
-    img1: NDArray[np.float32],
+    img0: AnyArray[np.float32],
+    img1: AnyArray[np.float32],
     max_shifts: tuple[float, ...],
 ):
     response = ncc_landscape(img0 - img0.mean(), img1 - img1.mean(), max_shifts)
@@ -80,11 +80,12 @@ def zncc_landscape_with_crop(
 
 
 def subpixel_zncc(
-    img0: NDArray[np.float32],
-    img1: NDArray[np.float32],
+    img0: AnyArray[np.float32],
+    img1: AnyArray[np.float32],
     upsample_factor: int,
     max_shifts: pixel | tuple[pixel, ...],
-) -> tuple[np.ndarray, float]:
+    backend: Backend,
+) -> tuple[NDArray[np.float32], float]:
     img0 -= img0.mean()
     img1 -= img1.mean()
     if isinstance(max_shifts, (int, float)):
@@ -95,8 +96,10 @@ def subpixel_zncc(
     )
     sl_res = tuple(slice(w, -w, None) for w in pad_width_eff)
     response_center = response[sl_res]
-    maxima = np.unravel_index(np.argmax(response_center), response_center.shape)
-    midpoints = np.asarray(response_center.shape, dtype=np.int32) // 2
+    maxima = backend.unravel_index(
+        backend.argmax(response_center), response_center.shape
+    )
+    midpoints = backend.asarray(response_center.shape, dtype=np.int32) // 2
 
     if upsample_factor > 1:
         coords = _create_mesh(
@@ -105,18 +108,24 @@ def subpixel_zncc(
             max_shifts,
             midpoints.astype(np.float32),
             pad_width_eff,
+            backend,
         )
-        local_response: np.ndarray = map_coordinates(
+        local_response = backend.map_coordinates(
             response, coords, order=3, mode="constant", cval=-1.0, prefilter=True
         )
-        local_maxima = np.unravel_index(np.argmax(local_response), local_response.shape)
+        local_maxima = backend.unravel_index(
+            np.argmax(local_response), local_response.shape
+        )
         zncc = local_response[local_maxima]
         shifts = (
-            np.array(maxima) - midpoints + np.array(local_maxima) / upsample_factor - 1
+            backend.asnumpy(maxima)
+            - midpoints
+            + backend.asnumpy(local_maxima) / upsample_factor
+            - 1
         )
     else:
         zncc = response[maxima]
-        shifts = np.array(maxima) - midpoints
+        shifts = backend.asnumpy(maxima) - midpoints
 
     return np.asarray(shifts, dtype=np.float32), zncc
 
@@ -191,8 +200,8 @@ def _create_mesh(
 
 
 def fftconvolve(
-    in1: NDArray[np.float32],
-    in2: NDArray[np.float32],
+    in1: AnyArray[np.float32],
+    in2: AnyArray[np.float32],
     backend: Backend,
 ):
     s1 = in1.shape
@@ -201,28 +210,23 @@ def fftconvolve(
     # shape = in1.shape
     shape = [s1[i] + s2[i] - 1 for i in range(in1.ndim)]
 
-    ret = _freq_domain_conv(in1, in2, shape)
-
-    return _apply_conv_mode(ret, s1, s2)
-
-
-def _freq_domain_conv(in1: NDArray[np.float32], in2: NDArray[np.float32], shape):
+    # convolve in the frequency domain
     fshape = [next_fast_len(shape[a], False) for a in range(in1.ndim)]
 
-    sp1 = rfftn(in1, fshape)
-    sp2 = rfftn(in2, fshape)
-    ret = irfftn(sp1 * sp2, fshape)
+    sp1 = backend.rfftn(in1, fshape)
+    sp2 = backend.rfftn(in2, fshape)
+    ret = backend.irfftn(sp1 * sp2, fshape)
 
     fslice = tuple([slice(sz) for sz in shape])
     ret = ret[fslice]
 
-    return ret
+    return _apply_conv_mode(ret, s1, s2)
 
 
-def _apply_conv_mode(ret: NDArray[np.float32], s1, s2):
+def _apply_conv_mode(ret: AnyArray[np.float32], s1, s2):
     shape_valid = np.asarray([s1[a] - s2[a] + 1 for a in range(ret.ndim)])
     currshape = np.array(ret.shape)
     startind = (currshape - shape_valid) // 2
     endind = startind + shape_valid
-    myslice = [slice(startind[k], endind[k]) for k in range(len(endind))]
-    return ret[tuple(myslice)]
+    sl = [slice(startind[k], endind[k]) for k in range(len(endind))]
+    return ret[tuple(sl)]

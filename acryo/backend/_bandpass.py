@@ -6,6 +6,8 @@ import numpy as np
 if TYPE_CHECKING:
     from ._api import Backend, AnyArray
 
+# Backend-independent implementation of low-pass/high-pass filters.
+
 
 def lowpass_filter_ft(
     backend: Backend,

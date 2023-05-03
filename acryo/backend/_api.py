@@ -37,6 +37,10 @@ class AnyArray(Protocol[_T]):
     def dtype(self) -> np.dtype[_T]: ...
     def dot(self, other: AnyArray[_T]) -> AnyArray[_T]: ...
     def astype(self, dtype: _T1) -> AnyArray[_T1]: ...
+    @overload
+    def mean(self, axis: None = None) -> _T: ...
+    @overload
+    def mean(self, axis: int | tuple[int, ...]) -> AnyArray[_T]: ...
 
 # fmt: on
 
@@ -218,6 +222,28 @@ class Backend:
             cval=cval,
             prefilter=prefilter,
         )  # type: ignore
+
+    def spline_filter(
+        self,
+        input,
+        order: int = 3,
+        output: _T = np.float64,
+        mode: str = "mirror",
+    ) -> AnyArray[_T]:
+        return self._ndi_.spline_filter(input, order=order, output=output, mode=mode)
+
+    def map_coordinates(
+        self,
+        x: AnyArray[_T],
+        coords: AnyArray[_T],
+        order: int = 3,
+        mode: str = "constant",
+        cval: float = -1.0,
+        prefilter: bool = True,
+    ) -> AnyArray[_T]:
+        return self._ndi_.map_coordinates(
+            x, coords, order=order, mode=mode, cval=cval, prefilter=True
+        )
 
     def rotated_crop(
         self,
