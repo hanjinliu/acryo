@@ -21,7 +21,7 @@ from acryo._types import Ranges, subpixel, degree
 from acryo._utils import compose_matrices
 from acryo._dask import DaskTaskPool, compute
 from acryo.backend import Backend, AnyArray, NUMPY_BACKEND
-from ._bound import ParametrizedModel
+from acryo.alignment._bound import ParametrizedModel
 
 
 TemplateType = Union[NDArray[np.float32], Sequence[NDArray[np.float32]]]
@@ -157,8 +157,8 @@ class BaseAlignmentModel(ABC):
     @abstractmethod
     def _optimize(
         self,
-        subvolume: NDArray[np.complex64],
-        template: NDArray[np.complex64],
+        subvolume: AnyArray[np.complex64],
+        template: AnyArray[np.complex64],
         max_shifts: tuple[float, ...],
         quaternion: NDArray[np.float32],
         pos: NDArray[np.float32],
@@ -197,20 +197,20 @@ class BaseAlignmentModel(ABC):
     @abstractmethod
     def pre_transform(
         self,
-        image: NDArray[np.float32],
+        image: AnyArray[np.float32],
         backend: Backend,
     ) -> AnyArray[np.complex64]:
         """Pre-transformation applied to input images (including template)."""
 
     def _landscape(
         self,
-        subvolume: NDArray[np.complex64],
-        template: NDArray[np.complex64],
+        subvolume: AnyArray[np.complex64],
+        template: AnyArray[np.complex64],
         max_shifts: tuple[float, ...],
         quaternion: NDArray[np.float32],
         pos: NDArray[np.float32],
         backend: Backend,
-    ) -> NDArray[np.float32]:
+    ) -> AnyArray[np.float32]:
         """Return the landscape of the subvolume."""
         raise NotImplementedError(
             f"_landscape method is not implemented for {type(self).__name__}."
@@ -237,12 +237,13 @@ class BaseAlignmentModel(ABC):
         """
         xp = backend or Backend()
         if self._n_templates > 1:
-            template_input = np.stack(
+            template_input = xp.stack(
                 [self.pre_transform(tmp * self._mask, xp) for tmp in self._template],
                 axis=0,
             )
         else:
-            template_input = self.pre_transform(self._template * self._mask, xp)
+            template_masked = xp.asarray(self._template * self._mask)
+            template_input = self.pre_transform(template_masked, xp)
         return xp.asnumpy(template_input), xp.asnumpy(self._mask)
 
     def align(
@@ -283,7 +284,7 @@ class BaseAlignmentModel(ABC):
         else:
             _align_fn = self._optimize_single
         return _align_fn(
-            img,
+            xp.asarray(img),
             self._template_input,
             self._mask_input,
             max_shifts,
@@ -317,12 +318,13 @@ class BaseAlignmentModel(ABC):
             Transformed input image and the alignment result.
         """
         xp = backend or Backend()
+        img_input = xp.asarray(img)
         result = self.align(
-            img, max_shifts=max_shifts, quaternion=None, pos=None, backend=xp
+            img_input, max_shifts=max_shifts, quaternion=None, pos=None, backend=xp
         )
-        mtx = result.affine_matrix(img.shape)
-        _cval = _normalize_cval(cval, img, xp)
-        img_trans = xp.affine_transform(img, mtx, cval=_cval)
+        mtx = result.affine_matrix(img_input.shape)
+        _cval = _normalize_cval(cval, img_input, xp)
+        img_trans = xp.affine_transform(img_input, mtx, cval=_cval)
         return xp.asnumpy(img_trans), result
 
     def landscape(
@@ -366,7 +368,7 @@ class BaseAlignmentModel(ABC):
 
         # calculate the landscape
         lds = fn(
-            img,
+            xp.asarray(img),
             self._template_input,
             self._mask_input,
             max_shifts,
@@ -395,9 +397,9 @@ class BaseAlignmentModel(ABC):
 
     def _landscape_single(
         self,
-        subvolume: NDArray[np.float32],
-        template: NDArray[np.complex64],
-        mask: NDArray[np.float32],
+        subvolume: AnyArray[np.float32],
+        template: AnyArray[np.complex64],
+        mask: AnyArray[np.float32],
         max_shifts: tuple[float, ...],
         quaternion: NDArray[np.float32],
         pos: NDArray[np.float32],
@@ -422,7 +424,7 @@ class BaseAlignmentModel(ABC):
         pos: NDArray[np.float32],
         backend: Backend,
     ) -> AnyArray[np.float32]:
-        out: list[NDArray[np.float32]] = []
+        out: list[AnyArray[np.float32]] = []
         for template, mask in zip(template_list, mask_list):
             lnd = self._landscape(
                 self.pre_transform(subvolume * mask, backend),
@@ -457,9 +459,9 @@ class BaseAlignmentModel(ABC):
 
     def _optimize_multiple(
         self,
-        subvolume: NDArray[np.float32],
-        template_list: Iterable[NDArray[np.complex64]],
-        mask_list: Iterable[NDArray[np.float32]],
+        subvolume: AnyArray[np.float32],
+        template_list: Iterable[AnyArray[np.complex64]],
+        mask_list: Iterable[AnyArray[np.float32]],
         max_shifts: tuple[float, float, float],
         quaternion: NDArray[np.float32],
         pos: NDArray[np.float32],
@@ -591,11 +593,12 @@ class RotationImplemented(BaseAlignmentModel):
         xp = backend or Backend()
         pool = DaskTaskPool.from_func(self._optimize)
         pos = np.zeros(3, dtype=np.float32)
+        img_input = xp.asarray(img)
         for quat, tmp, mask in zip(
             self.quaternions, self._template_input, self._mask_input
         ):
             pool.add_task(
-                self.pre_transform(img * mask, xp),
+                self.pre_transform(img_input * mask, xp),
                 tmp,
                 max_shifts,
                 quat,
@@ -613,14 +616,14 @@ class RotationImplemented(BaseAlignmentModel):
             score=opt_result[2],
         )
 
-        mtx = result.affine_matrix(img.shape)
-        _img_cval = _normalize_cval(cval, img, xp)
-        img_trans = xp.affine_transform(img, mtx, cval=_img_cval)
+        mtx = result.affine_matrix(img_input.shape)
+        _img_cval = _normalize_cval(cval, img_input, xp)
+        img_trans = xp.affine_transform(img_input, mtx, cval=_img_cval)
         return xp.asnumpy(img_trans), result
 
     def _transform_template(
         self,
-        temp: NDArray[np.float32],
+        temp: AnyArray[np.float32],
         matrix: NDArray[np.float32],
         cval: float | None = None,
         order: int = 3,
@@ -664,7 +667,7 @@ class RotationImplemented(BaseAlignmentModel):
             )
             cval = float(np.percentile(self._template, 1))
             if self._n_templates > 1:
-                inputs_templates: list[NDArray[np.float32]] = [
+                inputs_templates = [
                     xp.spline_filter(
                         tmp * self._mask,
                         order=3,
@@ -717,15 +720,15 @@ class RotationImplemented(BaseAlignmentModel):
                     pool_mask.asarrays(self.input_shape, dtype=np.float32),
                 )
             )
-            template_input = np.stack(_templates, axis=0)
-            mask_input = np.stack(_masks, axis=0)
+            template_input = xp.stack(_templates, axis=0)
+            mask_input = xp.stack(_masks, axis=0)
         else:
             pool = DaskTaskPool.from_func(self.pre_transform)
             if self._n_templates > 1:
                 for tmp in self._template:
                     pool.add_task(tmp * self._mask, xp)
-                template_input = np.stack(pool.compute(), axis=0)
-                mask_input = np.stack([self._mask] * len(self._template), axis=0)
+                template_input = xp.stack(pool.compute(), axis=0)
+                mask_input = xp.stack([self._mask] * len(self._template), axis=0)
 
             else:
                 # NOTE: dask.compute is always called once inside this method.
@@ -786,8 +789,8 @@ class TomographyInput(RotationImplemented):
         )
 
     def pre_transform(
-        self, image: NDArray[np.float32], backend: Backend
-    ) -> NDArray[np.complex64]:
+        self, image: AnyArray[np.float32], backend: Backend
+    ) -> AnyArray[np.complex64]:
         """Apply low-pass filter without IFFT."""
         return backend.lowpass_filter_ft(image, cutoff=self._cutoff)
 

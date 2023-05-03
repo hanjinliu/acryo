@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Callable, Literal, Protocol, Sequence, TypeVar, overload
+from typing import Any, Callable, Literal, Generic, Sequence, TypeVar, overload
 import numpy as np
 from numpy.typing import NDArray
 from . import _bandpass, _missing_wedge
@@ -13,38 +13,39 @@ _T = TypeVar("_T", bound=np.generic)
 _T1 = TypeVar("_T1", bound=np.generic)
 
 # fmt: off
-class AnyArray(Protocol[_T]):
+class AnyArray(Generic[_T]):
     """
     Type representing a ndarray of numpy or cupy (or any other array
     that has similar API).
     """
-    def __add__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...
-    def __sub__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...
-    def __mul__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...
-    def __truediv__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...
-    def __gt__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...
-    def __lt__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...
-    def __ge__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...
-    def __le__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...
-    def __eq__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...
-    def __getitem__(self, key) -> AnyArray[_T]: ...
+    def __add__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...  # type: ignore
+    def __sub__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...  # type: ignore
+    def __mul__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...  # type: ignore
+    def __truediv__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...  # type: ignore
+    def __gt__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...  # type: ignore
+    def __lt__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...  # type: ignore
+    def __ge__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...  # type: ignore
+    def __le__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...  # type: ignore
+    def __eq__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...  # type: ignore
+    def __getitem__(self, key) -> AnyArray[_T]: ...  # type: ignore
+    def __iter__(self) -> AnyArray[_T]: ...  # type: ignore
     @property
-    def real(self) -> AnyArray[np.float32]: ...
+    def real(self) -> AnyArray[np.float32]: ...  # type: ignore
     @property
-    def imag(self) -> AnyArray[np.float32]: ...
-    def conj(self) -> AnyArray[_T]: ...
+    def imag(self) -> AnyArray[np.float32]: ...  # type: ignore
+    def conj(self) -> AnyArray[_T]: ...  # type: ignore
     @property
-    def shape(self) -> tuple[int, ...]: ...
+    def shape(self) -> tuple[int, ...]: ...  # type: ignore
     @property
     def ndim(self) -> int: ...
     @property
-    def dtype(self) -> np.dtype[_T]: ...
-    def dot(self, other: AnyArray[_T]) -> AnyArray[_T]: ...
-    def astype(self, dtype: _T1) -> AnyArray[_T1]: ...
+    def dtype(self) -> np.dtype[_T]: ...  # type: ignore
+    def dot(self, other: AnyArray[_T]) -> AnyArray[_T]: ...  # type: ignore
+    def astype(self, dtype: _T1) -> AnyArray[_T1]: ...  # type: ignore
     @overload
-    def mean(self, axis: None = None) -> _T: ...
+    def mean(self, axis: None = None) -> _T: ...  # type: ignore
     @overload
-    def mean(self, axis: int | tuple[int, ...]) -> AnyArray[_T]: ...
+    def mean(self, axis: int | tuple[int, ...]) -> AnyArray[_T]: ...  # type: ignore
 
 # fmt: on
 
@@ -76,9 +77,18 @@ class Backend:
         return self._xp_.__name__
 
     def __hash__(self) -> int:
+        """Hash using the backend module."""
         return hash(self._xp_)
 
-    def asnumpy(self, x) -> NDArray[np.float32]:
+    @overload
+    def asnumpy(self, x: AnyArray[_T] | NDArray[_T]) -> NDArray[_T]:
+        ...
+
+    @overload
+    def asnumpy(self, x: Sequence[Any]) -> np.ndarray:
+        ...
+
+    def asnumpy(self, x):
         """Convert to numpy array."""
         if self._xp_ is np:
             return np.asarray(x)
@@ -178,7 +188,7 @@ class Backend:
     def argmin(self, x: AnyArray[_T], axis: int | tuple[int, ...]) -> AnyArray[np.intp]:
         ...
 
-    def argmin(self, x, axis=None):
+    def argmin(self, x, axis=None):  # type: ignore
         return self._xp_.argmin(x, axis=axis)  # type: ignore
 
     @overload
@@ -189,7 +199,7 @@ class Backend:
     def argmax(self, x: AnyArray[_T], axis: int | tuple[int, ...]) -> AnyArray[np.intp]:
         ...
 
-    def argmax(self, x, axis=None):
+    def argmax(self, x, axis=None):  # type: ignore
         return self._xp_.argmax(x, axis=axis)  # type: ignore
 
     def fftn(
@@ -234,11 +244,11 @@ class Backend:
 
     def ifftshift(self, x: AnyArray[_T]) -> AnyArray[_T]:
         """Inverse shift zero-frequency component to center."""
-        return self._xp_.fft.ifftshift(x)
+        return self._xp_.fft.ifftshift(x)  # type: ignore
 
-    def fftfreq(self, n: int, d: float = 1.0) -> AnyArray[np.float32]:
+    def fftfreq(self, n: int, d: float = 1.0) -> AnyArray[np.float_]:
         """Return the Discrete Fourier Transform sample frequencies."""
-        return self._xp_.fft.fftfreq(n, d)
+        return self._xp_.fft.fftfreq(n, d)  # type: ignore
 
     @overload
     def meshgrid(
@@ -273,17 +283,12 @@ class Backend:
     ) -> tuple[AnyArray[_T], AnyArray[_T], AnyArray[_T]]:
         ...
 
-    def meshgrid(
-        self,
-        *xi: AnyArray[_T],
-        copy: bool = True,
-        sparse: bool = False,
-        indexing: str = "xy",
-    ) -> tuple[AnyArray[_T], ...]:
+    def meshgrid(self, *xi, copy=True, sparse=False, indexing="xy"):  # type: ignore
         """Return coordinate matrices from coordinate vectors."""
         return self._xp_.meshgrid(*xi, copy=copy, sparse=sparse, indexing=indexing)  # type: ignore
 
     def unravel_index(self, indices, shape: tuple[int, ...]) -> AnyArray[np.intp]:
+        """Converts a flat index into a tuple of coordinate arrays."""
         return self._xp_.unravel_index(indices, shape)
 
     def stack(self, arrays: Sequence[AnyArray[_T]], axis: int = 0) -> AnyArray[_T]:
@@ -317,11 +322,11 @@ class Backend:
         self,
         input,
         order: int = 3,
-        output: _T = np.float64,
+        output: type[_T] = np.float64,
         mode: str = "mirror",
     ) -> AnyArray[_T]:
         return self._ndi_.spline_filter(
-            self.asarray(input), order=order, output=output, mode=mode
+            self.asarray(input), order=order, output=output, mode=mode  # type: ignore
         )
 
     def map_coordinates(
@@ -334,8 +339,8 @@ class Backend:
         prefilter: bool = True,
     ) -> AnyArray[_T]:
         return self._ndi_.map_coordinates(
-            x, coords, order=order, mode=mode, cval=cval, prefilter=True
-        )
+            x, coords, order=order, mode=mode, cval=cval, prefilter=prefilter
+        )  # type: ignore
 
     def rotated_crop(
         self,
