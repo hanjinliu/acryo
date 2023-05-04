@@ -43,7 +43,7 @@ class AnyArray(Generic[_T]):
     def __pow__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...  # type: ignore
     def __getitem__(self, key) -> AnyArray[_T]: ...  # type: ignore
     def __setitem__(self, key, value) -> None: ...  # type: ignore
-    def __iter__(self) -> Iterator[_T]: ...  # type: ignore
+    def __iter__(self) -> Iterator[AnyArray[_T]]: ...  # type: ignore
     @property
     def real(self) -> AnyArray[np.float32]: ...  # type: ignore
     @property
@@ -109,10 +109,29 @@ class Backend:
             return np.asarray(x)
         return self._xp_.asnumpy(x)  # type: ignore
 
-    def array(self, x, dtype: type[_T] | None = None) -> AnyArray[_T]:
+    @overload
+    def array(self, x, dtype: type[_T] | np.dtype[_T]) -> AnyArray[_T]:
+        ...
+
+    @overload
+    def array(self, x: AnyArray[_T] | NDArray[_T], dtype: None = None) -> AnyArray[_T]:
+        ...
+
+    def array(self, x, dtype=None):  # type: ignore
+        """Convert to numpy array."""
         return self._xp_.array(x, dtype)  # type: ignore
 
-    def asarray(self, x, dtype=None) -> AnyArray[np.float32]:
+    @overload
+    def asarray(self, x, dtype: type[_T] | np.dtype[_T]) -> AnyArray[_T]:
+        ...
+
+    @overload
+    def asarray(
+        self, x: AnyArray[_T] | NDArray[_T], dtype: None = None
+    ) -> AnyArray[_T]:
+        ...
+
+    def asarray(self, x, dtype=None):  # type: ignore
         """Convert to numpy array."""
         return self._xp_.asarray(x, dtype)  # type: ignore
 

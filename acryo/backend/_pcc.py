@@ -36,15 +36,19 @@ def subpixel_pcc(
 ) -> tuple[NDArray[np.float32], float]:
     product = f0 * f1.conj()
     power = _abs2(backend.ifftn(product))
-    _max_shifts = backend.asarray(max_shifts)
+    _max_shifts = backend.asarray(max_shifts, dtype=np.float32)
     _int_shifts = _max_shifts.astype(np.int32)
     power = crop_by_max_shifts(power, _int_shifts, _int_shifts, backend)
 
     maxima = backend.unravel_index(backend.argmax(power), power.shape)
-    midpoints = backend.array([np.fix(axis_size / 2) for axis_size in power.shape])
+    midpoints = backend.array(
+        [np.fix(axis_size / 2) for axis_size in power.shape], dtype=np.float32
+    )
 
     shifts = backend.asarray(maxima, dtype=np.float32)
-    shifts[shifts > midpoints] -= backend.array(power.shape)[shifts > midpoints]
+    shifts[shifts > midpoints] -= backend.array(power.shape, dtype=np.float32)[
+        shifts > midpoints
+    ]
     # Initial shift estimate in upsampled grid
     shifts = backend.fix(shifts * upsample_factor) / upsample_factor
     if upsample_factor > 1:
@@ -116,7 +120,7 @@ def crop_by_max_shifts(
     shifted_power = backend.fftshift(power)
     centers = tuple(s // 2 for s in power.shape)
     slices = tuple(
-        slice(max(c - int(shiftl), 0), min(c + int(shiftr) + 1, s), None)
+        slice(max(c - int(shiftl), 0), min(c + int(shiftr) + 1, s), None)  # type: ignore
         for c, shiftl, shiftr, s in zip(centers, left, right, power.shape)
     )
     return backend.ifftshift(shifted_power[slices])
