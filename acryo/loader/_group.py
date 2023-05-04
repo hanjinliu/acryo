@@ -28,6 +28,7 @@ from acryo import _utils
 from acryo._types import nm
 from acryo._dask import compute, DaskTaskList
 from acryo.loader import _misc
+from acryo.backend import Backend, AnyArray
 
 if TYPE_CHECKING:
     from dask.delayed import Delayed
@@ -90,19 +91,23 @@ class LoaderGroup(Generic[_K, _L]):
         yield from self._it
 
     def average(
-        self, output_shape: _ShapeType | None = None
+        self,
+        output_shape: _ShapeType = None,
+        *,
+        backend: Backend | None = None,
     ) -> dict[_K, NDArray[np.float32]]:
         """Calculate average images."""
+        xp = backend or Backend()
         tasks = []
         keys: list[_K] = []
         for key, loader in self:
             keys.append(key)
             _output_shape = loader._get_output_shape(output_shape)
-            dsk = loader.construct_dask(_output_shape)
+            dsk = loader.construct_dask(_output_shape, backend=xp)
             tasks.append(da.mean(dsk, axis=0))
 
-        out: list[NDArray[np.float32]] = da.compute(tasks)[0]
-        return {key: img for key, img in zip(keys, out)}
+        out: list[AnyArray[np.float32]] = da.compute(tasks)[0]
+        return {key: xp.asnumpy(img) for key, img in zip(keys, out)}
 
     def average_split(
         self,
@@ -110,6 +115,8 @@ class LoaderGroup(Generic[_K, _L]):
         seed: int | None = 0,
         squeeze: bool = True,
         output_shape: _ShapeType = None,
+        *,
+        backend: Backend | None = None,
     ) -> dict[_K, NDArray[np.float32]]:
         """
         Split subtomograms into two set and average separately.
@@ -135,12 +142,13 @@ class LoaderGroup(Generic[_K, _L]):
         dict of np.ndarray
             Averaged images with keys of the group keys.
         """
+        xp = backend or Backend()
         rng = np.random.default_rng(seed=seed)
 
         all_tasks: list[list[da.Array]] = []
         for key, loader in self:
             output_shape = loader._get_output_shape(output_shape)
-            dask_array = loader.construct_dask(output_shape=output_shape)
+            dask_array = loader.construct_dask(output_shape=output_shape, backend=xp)
             nmole = dask_array.shape[0]
             tasks: list[da.Array] = []
             for _ in range(n_set):
@@ -158,7 +166,7 @@ class LoaderGroup(Generic[_K, _L]):
         computed = da.compute(all_tasks)[0]
         out: dict[_K, NDArray[np.float32]] = {}
         for (key, loader), stack in zip(self, computed):
-            stack = np.stack(stack, axis=0)
+            stack = xp.asnumpy(xp.stack(stack, axis=0))
             if squeeze and n_set == 1:
                 stack = stack[0]
             out[key] = stack
@@ -171,6 +179,7 @@ class LoaderGroup(Generic[_K, _L]):
         mask: MaskInputType = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
         alignment_model: type[BaseAlignmentModel] | AlignmentFactory = ZNCCAlignment,
+        backend: Backend | None = None,
         **align_kwargs,
     ) -> LoaderGroup[_K, _L]:
         """
@@ -213,6 +222,7 @@ class LoaderGroup(Generic[_K, _L]):
                 model.align,
                 max_shifts=_max_shifts_px,
                 output_shape=model.input_shape,
+                backend=backend,
                 var_kwarg=dict(
                     quaternion=loader.molecules.quaternion(),
                     pos=loader.molecules.pos / loader.scale,
@@ -238,6 +248,7 @@ class LoaderGroup(Generic[_K, _L]):
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
         output_shape: _ShapeType = None,
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
+        backend: Backend | None = None,
         **align_kwargs,
     ) -> LoaderGroup[_K, _L]:
         """
@@ -265,12 +276,14 @@ class LoaderGroup(Generic[_K, _L]):
         LoaderGroup
             A loader group with updated molecules.
         """
-        avg = self.average(output_shape=output_shape)
+        xp = backend or Backend()
+        avg = self.average(output_shape=output_shape, backend=xp)
         return self.align(
             avg,
             mask=mask,
             max_shifts=max_shifts,
             alignment_model=alignment_model,
+            backend=xp,
             **align_kwargs,
         )
 
@@ -385,13 +398,17 @@ class LoaderGroup(Generic[_K, _L]):
         if len(set(schema)) != len(schema):
             raise ValueError("Schema names must be unique.")
         keys: list[_K] = []
+        xp = Backend()
         for key, loader in self:
             output_shape = loader.output_shape
             if not isinstance(output_shape, tuple):
                 raise ValueError("LoaderGroup has no output shape.")
             taskset = []
             for fn in _funcs:
-                tasks = loader.construct_mapping_tasks(fn, output_shape=output_shape)
+                f_as_np = lambda ar: fn(xp.asnumpy(ar))
+                tasks = loader.construct_mapping_tasks(
+                    f_as_np, output_shape=output_shape
+                )
                 taskset.append(list(tasks))
             all_tasks.append(taskset)
             keys.append(key)
@@ -507,7 +524,7 @@ class LoaderGroupByIterator(Iterable[tuple[_K, _L]]):
 
     def __iter__(self) -> Iterator[tuple[_K, _L]]:
         loader = self._loader
-        cached = loader._get_cached_array(shape=None)
+        cached = loader._get_cached_array(None, Backend())
         index_col_name = "__index"
         if index_col_name in loader.molecules.features:
             index_col_name += "_"

@@ -763,7 +763,7 @@ class RotationImplemented(BaseAlignmentModel):
 
             else:
                 # NOTE: dask.compute is always called once inside this method.
-                template_masked = self._template * self._mask
+                template_masked = xp.asarray(self._template * self._mask)
                 template_input = pool.add_task(template_masked, xp).compute()[0]
                 mask_input = xp.asarray(self._mask)
 
@@ -915,8 +915,8 @@ def _build_mesh(
     upsample: int,
     backend: Backend,
 ) -> AnyArray[np.float32]:
-    upsampled_max_shifts = (backend.asarray(max_shifts) * upsample).astype(np.int32)
-    center = backend.array(shape) / 2 - 0.5
+    upsampled_max_shifts = (np.asarray(max_shifts) * upsample).astype(np.int32)
+    center = np.array(shape) / 2 - 0.5
     mesh = backend.meshgrid(
         *[
             backend.arange(-width, width + 1) / upsample + c

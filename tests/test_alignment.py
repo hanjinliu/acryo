@@ -29,8 +29,6 @@ def measure_time(desc):
 @pytest.mark.parametrize("alignment_model", [ZNCCAlignment, PCCAlignment])
 @pytest.mark.parametrize("rotations", [None, ((25, 25), (25, 25), (25, 25))])
 def test_run(alignment_model: type[BaseAlignmentModel], rotations):
-    from acryo.backend import Backend
-    print(Backend())
     scale = 0.32
     temp = spiral()
     gen = TomogramGenerator(

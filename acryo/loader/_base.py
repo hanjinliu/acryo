@@ -114,15 +114,22 @@ class LoaderBase(ABC):
         return self._corner_safe
 
     @abstractmethod
-    def construct_loading_tasks(self, output_shape: _ShapeType = None) -> DaskArrayList:
+    def construct_loading_tasks(
+        self,
+        output_shape: _ShapeType = None,
+        backend: Backend | None = None,
+    ) -> DaskArrayList:
         ...
 
-    def _get_cached_array(self, shape: tuple[int, int, int] | None) -> da.Array | None:
-        return CACHE.get_cache(id(self), shape)
+    def _get_cached_array(
+        self, shape: tuple[int, int, int] | None, backend: Backend
+    ) -> da.Array | None:
+        return CACHE.get_cache(id(self), shape, backend)
 
     def construct_dask(
         self,
         output_shape: pixel | tuple[pixel, ...] | None = None,
+        backend: Backend | None = None,
     ) -> da.Array:
         """
         Construct a dask array of subtomograms.
@@ -136,11 +143,11 @@ class LoaderBase(ABC):
             An 4-D array which ``arr[i]`` corresponds to the ``i``-th subtomogram.
         """
         output_shape = self._get_output_shape(output_shape)
-
-        if (cached := self._get_cached_array(output_shape)) is not None:
+        xp = backend or Backend()
+        if (cached := self._get_cached_array(output_shape, xp)) is not None:
             return cached
 
-        tasks = self.construct_loading_tasks(output_shape=output_shape)
+        tasks = self.construct_loading_tasks(output_shape, xp)
         out = da.stack(tasks, axis=0)
         return out
 
@@ -251,9 +258,12 @@ class LoaderBase(ABC):
             A lazy-loading array that uses the memory-mapped array.
         """
         output_shape = self._get_output_shape(output_shape)
-        if (cached := self._get_cached_array(output_shape)) is not None:
+        backend = Backend()
+        if (cached := self._get_cached_array(output_shape, backend)) is not None:
             return cached
-        dsk = self.construct_dask(output_shape=output_shape)
+        dsk = self.construct_dask(output_shape=output_shape, backend=backend)
+        if backend.name == "cupy":
+            dsk = dsk.map_blocks(lambda x: x.get(), dtype=dsk.dtype)  # type: ignore
         return CACHE.cache_array(dsk, id(self))
 
     @contextmanager
@@ -374,7 +384,7 @@ class LoaderBase(ABC):
         """
         backend = Backend()
         output_shape = self._get_output_shape(output_shape)
-        rng = backend._xp_.random.default_rng(seed=seed)
+        rng = np.random.default_rng(seed=seed)
 
         tasks: list[da.Array] = []
         dsk = self.construct_dask(output_shape=output_shape)
@@ -931,7 +941,7 @@ class LoaderBase(ABC):
     ) -> Self:
         """Return a new loader with filtered molecules."""
         out = self.replace(molecules=self.molecules.filter(predicate))
-        if (cached := self._get_cached_array(shape=None)) is not None:
+        if (cached := self._get_cached_array(None, Backend())) is not None:
             if isinstance(predicate, (str, pl.Expr)):
                 sl = self.molecules.features.select(predicate).to_numpy().ravel()
             else:

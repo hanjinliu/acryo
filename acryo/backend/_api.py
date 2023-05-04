@@ -34,6 +34,10 @@ class AnyArray(Generic[_T]):
     def __sub__(self, other: Any) -> AnyArray[_T]: ...  # type: ignore
     def __mul__(self, other: Any) -> AnyArray[_T]: ...  # type: ignore
     def __truediv__(self, other: Any) -> AnyArray[np.float_]: ...  # type: ignore
+    def __radd__(self, other: Any) -> AnyArray[_T]: ...  # type: ignore
+    def __rsub__(self, other: Any) -> AnyArray[_T]: ...  # type: ignore
+    def __rmul__(self, other: Any) -> AnyArray[_T]: ...  # type: ignore
+    def __rtruediv__(self, other: Any) -> AnyArray[np.float_]: ...  # type: ignore
     def __floordiv__(self, other: Any) -> AnyArray[np.intp]: ...  # type: ignore
     def __gt__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...  # type: ignore
     def __lt__(self, other: AnyArray[_T] | float) -> AnyArray[_T]: ...  # type: ignore
@@ -72,7 +76,7 @@ class Backend:
         if name is None:
             name = self._default
         if name == "numpy":
-            from scipy import ndimage, fft
+            from scipy import ndimage, fft  # type: ignore
 
             self._xp_ = np
             self._ndi_ = ndimage
@@ -94,22 +98,14 @@ class Backend:
     def __hash__(self) -> int:
         """Hash using the backend module."""
         return hash(self._xp_)
-    
+
     def __repr__(self) -> str:
         return f"Backend<{self.name}>"
 
-    @overload
     def asnumpy(self, x: AnyArray[_T] | NDArray[_T]) -> NDArray[_T]:
-        ...
-
-    @overload
-    def asnumpy(self, x: Sequence[Any]) -> np.ndarray:
-        ...
-
-    def asnumpy(self, x):
         """Convert to numpy array."""
         if self._xp_ is np:
-            return np.asarray(x)
+            return x  # type: ignore
         return x.get()  # type: ignore
 
     @overload
@@ -176,15 +172,15 @@ class Backend:
     def sum(self, x, axis=None):
         """Return the sum of array elements over a given axis."""
         return self._xp_.sum(x, axis=axis)
-    
+
     @overload
     def mean(self, x: AnyArray[_T], axis: None = None) -> _T:
         ...
-    
+
     @overload
     def mean(self, x: AnyArray[_T], axis: int | tuple[int, ...]) -> AnyArray[_T]:
         ...
-    
+
     def mean(self, x, axis=None):
         """Return the mean of array elements over a given axis."""
         return self._xp_.mean(x, axis=axis)
@@ -365,9 +361,37 @@ class Backend:
         """Return coordinate matrices from coordinate vectors."""
         return self._xp_.meshgrid(*xi, copy=copy, sparse=sparse, indexing=indexing)  # type: ignore
 
+    @overload
+    def indices(
+        self, shape: tuple[int], dtype: type[_T] = np.int32
+    ) -> tuple[AnyArray[_T]]:
+        ...
+
+    @overload
+    def indices(
+        self, shape: tuple[int, int], dtype: type[_T] = np.int32
+    ) -> tuple[AnyArray[_T], AnyArray[_T]]:
+        ...
+
+    @overload
+    def indices(
+        self, shape: tuple[int, int, int], dtype: type[_T] = np.int32
+    ) -> tuple[AnyArray[_T], AnyArray[_T], AnyArray[_T]]:
+        ...
+
+    @overload
+    def indices(
+        self, shape: tuple[int, ...], dtype: type[_T] = np.int32
+    ) -> tuple[AnyArray[_T], ...]:
+        ...
+
+    def indices(self, shape, dtype=np.int32):  # type: ignore
+        """Return an array representing the indices of a grid."""
+        return self._xp_.indices(shape, dtype=dtype)  # type: ignore
+
     def unravel_index(self, indices, shape: tuple[int, ...]) -> AnyArray[np.intp]:
         """Converts a flat index into a tuple of coordinate arrays."""
-        return self._xp_.unravel_index(indices, shape)
+        return self._xp_.asarray(self._xp_.unravel_index(indices, shape))  # type: ignore
 
     def stack(self, arrays: Sequence[AnyArray[_T]], axis: int = 0) -> AnyArray[_T]:
         """Stack arrays in sequence along a new axis."""
@@ -426,7 +450,7 @@ class Backend:
         mtx: NDArray[np.float32],
         shape: tuple[int, int, int],
         order: int,
-        cval: float | Callable[[NDArray[np.float32]], float],
+        cval: float | Callable[[AnyArray[np.float32]], Any],
     ) -> AnyArray[np.float32]:
         if callable(cval):
             cval = cval(subimg)
@@ -471,6 +495,7 @@ def using_backend(name: str):
         yield
     finally:
         Backend._default = old_backend
+
 
 def set_backend(name: str):
     """Set the default backend."""

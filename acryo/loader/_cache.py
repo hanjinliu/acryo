@@ -6,6 +6,7 @@ import tempfile
 from contextlib import contextmanager
 import numpy as np
 from dask import array as da
+from acryo.backend import Backend
 
 
 class _Subtomogram(NamedTuple):
@@ -26,7 +27,7 @@ class SubtomogramCache(Mapping[int, _Subtomogram]):
     def __iter__(self):
         return iter(self._dict)
 
-    def cache_array(self, dsk: da.Array, id_) -> da.Array:
+    def cache_array(self, dsk: da.Array, id_: int) -> da.Array:
         shape = dsk.shape
         with tempfile.NamedTemporaryFile(dir=self._cache_dir) as ntf:
             mmap = np.memmap(ntf, dtype=np.float32, mode="w+", shape=shape)
@@ -42,12 +43,15 @@ class SubtomogramCache(Mapping[int, _Subtomogram]):
         return darr
 
     def get_cache(
-        self, id_: int, shape: tuple[int, int, int] | None = None
+        self,
+        id_: int,
+        shape: tuple[int, int, int] | None,
+        backend: Backend,
     ) -> da.Array | None:
         if id_ in self._dict:
             dsk = self._dict[id_].array
             if shape is None or dsk.shape[1:] == shape:
-                return dsk
+                return dsk.map_blocks(backend.asarray, dtype=dsk.dtype)  # type: ignore
         return None
 
     def delete_cache(self, id_):
