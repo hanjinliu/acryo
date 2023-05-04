@@ -122,7 +122,7 @@ class LoaderBase(ABC):
         ...
 
     def _get_cached_array(
-        self, shape: tuple[int, int, int] | None, backend: Backend
+        self, shape: tuple[int, int, int] | None, backend: Backend | None
     ) -> da.Array | None:
         return CACHE.get_cache(id(self), shape, backend)
 
@@ -262,8 +262,6 @@ class LoaderBase(ABC):
         if (cached := self._get_cached_array(output_shape, backend)) is not None:
             return cached
         dsk = self.construct_dask(output_shape=output_shape, backend=backend)
-        if backend.name == "cupy":
-            dsk = dsk.map_blocks(lambda x: x.get(), dtype=dsk.dtype)  # type: ignore
         return CACHE.cache_array(dsk, id(self))
 
     @contextmanager
@@ -345,11 +343,11 @@ class LoaderBase(ABC):
         np.ndarray
             Averaged image
         """
-        _backend = backend or Backend()
+        xp = backend or Backend()
         output_shape = self._get_output_shape(output_shape)
-        dsk = self.construct_dask(output_shape=output_shape)
+        dsk = self.construct_dask(output_shape=output_shape, backend=xp)
         dsk = dsk.rechunk(("auto",) + output_shape)  # type: ignore
-        return _backend.asnumpy(da.compute(da.mean(dsk, axis=0))[0])
+        return xp.asnumpy(dsk.mean(axis=0).compute())
 
     def average_split(
         self,
@@ -393,8 +391,8 @@ class LoaderBase(ABC):
             ind0, ind1 = _misc.random_splitter(rng, nmole)
             _stack = da.stack(
                 [
-                    da.mean(dsk[ind0].rechunk(("auto",) + output_shape), axis=0),  # type: ignore
-                    da.mean(dsk[ind1].rechunk(("auto",) + output_shape), axis=0),  # type: ignore
+                    dsk[ind0].rechunk(("auto",) + output_shape).mean(axis=0),  # type: ignore
+                    dsk[ind1].rechunk(("auto",) + output_shape).mean(axis=0),  # type: ignore
                 ],
                 axis=0,
             )
@@ -941,7 +939,7 @@ class LoaderBase(ABC):
     ) -> Self:
         """Return a new loader with filtered molecules."""
         out = self.replace(molecules=self.molecules.filter(predicate))
-        if (cached := self._get_cached_array(None, Backend())) is not None:
+        if (cached := self._get_cached_array(None, None)) is not None:
             if isinstance(predicate, (str, pl.Expr)):
                 sl = self.molecules.features.select(predicate).to_numpy().ravel()
             else:

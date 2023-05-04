@@ -416,7 +416,7 @@ class Backend:
             output=output,
             order=order,
             mode=mode,
-            cval=cval,
+            cval=float(cval),
             prefilter=prefilter,
         )  # type: ignore
 

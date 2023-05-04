@@ -11,6 +11,7 @@ from acryo.backend import Backend
 
 class _Subtomogram(NamedTuple):
     array: da.Array
+    backend: str
 
 
 class SubtomogramCache(Mapping[int, _Subtomogram]):
@@ -32,6 +33,10 @@ class SubtomogramCache(Mapping[int, _Subtomogram]):
         with tempfile.NamedTemporaryFile(dir=self._cache_dir) as ntf:
             mmap = np.memmap(ntf, dtype=np.float32, mode="w+", shape=shape)
 
+        component = dsk[(0,) * dsk.ndim].compute()
+        _is_cupy = type(component).__module__.startswith("cupy")
+        if _is_cupy:
+            dsk = dsk.map_blocks(lambda x: x.get(), dtype=dsk.dtype)  # type: ignore
         da.store(dsk, mmap, compute=True)
 
         darr = da.from_array(
@@ -39,18 +44,23 @@ class SubtomogramCache(Mapping[int, _Subtomogram]):
             chunks=("auto",) + shape[1:],  # type: ignore
             meta=np.array([], dtype=np.float32),
         )
-        self._dict[id_] = _Subtomogram(darr)
+        self._dict[id_] = _Subtomogram(darr, "cupy" if _is_cupy else "numpy")
         return darr
 
     def get_cache(
         self,
         id_: int,
         shape: tuple[int, int, int] | None,
-        backend: Backend,
+        backend: Backend | None = None,
     ) -> da.Array | None:
         if id_ in self._dict:
-            dsk = self._dict[id_].array
+            cache = self._dict[id_]
+            dsk = cache.array
             if shape is None or dsk.shape[1:] == shape:
+                if backend is None:
+                    return dsk
+                elif cache.backend == "cupy" and backend.name == "numpy":
+                    return dsk.map_blocks(backend.asnumpy, dtype=dsk.dtype)  # type: ignore
                 return dsk.map_blocks(backend.asarray, dtype=dsk.dtype)  # type: ignore
         return None
 
