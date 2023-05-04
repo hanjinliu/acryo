@@ -134,7 +134,7 @@ def fourier_shell_correlation(
     return freq, out
 
 
-def bin_image(img: np.ndarray | da.Array, binsize: int) -> np.ndarray:
+def bin_image(img: np.ndarray | da.Array, binsize: int):
     """Bin an image."""
     _slices: list[slice] = []
     _shapes: list[int] = []
@@ -144,9 +144,9 @@ def bin_image(img: np.ndarray | da.Array, binsize: int) -> np.ndarray:
         _shapes.extend([npix, binsize])
     slices = tuple(_slices)
     shapes = tuple(_shapes)
-    img_reshaped = np.reshape(img[slices], shapes)
+    img_reshaped = img[slices].reshape(shapes)
     axis = tuple(i * 2 + 1 for i in range(img.ndim))
-    return np.sum(img_reshaped, axis=axis)
+    return img_reshaped.sum(axis=axis)
 
 
 def prepare_affine(
