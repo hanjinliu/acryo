@@ -3,7 +3,6 @@
 from __future__ import annotations
 from typing import (
     TYPE_CHECKING,
-    Callable,
     NamedTuple,
     Any,
 )
@@ -12,7 +11,6 @@ from dask import array as da
 
 from acryo._types import nm, pixel
 from acryo._reader import imread
-from acryo._typed_scipy import affine_transform
 from acryo.molecules import Molecules
 from acryo.backend import Backend
 from acryo import _utils
@@ -278,25 +276,3 @@ def check_input(
 
     _corner_safe = bool(corner_safe)
     return order, _output_shape, _scale, _corner_safe
-
-
-def _rotated_crop(
-    subimg,
-    mtx: NDArray[np.float32],
-    shape: tuple[int, int, int],
-    order: int,
-    cval: float | Callable[[NDArray[np.float32]], float],
-) -> NDArray[np.float32]:
-    if callable(cval):
-        cval = cval(subimg)
-
-    out = affine_transform(
-        subimg,
-        matrix=mtx,
-        output_shape=shape,
-        order=order,
-        prefilter=order > 1,
-        mode="constant",
-        cval=cval,
-    )
-    return out

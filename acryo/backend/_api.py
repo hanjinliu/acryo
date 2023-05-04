@@ -108,6 +108,11 @@ class Backend:
             return x  # type: ignore
         return x.get()  # type: ignore
 
+    def maycopy(self, x: AnyArray[_T]) -> AnyArray[_T]:
+        if self._xp_ is np:
+            return x
+        return x.copy()  # type: ignore
+
     @overload
     def array(self, x, dtype: type[_T] | np.dtype[_T]) -> AnyArray[_T]:
         ...
@@ -453,7 +458,9 @@ class Backend:
         cval: float | Callable[[AnyArray[np.float32]], Any],
     ) -> AnyArray[np.float32]:
         if callable(cval):
-            cval = cval(subimg)
+            _cval = cval(subimg)
+        else:
+            _cval = cval
 
         out = self.affine_transform(
             subimg,
@@ -462,7 +469,7 @@ class Backend:
             order=order,
             prefilter=order > 1,
             mode="constant",
-            cval=cval,
+            cval=float(_cval),
         )
         return out
 

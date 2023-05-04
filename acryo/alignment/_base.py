@@ -589,7 +589,7 @@ class RotationImplemented(BaseAlignmentModel):
         AlignmentResult
             Result of alignment.
         """
-        iopt, shift, _, corr = super().align(img, max_shifts, quaternion, pos)
+        iopt, shift, _, corr = super().align(img, max_shifts, quaternion, pos, backend)
         quat = self.quaternions[iopt % self._n_rotations]
         return AlignmentResult(label=iopt, shift=shift, quat=quat, score=corr)
 
