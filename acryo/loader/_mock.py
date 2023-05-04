@@ -11,9 +11,10 @@ from scipy.spatial.transform import Rotation
 
 from acryo import _utils
 from acryo._types import nm
-from acryo._typed_scipy import fftn, ifftn, spline_filter, affine_transform
+from acryo._typed_scipy import fftn, ifftn, spline_filter
 from acryo._dask import DaskArrayList, DaskTaskPool
 from acryo.molecules import Molecules
+from acryo.backend import Backend
 from acryo.pipe._classes import ImageProvider
 
 if TYPE_CHECKING:
@@ -87,11 +88,18 @@ class MockLoader(LoaderBase):
         """All the molecules"""
         return self._molecules
 
-    def construct_loading_tasks(self, output_shape: _ShapeType = None) -> DaskArrayList:
+    def construct_loading_tasks(
+        self,
+        output_shape: _ShapeType = None,
+        backend: Backend | None = None,
+    ) -> DaskArrayList:
         # TODO: this implementation is not efficent. Radon transformation is not
         # actually needed. Apply missing wedge mask directly to the template, and
         # apply inverse-Radon only to the noise. The linearity of Radon
         # transformation guarantees that the result is correct.
+        _backend = backend or Backend()
+        if _backend.name == "cupy":
+            raise NotImplementedError("Cupy backend is not supported yet.")
         if isinstance(self._template, ImageProvider):
             template = self._template(self.scale)
         else:
@@ -113,7 +121,7 @@ class MockLoader(LoaderBase):
         matrices = self.molecules.affine_matrix(
             center, center + self.molecules.pos / self.scale
         )
-        pool = DaskTaskPool.from_func(affine_transform)
+        pool = DaskTaskPool.from_func(_backend.affine_transform)
         for mtx in matrices:
             pool.add_task(template, mtx, order=self.order, prefilter=False)
         task_list = pool.asarrays(shape=template.shape, dtype=np.float32)

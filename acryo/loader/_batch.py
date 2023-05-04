@@ -12,6 +12,7 @@ from dask import array as da
 
 from acryo import _utils
 from acryo.molecules import Molecules
+from acryo.backend import Backend
 from acryo._types import nm, pixel
 from acryo._dask import DaskArrayList
 from acryo.loader._base import LoaderBase
@@ -60,9 +61,24 @@ class BatchLoader(LoaderBase):
         self,
         image: np.ndarray | da.Array,
         molecules: Molecules,
-        image_id: Hashable = None,
+        image_id: Hashable | None = None,
     ) -> Self:
-        """Add a tomogram and its molecules to the collection."""
+        """
+        Add a tomogram and its molecules to the collection.
+
+        Parameters
+        ----------
+        image : np.ndarray or da.Array
+            Tomogram image. This argument is passed directly to the `SubtomogramLoader`
+            constructor.
+        molecules : Molecules
+            Molecules in the tomogram (corresponding to the ``image`` argument). This
+            argument is passed directly to the `SubtomogramLoader` constructor.
+        image_id : Hashable, optional
+            Identifier for the tomogram. If not provided, a unique identifier will be
+            generated. This identifier is used to tag molecules with the tomogram they
+            reside in.
+        """
         if image_id is None:
             image_id = len(self._images)
             while image_id in self._images:
@@ -165,9 +181,14 @@ class BatchLoader(LoaderBase):
         out._images = _images
         return out
 
-    def construct_loading_tasks(self, output_shape: _ShapeType = None) -> DaskArrayList:
+    def construct_loading_tasks(
+        self,
+        output_shape: _ShapeType = None,
+        backend: Backend | None = None,
+    ) -> DaskArrayList:
+        _backend = backend or Backend()
         return DaskArrayList.concat(
-            loader.construct_loading_tasks(output_shape=output_shape)
+            loader.construct_loading_tasks(output_shape=output_shape, backend=_backend)
             for loader in self.loaders
         )
 

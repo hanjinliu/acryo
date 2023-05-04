@@ -33,6 +33,7 @@ from acryo.alignment import (
 )
 from acryo import _utils
 from acryo._types import nm, pixel
+from acryo.backend import Backend
 from acryo._dask import DaskArrayList, DaskTaskList, DaskTaskIterator, compute
 from acryo.molecules import Molecules
 from acryo.loader import _misc
@@ -320,7 +321,9 @@ class LoaderBase(ABC):
         for task in tasks:
             yield task.compute()
 
-    def average(self, output_shape: _ShapeType = None) -> NDArray[np.float32]:
+    def average(
+        self, output_shape: _ShapeType = None, *, backend: Backend | None = None
+    ) -> NDArray[np.float32]:
         """
         Calculate the average of subtomograms.
 
@@ -332,10 +335,11 @@ class LoaderBase(ABC):
         np.ndarray
             Averaged image
         """
+        _backend = backend or Backend()
         output_shape = self._get_output_shape(output_shape)
         dsk = self.construct_dask(output_shape=output_shape)
         dsk = dsk.rechunk(("auto",) + output_shape)  # type: ignore
-        return da.compute(da.mean(dsk, axis=0))[0]
+        return _backend.asnumpy(da.compute(da.mean(dsk, axis=0))[0])
 
     def average_split(
         self,
@@ -368,8 +372,9 @@ class LoaderBase(ABC):
         np.ndarray
             Averaged images. The shape of the array is (n_set, 2, *output_shape).
         """
+        backend = Backend()
         output_shape = self._get_output_shape(output_shape)
-        rng = np.random.default_rng(seed=seed)
+        rng = backend._xp_.random.default_rng(seed=seed)
 
         tasks: list[da.Array] = []
         dsk = self.construct_dask(output_shape=output_shape)
@@ -386,7 +391,7 @@ class LoaderBase(ABC):
             tasks.append(_stack)
 
         out = da.compute(tasks)[0]
-        stack = np.stack(out, axis=0)
+        stack = np.stack([backend.asnumpy(a) for a in out], axis=0)
         if squeeze and n_set == 1:
             stack = stack[0]
         return stack
@@ -398,6 +403,7 @@ class LoaderBase(ABC):
         mask: MaskInputType = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
         alignment_model: type[BaseAlignmentModel] | AlignmentFactory = ZNCCAlignment,
+        backend: Backend | None = None,
         **align_kwargs,
     ) -> Self:
         """
@@ -427,6 +433,7 @@ class LoaderBase(ABC):
         subtomogram loader object
             A loader instance of the same type with updated molecules.
         """
+        _backend = backend or Backend()
         max_shifts = _normalize_max_shifts(max_shifts)
         _max_shifts_px = np.asarray(max_shifts) / self.scale
 
@@ -439,6 +446,7 @@ class LoaderBase(ABC):
             model.align,
             max_shifts=_max_shifts_px,
             output_shape=model.input_shape,
+            backend=_backend,
             var_kwarg=dict(
                 quaternion=self.molecules.quaternion(),
                 pos=self.molecules.pos / self.scale,
@@ -504,13 +512,15 @@ class LoaderBase(ABC):
         """
         if output_shape is None and isinstance(mask, np.ndarray):
             output_shape = mask.shape
+        backend = Backend()
         with self.cached(output_shape=output_shape):
-            template = self.average(output_shape=output_shape)
+            template = self.average(output_shape=output_shape, backend=backend)
             out = self.align(
                 template,
                 mask=mask,
                 max_shifts=max_shifts,
                 alignment_model=alignment_model,
+                backend=backend,
                 **align_kwargs,
             )
         return out
@@ -564,6 +574,7 @@ class LoaderBase(ABC):
             model.align,
             max_shifts=_max_shifts_px,
             output_shape=model.input_shape,
+            backend=Backend(),
             var_kwarg=dict(
                 quaternion=self.molecules.quaternion(),
                 pos=self.molecules.pos / self.scale,
