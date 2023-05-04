@@ -239,7 +239,7 @@ class SubtomogramLoader(LoaderBase):
                 mtx,
                 shape=output_shape,
                 order=self.order,
-                cval=_backend._xp_.mean,
+                cval=_backend.mean,
             )
 
         return pool.asarrays(shape=output_shape, dtype=np.float32)

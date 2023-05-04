@@ -52,7 +52,7 @@ def subpixel_pcc(
     # Initial shift estimate in upsampled grid
     shifts = backend.fix(shifts * upsample_factor) / upsample_factor
     if upsample_factor > 1:
-        upsampled_region_size = backend._xp_.ceil(upsample_factor * 1.5)
+        upsampled_region_size = math.ceil(upsample_factor * 1.5)
         # Center of output array at dftshift + 1
         dftshift = backend.fix(upsampled_region_size / 2.0)
         # Matrix multiply DFT around the current shift estimate

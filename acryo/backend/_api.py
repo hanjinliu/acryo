@@ -81,7 +81,7 @@ class Backend:
             import cupy
             from cupyx.scipy import ndimage, fft
 
-            self._xp = cupy
+            self._xp_ = cupy
             self._ndi_ = ndimage
             self._fft_ = fft
         else:
@@ -94,6 +94,9 @@ class Backend:
     def __hash__(self) -> int:
         """Hash using the backend module."""
         return hash(self._xp_)
+    
+    def __repr__(self) -> str:
+        return f"Backend<{self.name}>"
 
     @overload
     def asnumpy(self, x: AnyArray[_T] | NDArray[_T]) -> NDArray[_T]:
@@ -107,7 +110,7 @@ class Backend:
         """Convert to numpy array."""
         if self._xp_ is np:
             return np.asarray(x)
-        return self._xp_.asnumpy(x)  # type: ignore
+        return x.get()  # type: ignore
 
     @overload
     def array(self, x, dtype: type[_T] | np.dtype[_T]) -> AnyArray[_T]:
@@ -173,6 +176,18 @@ class Backend:
     def sum(self, x, axis=None):
         """Return the sum of array elements over a given axis."""
         return self._xp_.sum(x, axis=axis)
+    
+    @overload
+    def mean(self, x: AnyArray[_T], axis: None = None) -> _T:
+        ...
+    
+    @overload
+    def mean(self, x: AnyArray[_T], axis: int | tuple[int, ...]) -> AnyArray[_T]:
+        ...
+    
+    def mean(self, x, axis=None):
+        """Return the mean of array elements over a given axis."""
+        return self._xp_.mean(x, axis=axis)
 
     def cumsum(self, x: AnyArray[_T], axis: int | None = None) -> AnyArray[_T]:
         return self._xp_.cumsum(x, axis=axis)  # type: ignore
@@ -301,13 +316,13 @@ class Backend:
         """N-dimensional inverse FFT of real part."""
         return self._fft_.irfftn(x, s, axes)  # type: ignore
 
-    def fftshift(self, x: AnyArray[_T]) -> AnyArray[_T]:
+    def fftshift(self, x: AnyArray[_T], axes=None) -> AnyArray[_T]:
         """Shift zero-frequency component to center."""
-        return self._xp_.fft.fftshift(x)  # type: ignore
+        return self._xp_.fft.fftshift(x, axes=axes)  # type: ignore
 
-    def ifftshift(self, x: AnyArray[_T]) -> AnyArray[_T]:
+    def ifftshift(self, x: AnyArray[_T], axes=None) -> AnyArray[_T]:
         """Inverse shift zero-frequency component to center."""
-        return self._xp_.fft.ifftshift(x)  # type: ignore
+        return self._xp_.fft.ifftshift(x, axes=axes)  # type: ignore
 
     def fftfreq(self, n: int, d: float = 1.0) -> AnyArray[np.float_]:
         """Return the Discrete Fourier Transform sample frequencies."""
@@ -448,7 +463,7 @@ NUMPY_BACKEND = Backend("numpy")
 
 
 @contextmanager
-def using(name: str):
+def using_backend(name: str):
     """Context manager to temporarily change the default backend."""
     old_backend = Backend._default
     Backend._default = name
@@ -456,3 +471,7 @@ def using(name: str):
         yield
     finally:
         Backend._default = old_backend
+
+def set_backend(name: str):
+    """Set the default backend."""
+    Backend._default = name
