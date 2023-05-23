@@ -75,7 +75,7 @@ if TYPE_CHECKING:
 
 else:
     from scipy.fft import rfftn, irfftn, fftn, ifftn
-    from scipy.ndimage import spline_filter, affine_transform, map_coordinates
+    from scipy.ndimage import spline_filter, affine_transform, map_coordinates, shift
     from scipy.signal import convolve
 
 __all__ = [
