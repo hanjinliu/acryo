@@ -871,13 +871,11 @@ class TomographyInput(RotationImplemented):
         mask = self._get_missing_wedge_mask(quaternion, xp)
         return xp.asnumpy(xp.asarray(image) * mask)
 
-    def _get_missing_wedge_mask(
-        self,
-        quat: NDArray[np.float32],
-        backend: Backend,
-    ) -> AnyArray[np.float32] | int:
+    def get_missing_wedge_mask(
+        self, quat: NDArray[np.float32], backend: Backend | None = None
+    ):
         """
-        Create a binary mask that covers tomographical missing wedge.
+        Create a mask that covers tomographical missing wedge.
 
         Parameters
         ----------
@@ -886,9 +884,18 @@ class TomographyInput(RotationImplemented):
 
         Returns
         -------
-        np.ndarray or float
-            Missing wedge mask. If ``tilt_range`` is None, 1 will be returned.
+        np.ndarray or 1
+            Missing wedge mask array.
         """
+        xp = backend or Backend()
+        return self._get_missing_wedge_mask(quat, xp)
+
+    def _get_missing_wedge_mask(
+        self,
+        quat: NDArray[np.float32],
+        backend: Backend,
+    ) -> AnyArray[np.float32] | int:
+        """Create a mask that covers tomographical missing wedge."""
         if self._tilt_range is None:
             return 1
         return backend.missing_wedge_mask(
