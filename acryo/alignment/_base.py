@@ -589,7 +589,7 @@ class RotationImplemented(BaseAlignmentModel):
         AlignmentResult
             Result of alignment.
         """
-        iopt, shift, _, corr = super().align(img, max_shifts, quaternion, pos)
+        iopt, shift, _, corr = super().align(img, max_shifts, quaternion, pos, backend)
         quat = self.quaternions[iopt % self._n_rotations]
         return AlignmentResult(label=iopt, shift=shift, quat=quat, score=corr)
 
@@ -763,7 +763,7 @@ class RotationImplemented(BaseAlignmentModel):
 
             else:
                 # NOTE: dask.compute is always called once inside this method.
-                template_masked = self._template * self._mask
+                template_masked = xp.asarray(self._template * self._mask)
                 template_input = pool.add_task(template_masked, xp).compute()[0]
                 mask_input = xp.asarray(self._mask)
 
@@ -871,13 +871,11 @@ class TomographyInput(RotationImplemented):
         mask = self._get_missing_wedge_mask(quaternion, xp)
         return xp.asnumpy(xp.asarray(image) * mask)
 
-    def _get_missing_wedge_mask(
-        self,
-        quat: NDArray[np.float32],
-        backend: Backend,
-    ) -> AnyArray[np.float32] | int:
+    def get_missing_wedge_mask(
+        self, quat: NDArray[np.float32], backend: Backend | None = None
+    ):
         """
-        Create a binary mask that covers tomographical missing wedge.
+        Create a mask that covers tomographical missing wedge.
 
         Parameters
         ----------
@@ -886,9 +884,18 @@ class TomographyInput(RotationImplemented):
 
         Returns
         -------
-        np.ndarray or float
-            Missing wedge mask. If ``tilt_range`` is None, 1 will be returned.
+        np.ndarray or 1
+            Missing wedge mask array.
         """
+        xp = backend or Backend()
+        return self._get_missing_wedge_mask(quat, xp)
+
+    def _get_missing_wedge_mask(
+        self,
+        quat: NDArray[np.float32],
+        backend: Backend,
+    ) -> AnyArray[np.float32] | int:
+        """Create a mask that covers tomographical missing wedge."""
         if self._tilt_range is None:
             return 1
         return backend.missing_wedge_mask(
@@ -915,8 +922,8 @@ def _build_mesh(
     upsample: int,
     backend: Backend,
 ) -> AnyArray[np.float32]:
-    upsampled_max_shifts = (backend.asarray(max_shifts) * upsample).astype(np.int32)
-    center = backend.array(shape) / 2 - 0.5
+    upsampled_max_shifts = (np.asarray(max_shifts) * upsample).astype(np.int32)
+    center = np.array(shape) / 2 - 0.5
     mesh = backend.meshgrid(
         *[
             backend.arange(-width, width + 1) / upsample + c

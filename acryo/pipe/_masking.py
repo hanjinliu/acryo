@@ -63,7 +63,7 @@ def dilation(img: NDArray[np.bool_], scale: nm, radius: nm) -> NDArray[np.bool_]
         out = ndi.binary_erosion(img, structure=structure, border_value=False)
     elif radius > 0:
         out = ndi.binary_dilation(img, structure=structure, border_value=False)
-    return out
+    return out  # type: ignore
 
 
 @converter_function
@@ -81,7 +81,7 @@ def gaussian_smooth(
     if sigma == 0:
         return img.astype(np.float32)
     img = ~img
-    dist = ndi.distance_transform_edt(img)
+    dist: NDArray[np.float32] = ndi.distance_transform_edt(img)  # type: ignore
     blurred_mask = np.exp(-(dist**2) / 2 / (sigma / scale) ** 2, dtype=np.float32)
     return blurred_mask
 

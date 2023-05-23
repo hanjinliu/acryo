@@ -3,7 +3,6 @@
 from __future__ import annotations
 from typing import (
     TYPE_CHECKING,
-    Callable,
     NamedTuple,
     Any,
 )
@@ -12,7 +11,6 @@ from dask import array as da
 
 from acryo._types import nm, pixel
 from acryo._reader import imread
-from acryo._typed_scipy import affine_transform
 from acryo.molecules import Molecules
 from acryo.backend import Backend
 from acryo import _utils
@@ -213,20 +211,20 @@ class SubtomogramLoader(LoaderBase):
             Each object returns a subtomogram on execution by ``da.compute``.
         """
         output_shape = self._get_output_shape(output_shape)
-        if (cached := self._get_cached_array(output_shape)) is not None:
+        xp = backend or Backend()
+        if (cached := self._get_cached_array(output_shape, xp)) is not None:
             return DaskArrayList(cached[i] for i in range(len(self)))
 
-        _backend = backend or Backend()
         image = self.image
         scale = self.scale
         if isinstance(image, np.ndarray):
-            image = da.from_array(image, asarray=_backend.asarray)
+            image = da.from_array(image, asarray=xp.asarray)
 
         if self.corner_safe:
             _prep = _utils.prepare_affine_cornersafe
         else:
             _prep = _utils.prepare_affine
-        pool = DaskTaskPool.from_func(_backend.rotated_crop)
+        pool = DaskTaskPool.from_func(xp.rotated_crop)
         for i in range(len(self)):
             subvol, mtx = _prep(
                 image,
@@ -239,7 +237,7 @@ class SubtomogramLoader(LoaderBase):
                 mtx,
                 shape=output_shape,
                 order=self.order,
-                cval=_backend._xp_.mean,
+                cval=xp.mean,
             )
 
         return pool.asarrays(shape=output_shape, dtype=np.float32)
@@ -278,25 +276,3 @@ def check_input(
 
     _corner_safe = bool(corner_safe)
     return order, _output_shape, _scale, _corner_safe
-
-
-def _rotated_crop(
-    subimg,
-    mtx: NDArray[np.float32],
-    shape: tuple[int, int, int],
-    order: int,
-    cval: float | Callable[[NDArray[np.float32]], float],
-) -> NDArray[np.float32]:
-    if callable(cval):
-        cval = cval(subimg)
-
-    out = affine_transform(
-        subimg,
-        matrix=mtx,
-        output_shape=shape,
-        order=order,
-        prefilter=order > 1,
-        mode="constant",
-        cval=cval,
-    )
-    return out

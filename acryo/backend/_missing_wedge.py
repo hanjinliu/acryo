@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import math
 from typing import TYPE_CHECKING
 from scipy.spatial.transform import Rotation
 from acryo._types import degree
@@ -63,11 +64,11 @@ def _get_unrotated_normals(
 
 
 @lru_cache(maxsize=32)
-def _get_indices(shape: tuple[int, ...], backend: Backend) -> AnyArray[np.float32]:
-    inds = backend._xp_.indices(shape, dtype=np.float32)
+def _get_indices(shape: tuple[int, int, int], backend: Backend) -> AnyArray[np.float32]:
+    inds = backend.indices(shape, dtype=np.float32)
     for ind, s in zip(inds, shape):
         # Note that the shifts in indices must resemble the shifts in fftshift.
-        ind -= backend._xp_.ceil(s / 2)
-    return backend._xp_.fft.fftshift(
-        backend._xp_.stack(list(inds), axis=-1), axes=(0, 1, 2)
+        ind -= math.ceil(s / 2)
+    return backend.fftshift(
+        backend.stack(list(inds), axis=-1), axes=(0, 1, 2)
     )  # type: ignore

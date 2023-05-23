@@ -77,7 +77,7 @@ def compose_matrices(
 
     matrices: list[np.ndarray] = []
     for rot in rotators:
-        e_ = np.eye(4)
+        e_ = np.eye(4, dtype=np.float32)
         e_[:3, :3] = rot.as_matrix()
         matrices.append(translation_0 @ e_ @ translation_1)
     return matrices

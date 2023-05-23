@@ -96,7 +96,7 @@ def nd_butterworth_weight(
 ) -> AnyArray[np.complex64]:
     ranges = []
     for d in shape:
-        axis = backend._xp_.arange(
+        axis = backend.arange(
             -(d - 1) // 2, (d - 1) // 2 + 1, dtype=np.float32
         ) / (d * cutoff)
         ranges.append(backend.ifftshift(axis**2))

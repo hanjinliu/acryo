@@ -173,6 +173,11 @@ class DaskArrayList(Sequence["da.Array"], _DaskComputable[NDArray[_D]]):
         [pool.add_task(s, *args, **kwargs) for s in self]
         return pool
 
+    def map_blocks(self, func, *args, **kwargs):
+        return DaskArrayList(
+            [a.map_blocks(func, *args, **kwargs) for a in self._arrays]
+        )
+
     def enumerate(self) -> Iterator[tuple[int, da.Array]]:
         return enumerate(self)
 

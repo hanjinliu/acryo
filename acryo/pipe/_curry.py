@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable, TypeVar, Any
+from typing import Callable, Any
 from typing_extensions import ParamSpec, Concatenate
 import inspect
 import numpy as np
@@ -8,7 +8,6 @@ from acryo.pipe._classes import ImageProvider, ImageConverter
 from acryo._types import nm
 
 _P = ParamSpec("_P")
-_R = TypeVar("_R")
 
 
 def provider_function(
@@ -27,7 +26,7 @@ def provider_function(
 
     """
 
-    def inner(*args, **kwargs):
+    def inner(*args: _P.args, **kwargs: _P.kwargs):
         _fn = _assert_1_arg(fn)
         return ImageProvider(lambda scale: _fn(scale, *args, **kwargs)).with_name(
             _format_args(fn, *args, **kwargs)
@@ -56,7 +55,7 @@ def converter_function(
 
     """
 
-    def inner(*args, **kwargs):
+    def inner(*args: _P.args, **kwargs: _P.kwargs):
         _fn = _assert_2_args(fn)
         return ImageConverter(
             lambda img, scale: _fn(img, scale, *args, **kwargs)
@@ -91,6 +90,7 @@ def _assert_1_arg(func: Callable) -> Callable[[Any], Any]:
     if nargs == 0:
         out = lambda x: func()
         _update_attr(out, func)
+        return out
     else:
         return func
 

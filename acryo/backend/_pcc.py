@@ -36,25 +36,24 @@ def subpixel_pcc(
 ) -> tuple[NDArray[np.float32], float]:
     product = f0 * f1.conj()
     power = _abs2(backend.ifftn(product))
-    _max_shifts = backend.asarray(max_shifts, dtype=np.float32)
+    _max_shifts = np.asarray(max_shifts, dtype=np.float32)
     _int_shifts = _max_shifts.astype(np.int32)
     power = crop_by_max_shifts(power, _int_shifts, _int_shifts, backend)
 
     maxima = backend.unravel_index(backend.argmax(power), power.shape)
-    midpoints = backend.array(
+    midpoints = np.array(
         [np.fix(axis_size / 2) for axis_size in power.shape], dtype=np.float32
     )
 
-    shifts = backend.asarray(maxima, dtype=np.float32)
-    shifts[shifts > midpoints] -= backend.array(power.shape, dtype=np.float32)[
-        shifts > midpoints
-    ]
+    shifts = backend.asnumpy(maxima).astype(np.float32)
+    sl = shifts > midpoints
+    shifts[sl] -= np.array(power.shape, dtype=np.float32)[sl]
     # Initial shift estimate in upsampled grid
-    shifts = backend.fix(shifts * upsample_factor) / upsample_factor
+    shifts = np.fix(shifts * upsample_factor) / upsample_factor
     if upsample_factor > 1:
-        upsampled_region_size = backend._xp_.ceil(upsample_factor * 1.5)
+        upsampled_region_size = math.ceil(upsample_factor * 1.5)
         # Center of output array at dftshift + 1
-        dftshift = backend.fix(upsampled_region_size / 2.0)
+        dftshift = float(np.fix(upsampled_region_size / 2.0))
         # Matrix multiply DFT around the current shift estimate
         sample_region_offset = dftshift - shifts * upsample_factor
         # Locate maximum and map back to original pixel grid
@@ -68,20 +67,23 @@ def subpixel_pcc(
             )
         )
 
-        if _max_shifts is not None:
-            _lshift = (shifts + _max_shifts) * upsample_factor
-            _rshift = (_max_shifts - shifts) * upsample_factor
-            power = crop_by_max_shifts(
-                power, _lshift.astype(np.int32), _rshift.astype(np.int32), backend
-            )
+        _lshift = (shifts + _max_shifts) * upsample_factor
+        _rshift = (_max_shifts - shifts) * upsample_factor
+        power = crop_by_max_shifts(
+            power, _lshift.astype(np.int32), _rshift.astype(np.int32), backend
+        )
 
-        maxima = backend.unravel_index(backend.argmax(power), power.shape)
-        maxima = backend.asarray(maxima, dtype=np.float32) - dftshift
+        maxima = (
+            backend.asnumpy(
+                backend.unravel_index(backend.argmax(power), power.shape)
+            ).astype(np.float32)
+            - dftshift
+        )
         shifts = shifts + maxima / upsample_factor
-        pcc = math.sqrt(power[tuple(int(round(m)) for m in maxima)])  # type: ignore
+        pcc = math.sqrt(backend.asnumpy(power[tuple(int(round(m)) for m in maxima)]))
     else:
-        pcc = math.sqrt(power[maxima])  # type: ignore
-    return backend.asnumpy(shifts), pcc
+        pcc = math.sqrt(backend.asnumpy(power[maxima]))
+    return shifts, pcc
 
 
 _DType = TypeVar("_DType", bound=np.number)
@@ -89,9 +91,9 @@ _DType = TypeVar("_DType", bound=np.number)
 
 def _upsampled_dft(
     data: AnyArray[_DType],
-    upsampled_region_size: AnyArray[np.integer],
+    upsampled_region_size: int,
     upsample_factor: int,
-    axis_offsets: AnyArray[np.float32],
+    axis_offsets: NDArray[np.float32],
     backend: Backend,
 ) -> AnyArray[_DType]:
     # if people pass in an integer, expand it to a list of equal-sized sections
@@ -113,8 +115,8 @@ def _abs2(a: AnyArray[np.complex64]) -> AnyArray[np.float32]:
 
 def crop_by_max_shifts(
     power: AnyArray[_DType],
-    left: AnyArray[np.intp],
-    right: AnyArray[np.intp],
+    left: NDArray[np.intp],
+    right: NDArray[np.intp],
     backend: Backend,
 ) -> AnyArray[_DType]:
     shifted_power = backend.fftshift(power)

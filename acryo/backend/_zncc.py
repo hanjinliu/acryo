@@ -82,10 +82,10 @@ def subpixel_zncc(
     )
     sl_res = tuple(slice(w, -w, None) for w in pad_width_eff)
     response_center = response[sl_res]
-    maxima = backend.unravel_index(
-        backend.argmax(response_center), response_center.shape
+    maxima = backend.asnumpy(
+        backend.unravel_index(backend.argmax(response_center), response_center.shape)
     )
-    midpoints = backend.asarray(response_center.shape, dtype=np.int32) // 2
+    midpoints = np.asarray(response_center.shape, dtype=np.int32) // 2
 
     if upsample_factor > 1:
         coords = _create_mesh(
@@ -99,15 +99,15 @@ def subpixel_zncc(
         local_response = backend.map_coordinates(
             response, coords, order=3, mode="constant", cval=-1.0, prefilter=True
         )
-        local_maxima = backend.unravel_index(
-            backend.argmax(local_response), local_response.shape
+        local_maxima = backend.asnumpy(
+            backend.unravel_index(backend.argmax(local_response), local_response.shape)
         )
-        zncc = local_response[local_maxima]
-        loc_shift = backend.asnumpy(local_maxima) / upsample_factor - 1
-        shifts = backend.asnumpy(maxima - midpoints) + loc_shift
+        zncc = backend.asnumpy(local_response[tuple(local_maxima)])
+        loc_shift = local_maxima / upsample_factor - 1
+        shifts = (maxima - midpoints) + loc_shift
     else:
-        zncc = response[maxima]
-        shifts = backend.asnumpy(maxima - midpoints)
+        zncc = backend.asnumpy(response[tuple(maxima)])
+        shifts = maxima - midpoints
 
     return shifts, zncc  # type: ignore
 
@@ -162,14 +162,14 @@ def _get_padding_width(max_shifts: tuple[int, ...]) -> list[tuple[int, ...]]:
 
 def _create_mesh(
     upsample_factor: int,
-    maxima: AnyArray[np.intp],
+    maxima: NDArray[np.intp],
     max_shifts: Sequence[pixel],
-    midpoints: AnyArray[np.float32],
+    midpoints: NDArray[np.float32],
     pad_width_eff: Sequence[pixel],
     backend: Backend,
 ):
-    shifts = backend.array(maxima, dtype=np.float32) - midpoints
-    _max_shifts = backend.array(max_shifts, dtype=np.float32)  # type: ignore
+    shifts = np.array(maxima, dtype=np.float32) - midpoints
+    _max_shifts = np.array(max_shifts, dtype=np.float32)
     left = -shifts - _max_shifts
     right = -shifts + _max_shifts
     local_shifts = tuple(
@@ -215,8 +215,10 @@ def fftconvolve(
     return _apply_conv_mode(ret, s1, s2)
 
 
-def _apply_conv_mode(ret: AnyArray[np.float32], s1, s2):
-    shape_valid = np.asarray([s1[a] - s2[a] + 1 for a in range(ret.ndim)])
+def _apply_conv_mode(
+    ret: AnyArray[np.float32], s1: tuple[int, ...], s2: tuple[int, ...]
+):
+    shape_valid = np.array([s1[a] - s2[a] + 1 for a in range(ret.ndim)], dtype=np.int32)
     currshape = np.array(ret.shape)
     startind = (currshape - shape_valid) // 2
     endind = startind + shape_valid

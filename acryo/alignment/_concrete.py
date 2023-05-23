@@ -41,16 +41,14 @@ class PCCAlignment(TomographyInput):
         quaternion: NDArray[np.float32],
         pos: NDArray[np.float32],
         backend: Backend,
-    ) -> NDArray[np.float32]:
+    ) -> AnyArray[np.float32]:
         """Compute landscape."""
         mw = self._get_missing_wedge_mask(quaternion, backend)
-        return backend.asnumpy(
-            pcc_landscape(
-                subvolume * mw,
-                template * mw,
-                max_shifts=max_shifts,
-                backend=backend,
-            )
+        return pcc_landscape(
+            subvolume * mw,
+            template * mw,
+            max_shifts=max_shifts,
+            backend=backend,
         )
 
 
@@ -85,14 +83,12 @@ class ZNCCAlignment(TomographyInput):
         quaternion: NDArray[np.float32],
         pos: NDArray[np.float32],
         backend: Backend,
-    ) -> NDArray[np.float32]:
+    ) -> AnyArray[np.float32]:
         """Compute landscape."""
         mw = self._get_missing_wedge_mask(quaternion, backend)
-        return backend.asnumpy(
-            zncc_landscape_with_crop(
-                backend.ifftn(subvolume * mw).real,
-                backend.ifftn(template * mw).real,
-                max_shifts=max_shifts,
-                backend=backend,
-            )
+        return zncc_landscape_with_crop(
+            backend.ifftn(subvolume * mw).real,
+            backend.ifftn(template * mw).real,
+            max_shifts=max_shifts,
+            backend=backend,
         )
