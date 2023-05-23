@@ -4,7 +4,7 @@ from contextlib import contextmanager
 
 import numpy as np
 from numpy.testing import assert_allclose
-from acryo import SubtomogramLoader
+from acryo import SubtomogramLoader, Molecules
 from acryo.alignment import (
     PCCAlignment,
     ZNCCAlignment,
@@ -12,7 +12,7 @@ from acryo.alignment import (
 )
 from acryo._rotation import rotate, euler_to_quat
 from acryo.testing import TomogramGenerator, spiral
-from scipy import ndimage as ndi
+from acryo._typed_scipy import shift as ndi_shift
 import pytest
 
 if TYPE_CHECKING:
@@ -72,7 +72,7 @@ def test_fit(shift, rot, alignment_model: "type[TomographyInput]"):
     rotations = ((15, 15), (15, 15), (15, 15))
     model = alignment_model(temp, rotations=rotations)
     temp_transformed = temp * 4 + np.mean(temp)  # linear transformation to input image
-    img = ndi.shift(rotate(temp_transformed, rot, cval=np.min), shift=shift)
+    img = ndi_shift(rotate(temp_transformed, rot, cval=np.min), shift=shift)
     with measure_time(alignment_model.__name__):
         imgout, result = model.fit(img, (5, 5, 5))
     assert_allclose(result.quat, euler_to_quat(rot))
@@ -87,7 +87,7 @@ def test_fit(shift, rot, alignment_model: "type[TomographyInput]"):
 def test_landscape(shift, alignment_model: "type[TomographyInput]", upsample):
     model = alignment_model(temp)
     temp_transformed = temp * 4 + np.mean(temp)  # linear transformation to input image
-    img = ndi.shift(temp_transformed, shift=shift)
+    img = ndi_shift(temp_transformed, shift=shift)
     with measure_time(alignment_model.__name__):
         lnd = model.landscape(img, (5, 5, 5), upsample=upsample)
     maxima = np.unravel_index(np.argmax(lnd), lnd.shape)
@@ -109,7 +109,7 @@ def test_landscape_in_loader(upsample):
     )
     mask = temp > np.mean(temp)
     arr: np.ndarray = loader.construct_landscape(
-        temp, mask=mask, upsample=upsample, max_shifts=1.0
+        temp, mask=mask.astype(np.float32), upsample=upsample, max_shifts=1.0
     ).compute()
     assert arr.shape == (
         len(mole),
@@ -127,7 +127,7 @@ def test_landscape_in_loader_with_rotation(upsample):
     mask = temp > np.mean(temp)
     arr: np.ndarray = loader.construct_landscape(
         temp,
-        mask=mask,
+        mask=mask.astype(np.float32),
         upsample=upsample,
         max_shifts=1.0,
         rotations=((15, 15), (15, 15), (15, 15)),
@@ -180,3 +180,19 @@ def test_multi_align():
         [img0, img1], max_shifts=2, label_name=label_name
     )
     assert list(out.features[label_name]) == [0, 1, 0]
+
+
+@pytest.mark.parametrize("alignment_model", [ZNCCAlignment, PCCAlignment])
+@pytest.mark.parametrize("lim", [1.2, 0.6, 0.3])
+def test_max_shifts(alignment_model: "type[TomographyInput]", lim: float):
+    rng = np.random.default_rng(48172)
+    tomogram = rng.normal(size=(20, 20, 100))
+    template = rng.normal(size=(6, 6, 6)).astype(np.float32)
+    scale = 0.4
+    pos = np.full((10, 3), 10)
+    pos[:, 2] = np.linspace(10, 90, 10)
+    mole = Molecules(pos * scale)
+    loader = SubtomogramLoader(tomogram, mole, order=1, scale=scale)
+    aligned = loader.align(template, max_shifts=lim, alignment_model=alignment_model)
+    distances = np.abs(aligned.molecules.pos - mole.pos)
+    assert np.all(distances <= lim)

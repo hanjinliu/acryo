@@ -4,6 +4,7 @@ from numpy.typing import NDArray
 from scipy import ndimage as ndi
 from acryo import _utils
 from acryo._types import nm
+from acryo._typed_scipy import shift as ndi_shift
 from acryo.pipe._curry import converter_function
 
 
@@ -13,7 +14,7 @@ def center_by_mass(
 ) -> NDArray[np.float32]:
     """Centering an image by its center of mass."""
     shift = np.array(ndi.center_of_mass(img)) - np.array(img.shape) / 2
-    return ndi.shift(img, -shift, order=order, prefilter=order > 1, mode="nearest")  # type: ignore
+    return ndi_shift(img, -shift, order=order, prefilter=order > 1, mode="nearest")
 
 
 @converter_function
