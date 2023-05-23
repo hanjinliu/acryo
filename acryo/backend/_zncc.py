@@ -88,7 +88,7 @@ def subpixel_zncc(
     midpoints = np.asarray(response_center.shape, dtype=np.int32) // 2
 
     if upsample_factor > 1:
-        coords = _create_mesh(
+        coords, local_offset = _create_mesh(
             upsample_factor,
             maxima,
             max_shifts,
@@ -103,7 +103,7 @@ def subpixel_zncc(
             backend.unravel_index(backend.argmax(local_response), local_response.shape)
         )
         zncc = backend.asnumpy(local_response[tuple(local_maxima)])
-        loc_shift = local_maxima / upsample_factor - 1
+        loc_shift = local_maxima / upsample_factor + local_offset
         shifts = (maxima - midpoints) + loc_shift
     else:
         zncc = backend.asnumpy(response[tuple(maxima)])
@@ -168,17 +168,20 @@ def _create_mesh(
     pad_width_eff: Sequence[pixel],
     backend: Backend,
 ):
+    """
+    Create a 3 pixel x 3 pixel (if not upsampled) mesh for image upsampling.
+    """
     shifts = np.array(maxima, dtype=np.float32) - midpoints
     _max_shifts = np.array(max_shifts, dtype=np.float32)
     left = -shifts - _max_shifts
     right = -shifts + _max_shifts
-    local_shifts = tuple(
+    local_shifts = [
         [
             int(round(max(float(shiftl), -1.0) * upsample_factor)),
             int(round(min(float(shiftr), 1.0) * upsample_factor)),
         ]
         for shiftl, shiftr in zip(left, right)
-    )
+    ]
     mesh = backend.meshgrid(
         *[
             backend.arange(s0, s1 + 1) / upsample_factor + m + w
@@ -186,7 +189,8 @@ def _create_mesh(
         ],  # type: ignore
         indexing="ij",
     )
-    return backend.stack(mesh, axis=0)
+    offset = [s0 for s0, s1 in local_shifts]
+    return backend.stack(mesh, axis=0), backend.array(offset) / upsample_factor
 
 
 def fftconvolve(

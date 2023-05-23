@@ -195,4 +195,4 @@ def test_max_shifts(alignment_model: "type[TomographyInput]", lim: float):
     loader = SubtomogramLoader(tomogram, mole, order=1, scale=scale)
     aligned = loader.align(template, max_shifts=lim, alignment_model=alignment_model)
     distances = np.abs(aligned.molecules.pos - mole.pos)
-    assert np.all(distances <= lim)
+    assert np.all(distances <= lim + 1e-6)
