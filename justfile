@@ -1,3 +1,5 @@
+set shell := ["powershell.exe", "-c"]
+
 doc:
 	sphinx-apidoc -f -o ./rst/apidoc ./acryo
 	sphinx-build -b html ./rst ./docs

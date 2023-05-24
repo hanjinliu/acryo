@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo.loader._batch &mdash; acryo 0.3.0 documentation</title>
+  <title>acryo.loader._batch &mdash; acryo 0.4.0 documentation</title>
       <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -33,7 +33,7 @@
             acryo
           </a>
               <div class="version">
-                0.3.0
+                0.4.0
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
@@ -90,6 +90,7 @@
 
 <span class="kn">from</span> <span class="nn">acryo</span> <span class="kn">import</span> <span class="n">_utils</span>
 <span class="kn">from</span> <span class="nn">acryo.molecules</span> <span class="kn">import</span> <span class="n">Molecules</span>
+<span class="kn">from</span> <span class="nn">acryo.backend</span> <span class="kn">import</span> <span class="n">Backend</span>
 <span class="kn">from</span> <span class="nn">acryo._types</span> <span class="kn">import</span> <span class="n">nm</span><span class="p">,</span> <span class="n">pixel</span>
 <span class="kn">from</span> <span class="nn">acryo._dask</span> <span class="kn">import</span> <span class="n">DaskArrayList</span>
 <span class="kn">from</span> <span class="nn">acryo.loader._base</span> <span class="kn">import</span> <span class="n">LoaderBase</span>
@@ -138,9 +139,24 @@
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">image</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="n">da</span><span class="o">.</span><span class="n">Array</span><span class="p">,</span>
         <span class="n">molecules</span><span class="p">:</span> <span class="n">Molecules</span><span class="p">,</span>
-        <span class="n">image_id</span><span class="p">:</span> <span class="n">Hashable</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">image_id</span><span class="p">:</span> <span class="n">Hashable</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Add a tomogram and its molecules to the collection.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Add a tomogram and its molecules to the collection.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        image : np.ndarray or da.Array</span>
+<span class="sd">            Tomogram image. This argument is passed directly to the `SubtomogramLoader`</span>
+<span class="sd">            constructor.</span>
+<span class="sd">        molecules : Molecules</span>
+<span class="sd">            Molecules in the tomogram (corresponding to the ``image`` argument). This</span>
+<span class="sd">            argument is passed directly to the `SubtomogramLoader` constructor.</span>
+<span class="sd">        image_id : Hashable, optional</span>
+<span class="sd">            Identifier for the tomogram. If not provided, a unique identifier will be</span>
+<span class="sd">            generated. This identifier is used to tag molecules with the tomogram they</span>
+<span class="sd">            reside in.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
         <span class="k">if</span> <span class="n">image_id</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
             <span class="n">image_id</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_images</span><span class="p">)</span>
             <span class="k">while</span> <span class="n">image_id</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_images</span><span class="p">:</span>
@@ -243,9 +259,14 @@
         <span class="n">out</span><span class="o">.</span><span class="n">_images</span> <span class="o">=</span> <span class="n">_images</span>
         <span class="k">return</span> <span class="n">out</span></div>
 
-<div class="viewcode-block" id="BatchLoader.construct_loading_tasks"><a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.BatchLoader.construct_loading_tasks">[docs]</a>    <span class="k">def</span> <span class="nf">construct_loading_tasks</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">output_shape</span><span class="p">:</span> <span class="n">_ShapeType</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">DaskArrayList</span><span class="p">:</span>
+<div class="viewcode-block" id="BatchLoader.construct_loading_tasks"><a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.BatchLoader.construct_loading_tasks">[docs]</a>    <span class="k">def</span> <span class="nf">construct_loading_tasks</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">output_shape</span><span class="p">:</span> <span class="n">_ShapeType</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">DaskArrayList</span><span class="p">:</span>
+        <span class="n">_backend</span> <span class="o">=</span> <span class="n">backend</span> <span class="ow">or</span> <span class="n">Backend</span><span class="p">()</span>
         <span class="k">return</span> <span class="n">DaskArrayList</span><span class="o">.</span><span class="n">concat</span><span class="p">(</span>
-            <span class="n">loader</span><span class="o">.</span><span class="n">construct_loading_tasks</span><span class="p">(</span><span class="n">output_shape</span><span class="o">=</span><span class="n">output_shape</span><span class="p">)</span>
+            <span class="n">loader</span><span class="o">.</span><span class="n">construct_loading_tasks</span><span class="p">(</span><span class="n">output_shape</span><span class="o">=</span><span class="n">output_shape</span><span class="p">,</span> <span class="n">backend</span><span class="o">=</span><span class="n">_backend</span><span class="p">)</span>
             <span class="k">for</span> <span class="n">loader</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">loaders</span>
         <span class="p">)</span></div></div>
 

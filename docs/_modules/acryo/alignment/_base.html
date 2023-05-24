@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo.alignment._base &mdash; acryo 0.3.0 documentation</title>
+  <title>acryo.alignment._base &mdash; acryo 0.4.0 documentation</title>
       <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -33,7 +33,7 @@
             acryo
           </a>
               <div class="version">
-                0.3.0
+                0.4.0
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
@@ -86,11 +86,9 @@
     <span class="n">Iterable</span><span class="p">,</span>
     <span class="n">NamedTuple</span><span class="p">,</span>
     <span class="n">Sequence</span><span class="p">,</span>
-    <span class="n">TYPE_CHECKING</span><span class="p">,</span>
     <span class="n">Union</span><span class="p">,</span>
 <span class="p">)</span>
 <span class="kn">from</span> <span class="nn">typing_extensions</span> <span class="kn">import</span> <span class="n">Self</span>
-<span class="kn">import</span> <span class="nn">warnings</span>
 
 <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
 <span class="kn">from</span> <span class="nn">numpy.typing</span> <span class="kn">import</span> <span class="n">NDArray</span>
@@ -98,17 +96,10 @@
 
 <span class="kn">from</span> <span class="nn">acryo._rotation</span> <span class="kn">import</span> <span class="n">normalize_rotations</span>
 <span class="kn">from</span> <span class="nn">acryo._types</span> <span class="kn">import</span> <span class="n">Ranges</span><span class="p">,</span> <span class="n">subpixel</span><span class="p">,</span> <span class="n">degree</span>
-<span class="kn">from</span> <span class="nn">acryo._utils</span> <span class="kn">import</span> <span class="p">(</span>
-    <span class="n">compose_matrices</span><span class="p">,</span>
-    <span class="n">missing_wedge_mask</span><span class="p">,</span>
-    <span class="n">lowpass_filter_ft</span><span class="p">,</span>
-<span class="p">)</span>
-<span class="kn">from</span> <span class="nn">acryo._typed_scipy</span> <span class="kn">import</span> <span class="n">ifftn</span><span class="p">,</span> <span class="n">spline_filter</span><span class="p">,</span> <span class="n">affine_transform</span><span class="p">,</span> <span class="n">map_coordinates</span>
-<span class="kn">from</span> <span class="nn">acryo._dask</span> <span class="kn">import</span> <span class="n">DaskTaskPool</span>
-<span class="kn">from</span> <span class="nn">._bound</span> <span class="kn">import</span> <span class="n">ParametrizedModel</span>
-
-<span class="k">if</span> <span class="n">TYPE_CHECKING</span><span class="p">:</span>
-    <span class="k">pass</span>
+<span class="kn">from</span> <span class="nn">acryo._utils</span> <span class="kn">import</span> <span class="n">compose_matrices</span>
+<span class="kn">from</span> <span class="nn">acryo._dask</span> <span class="kn">import</span> <span class="n">DaskTaskPool</span><span class="p">,</span> <span class="n">compute</span>
+<span class="kn">from</span> <span class="nn">acryo.backend</span> <span class="kn">import</span> <span class="n">Backend</span><span class="p">,</span> <span class="n">AnyArray</span><span class="p">,</span> <span class="n">NUMPY_BACKEND</span>
+<span class="kn">from</span> <span class="nn">acryo.alignment._bound</span> <span class="kn">import</span> <span class="n">ParametrizedModel</span>
 
 
 <span class="n">TemplateType</span> <span class="o">=</span> <span class="n">Union</span><span class="p">[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span> <span class="n">Sequence</span><span class="p">[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]]]</span>
@@ -117,9 +108,9 @@
     <span class="n">Callable</span><span class="p">[[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]],</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]],</span>
     <span class="kc">None</span><span class="p">,</span>
 <span class="p">]</span>
-<span class="n">AlignmentFactory</span> <span class="o">=</span> <span class="n">Callable</span><span class="p">[</span>
-    <span class="p">[</span><span class="n">TemplateType</span><span class="p">,</span> <span class="n">Union</span><span class="p">[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span> <span class="kc">None</span><span class="p">]],</span> <span class="s2">&quot;BaseAlignmentModel&quot;</span>
-<span class="p">]</span>
+<span class="n">AlignmentFactory</span> <span class="o">=</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">TemplateType</span><span class="p">,</span> <span class="n">MaskType</span><span class="p">],</span> <span class="s2">&quot;BaseAlignmentModel&quot;</span><span class="p">]</span>
+<span class="n">_Template</span> <span class="o">=</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">]</span>
+<span class="n">_Mask</span> <span class="o">=</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span>
 
 
 <div class="viewcode-block" id="AlignmentResult"><a class="viewcode-back" href="../../../apidoc/acryo.alignment.html#acryo.alignment.AlignmentResult">[docs]</a><span class="k">class</span> <span class="nc">AlignmentResult</span><span class="p">(</span><span class="n">NamedTuple</span><span class="p">):</span>
@@ -137,6 +128,24 @@
         <span class="n">shift_matrix</span><span class="p">[:</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">shift</span>
         <span class="n">rot_matrix</span> <span class="o">=</span> <span class="n">compose_matrices</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">shape</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span> <span class="o">-</span> <span class="mf">0.5</span><span class="p">,</span> <span class="p">[</span><span class="n">rotator</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>
         <span class="k">return</span> <span class="n">shift_matrix</span> <span class="o">@</span> <span class="n">rot_matrix</span></div></div>
+
+
+<span class="k">class</span> <span class="nc">TemplateMaskCache</span><span class="p">:</span>
+    <span class="n">_dict</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="n">Backend</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">_Template</span><span class="p">,</span> <span class="n">_Mask</span><span class="p">]]</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_dict</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="k">def</span> <span class="nf">get</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">_Template</span><span class="p">,</span> <span class="n">_Mask</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">out</span> <span class="o">:=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_dict</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">backend</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">out</span>
+        <span class="k">if</span> <span class="n">val</span> <span class="o">:=</span> <span class="nb">next</span><span class="p">(</span><span class="nb">iter</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_dict</span><span class="o">.</span><span class="n">values</span><span class="p">()),</span> <span class="kc">None</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_dict</span><span class="p">[</span><span class="n">backend</span><span class="p">]</span> <span class="o">=</span> <span class="n">out</span> <span class="o">=</span> <span class="n">backend</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">val</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span> <span class="n">backend</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">val</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+            <span class="k">return</span> <span class="n">out</span>
+        <span class="k">return</span> <span class="kc">None</span>
+
+    <span class="k">def</span> <span class="nf">set</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span><span class="p">,</span> <span class="n">template</span><span class="p">:</span> <span class="n">_Template</span><span class="p">,</span> <span class="n">mask</span><span class="p">:</span> <span class="n">_Mask</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_dict</span><span class="p">[</span><span class="n">backend</span><span class="p">]</span> <span class="o">=</span> <span class="n">template</span><span class="p">,</span> <span class="n">mask</span>
 
 
 <div class="viewcode-block" id="BaseAlignmentModel"><a class="viewcode-back" href="../../../apidoc/acryo.alignment.html#acryo.alignment.BaseAlignmentModel">[docs]</a><span class="k">class</span> <span class="nc">BaseAlignmentModel</span><span class="p">(</span><span class="n">ABC</span><span class="p">):</span>
@@ -161,9 +170,9 @@
 
 <span class="sd">    Abstract Methods</span>
 <span class="sd">    ----------------</span>
-<span class="sd">    &gt;&gt;&gt; def optimize(self, template, reference, max_shifts, quaternion):</span>
+<span class="sd">    &gt;&gt;&gt; def optimize(self, template, reference, max_shifts, quaternion, pos, backend):</span>
 <span class="sd">    &gt;&gt;&gt;     ...</span>
-<span class="sd">    &gt;&gt;&gt; def pre_transform(self, image):</span>
+<span class="sd">    &gt;&gt;&gt; def pre_transform(self, image, backend):</span>
 <span class="sd">    &gt;&gt;&gt;     ...</span>
 
 <span class="sd">    &quot;&quot;&quot;</span>
@@ -210,7 +219,8 @@
                 <span class="n">mask</span> <span class="o">=</span> <span class="n">mask</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">_mask</span> <span class="o">=</span> <span class="n">mask</span>
 
-        <span class="bp">self</span><span class="o">.</span><span class="n">_template_input</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mask_input</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_template_and_mask_input</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_template_mask_cache</span> <span class="o">=</span> <span class="n">TemplateMaskCache</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_get_template_and_mask_input</span><span class="p">(</span><span class="n">Backend</span><span class="p">())</span>  <span class="c1"># cache the template and mask</span>
 
     <span class="k">def</span> <span class="fm">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
         <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">(shape=</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_template</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2">)&quot;</span>
@@ -230,6 +240,11 @@
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the array shape of input images and template.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_template</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="bp">self</span><span class="o">.</span><span class="n">_ndim</span> <span class="p">:]</span>
 
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">has_rotation</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;If the alignment model has rotation optimization.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="kc">False</span>
+
 <div class="viewcode-block" id="BaseAlignmentModel.with_params"><a class="viewcode-back" href="../../../apidoc/acryo.alignment.html#acryo.alignment.BaseAlignmentModel.with_params">[docs]</a>    <span class="nd">@classmethod</span>
     <span class="k">def</span> <span class="nf">with_params</span><span class="p">(</span>
         <span class="bp">cls</span><span class="p">,</span>
@@ -241,11 +256,12 @@
     <span class="nd">@abstractmethod</span>
     <span class="k">def</span> <span class="nf">_optimize</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
-        <span class="n">subvolume</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span>
-        <span class="n">template</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span>
+        <span class="n">subvolume</span><span class="p">:</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span>
+        <span class="n">template</span><span class="p">:</span> <span class="n">_Template</span><span class="p">,</span>
         <span class="n">max_shifts</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="o">...</span><span class="p">],</span>
         <span class="n">quaternion</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
         <span class="n">pos</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
+        <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span> <span class="nb">float</span><span class="p">]:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Optimization of shift and rotation of subvolume.</span>
@@ -278,17 +294,22 @@
 <span class="sd">        &quot;&quot;&quot;</span>
 
 <div class="viewcode-block" id="BaseAlignmentModel.pre_transform"><a class="viewcode-back" href="../../../apidoc/acryo.alignment.html#acryo.alignment.BaseAlignmentModel.pre_transform">[docs]</a>    <span class="nd">@abstractmethod</span>
-    <span class="k">def</span> <span class="nf">pre_transform</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">]:</span>
+    <span class="k">def</span> <span class="nf">pre_transform</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">image</span><span class="p">:</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
+        <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">]:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Pre-transformation applied to input images (including template).&quot;&quot;&quot;</span></div>
 
     <span class="k">def</span> <span class="nf">_landscape</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
-        <span class="n">subvolume</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span>
-        <span class="n">template</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span>
+        <span class="n">subvolume</span><span class="p">:</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span>
+        <span class="n">template</span><span class="p">:</span> <span class="n">_Template</span><span class="p">,</span>
         <span class="n">max_shifts</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="o">...</span><span class="p">],</span>
         <span class="n">quaternion</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
         <span class="n">pos</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
-    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
+        <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the landscape of the subvolume.&quot;&quot;&quot;</span>
         <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span>
             <span class="sa">f</span><span class="s2">&quot;_landscape method is not implemented for </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">.&quot;</span>
@@ -296,7 +317,8 @@
 
     <span class="k">def</span> <span class="nf">_get_template_and_mask_input</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
-    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]]:</span>
+        <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">_Template</span><span class="p">,</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]]:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Returns proper template and mask images for alignment.</span>
 
@@ -312,21 +334,31 @@
 <span class="sd">            - single template image ... 3D</span>
 <span class="sd">            - many template images ... 4D</span>
 <span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">xp</span> <span class="o">=</span> <span class="n">backend</span> <span class="ow">or</span> <span class="n">Backend</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">out</span> <span class="o">:=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_template_mask_cache</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">xp</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">out</span>
+        <span class="n">mask</span> <span class="o">=</span> <span class="n">xp</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_mask</span><span class="p">)</span>
         <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_n_templates</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
-            <span class="n">template_input</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span>
-                <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">pre_transform</span><span class="p">(</span><span class="n">tmp</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mask</span><span class="p">)</span> <span class="k">for</span> <span class="n">tmp</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_template</span><span class="p">],</span>
+            <span class="n">template_input</span> <span class="o">=</span> <span class="n">xp</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span>
+                <span class="p">[</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">pre_transform</span><span class="p">(</span><span class="n">xp</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">tmp</span><span class="p">)</span> <span class="o">*</span> <span class="n">mask</span><span class="p">,</span> <span class="n">xp</span><span class="p">)</span>
+                    <span class="k">for</span> <span class="n">tmp</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_template</span>
+                <span class="p">],</span>
                 <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
             <span class="p">)</span>
         <span class="k">else</span><span class="p">:</span>
-            <span class="n">template_input</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">pre_transform</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_template</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mask</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">template_input</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mask</span>
+            <span class="n">template_masked</span> <span class="o">=</span> <span class="n">xp</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_template</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mask</span><span class="p">)</span>
+            <span class="n">template_input</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">pre_transform</span><span class="p">(</span><span class="n">template_masked</span><span class="p">,</span> <span class="n">xp</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_template_mask_cache</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">xp</span><span class="p">,</span> <span class="n">template_input</span><span class="p">,</span> <span class="n">mask</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">template_input</span><span class="p">,</span> <span class="n">mask</span>
 
 <div class="viewcode-block" id="BaseAlignmentModel.align"><a class="viewcode-back" href="../../../apidoc/acryo.alignment.html#acryo.alignment.BaseAlignmentModel.align">[docs]</a>    <span class="k">def</span> <span class="nf">align</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
-        <span class="n">img</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
+        <span class="n">img</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span> <span class="o">|</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
         <span class="n">max_shifts</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">],</span>
         <span class="n">quaternion</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">pos</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AlignmentResult</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Align an image using current alignment parameters.</span>
@@ -343,6 +375,7 @@
 <span class="sd">        AlignmentResult</span>
 <span class="sd">            Result of alignment.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">xp</span> <span class="o">=</span> <span class="n">backend</span> <span class="ow">or</span> <span class="n">Backend</span><span class="p">()</span>
         <span class="k">if</span> <span class="n">quaternion</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
             <span class="n">_quat</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_DUMMY_QUAT</span>
         <span class="k">else</span><span class="p">:</span>
@@ -356,13 +389,15 @@
             <span class="n">_align_fn</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_optimize_multiple</span>
         <span class="k">else</span><span class="p">:</span>
             <span class="n">_align_fn</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_optimize_single</span>
+        <span class="n">_template</span><span class="p">,</span> <span class="n">_mask</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_template_and_mask_input</span><span class="p">(</span><span class="n">backend</span><span class="o">=</span><span class="n">xp</span><span class="p">)</span>
         <span class="k">return</span> <span class="n">_align_fn</span><span class="p">(</span>
-            <span class="n">img</span><span class="p">,</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">_template_input</span><span class="p">,</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">_mask_input</span><span class="p">,</span>
+            <span class="n">xp</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">img</span><span class="p">),</span>
+            <span class="n">_template</span><span class="p">,</span>
+            <span class="n">_mask</span><span class="p">,</span>
             <span class="n">max_shifts</span><span class="p">,</span>
             <span class="n">_quat</span><span class="p">,</span>
             <span class="n">_pos</span><span class="p">,</span>
+            <span class="n">xp</span><span class="p">,</span>
         <span class="p">)</span></div>
 
 <div class="viewcode-block" id="BaseAlignmentModel.fit"><a class="viewcode-back" href="../../../apidoc/acryo.alignment.html#acryo.alignment.BaseAlignmentModel.fit">[docs]</a>    <span class="k">def</span> <span class="nf">fit</span><span class="p">(</span>
@@ -370,6 +405,7 @@
         <span class="n">img</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
         <span class="n">max_shifts</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">],</span>
         <span class="n">cval</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span> <span class="n">AlignmentResult</span><span class="p">]:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Fit image to template based on the alignment model.</span>
@@ -388,11 +424,15 @@
 <span class="sd">        np.ndarray, AlignmentResult</span>
 <span class="sd">            Transformed input image and the alignment result.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
-        <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">align</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">max_shifts</span><span class="o">=</span><span class="n">max_shifts</span><span class="p">,</span> <span class="n">quaternion</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">pos</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
-        <span class="n">mtx</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">affine_matrix</span><span class="p">(</span><span class="n">img</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
-        <span class="n">_cval</span> <span class="o">=</span> <span class="n">_normalize_cval</span><span class="p">(</span><span class="n">cval</span><span class="p">,</span> <span class="n">img</span><span class="p">)</span>
-        <span class="n">img_trans</span> <span class="o">=</span> <span class="n">affine_transform</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">mtx</span><span class="p">,</span> <span class="n">cval</span><span class="o">=</span><span class="n">_cval</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">img_trans</span><span class="p">,</span> <span class="n">result</span></div>
+        <span class="n">xp</span> <span class="o">=</span> <span class="n">backend</span> <span class="ow">or</span> <span class="n">Backend</span><span class="p">()</span>
+        <span class="n">img_input</span> <span class="o">=</span> <span class="n">xp</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">img</span><span class="p">)</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">align</span><span class="p">(</span>
+            <span class="n">img_input</span><span class="p">,</span> <span class="n">max_shifts</span><span class="o">=</span><span class="n">max_shifts</span><span class="p">,</span> <span class="n">quaternion</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">pos</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">backend</span><span class="o">=</span><span class="n">xp</span>
+        <span class="p">)</span>
+        <span class="n">mtx</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">affine_matrix</span><span class="p">(</span><span class="n">img_input</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
+        <span class="n">_cval</span> <span class="o">=</span> <span class="n">_normalize_cval</span><span class="p">(</span><span class="n">cval</span><span class="p">,</span> <span class="n">img_input</span><span class="p">,</span> <span class="n">xp</span><span class="p">)</span>
+        <span class="n">img_trans</span> <span class="o">=</span> <span class="n">xp</span><span class="o">.</span><span class="n">affine_transform</span><span class="p">(</span><span class="n">img_input</span><span class="p">,</span> <span class="n">mtx</span><span class="p">,</span> <span class="n">cval</span><span class="o">=</span><span class="n">_cval</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">xp</span><span class="o">.</span><span class="n">asnumpy</span><span class="p">(</span><span class="n">img_trans</span><span class="p">),</span> <span class="n">result</span></div>
 
 <div class="viewcode-block" id="BaseAlignmentModel.landscape"><a class="viewcode-back" href="../../../apidoc/acryo.alignment.html#acryo.alignment.BaseAlignmentModel.landscape">[docs]</a>    <span class="k">def</span> <span class="nf">landscape</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
@@ -401,6 +441,7 @@
         <span class="n">quaternion</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">pos</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">upsample</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span>
+        <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Calculate correlation landscape of the input image.</span>
@@ -418,6 +459,7 @@
 <span class="sd">            N (if single template) or N+1 (if multi-template) dimensional array of</span>
 <span class="sd">            correlation landscape.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">xp</span> <span class="o">=</span> <span class="n">backend</span> <span class="ow">or</span> <span class="n">Backend</span><span class="p">()</span>
         <span class="k">if</span> <span class="n">quaternion</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
             <span class="n">_quat</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_DUMMY_QUAT</span>
         <span class="k">else</span><span class="p">:</span>
@@ -431,109 +473,119 @@
         <span class="k">else</span><span class="p">:</span>
             <span class="n">fn</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_landscape_single</span>
 
+        <span class="n">_template</span><span class="p">,</span> <span class="n">_mask</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_template_and_mask_input</span><span class="p">(</span><span class="n">backend</span><span class="o">=</span><span class="n">xp</span><span class="p">)</span>
         <span class="c1"># calculate the landscape</span>
         <span class="n">lds</span> <span class="o">=</span> <span class="n">fn</span><span class="p">(</span>
-            <span class="n">img</span><span class="p">,</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">_template_input</span><span class="p">,</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">_mask_input</span><span class="p">,</span>
+            <span class="n">xp</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">img</span><span class="p">),</span>
+            <span class="n">_template</span><span class="p">,</span>
+            <span class="n">_mask</span><span class="p">,</span>
             <span class="n">max_shifts</span><span class="p">,</span>
             <span class="n">_quat</span><span class="p">,</span>
             <span class="n">_pos</span><span class="p">,</span>
+            <span class="n">xp</span><span class="p">,</span>
         <span class="p">)</span>
 
         <span class="k">if</span> <span class="n">upsample</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
             <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_multiple</span><span class="p">():</span>
-                <span class="n">coords</span> <span class="o">=</span> <span class="n">_create_mesh_for_landscape</span><span class="p">(</span><span class="n">lds</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">max_shifts</span><span class="p">,</span> <span class="n">upsample</span><span class="p">)</span>
-                <span class="n">lds_upsampled</span> <span class="o">=</span> <span class="n">map_coordinates</span><span class="p">(</span>
+                <span class="n">coords</span> <span class="o">=</span> <span class="n">_build_mesh</span><span class="p">(</span><span class="n">lds</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">max_shifts</span><span class="p">,</span> <span class="n">upsample</span><span class="p">,</span> <span class="n">xp</span><span class="p">)</span>
+                <span class="n">lds_upsampled</span> <span class="o">=</span> <span class="n">xp</span><span class="o">.</span><span class="n">map_coordinates</span><span class="p">(</span>
                     <span class="n">lds</span><span class="p">,</span> <span class="n">coords</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;constant&quot;</span><span class="p">,</span> <span class="n">cval</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">prefilter</span><span class="o">=</span><span class="kc">True</span>
                 <span class="p">)</span>
             <span class="k">else</span><span class="p">:</span>
-                <span class="n">coords</span> <span class="o">=</span> <span class="n">_create_mesh_for_landscape</span><span class="p">(</span><span class="n">lds</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">:],</span> <span class="n">max_shifts</span><span class="p">,</span> <span class="n">upsample</span><span class="p">)</span>
+                <span class="n">coords</span> <span class="o">=</span> <span class="n">_build_mesh</span><span class="p">(</span><span class="n">lds</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">:],</span> <span class="n">max_shifts</span><span class="p">,</span> <span class="n">upsample</span><span class="p">,</span> <span class="n">xp</span><span class="p">)</span>
                 <span class="n">all_lds</span> <span class="o">=</span> <span class="p">[</span>
-                    <span class="n">map_coordinates</span><span class="p">(</span>
+                    <span class="n">xp</span><span class="o">.</span><span class="n">map_coordinates</span><span class="p">(</span>
                         <span class="n">l</span><span class="p">,</span> <span class="n">coords</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;constant&quot;</span><span class="p">,</span> <span class="n">cval</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">prefilter</span><span class="o">=</span><span class="kc">True</span>
                     <span class="p">)</span>
                     <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="n">lds</span>
                 <span class="p">]</span>
-                <span class="n">lds_upsampled</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">all_lds</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
-            <span class="k">return</span> <span class="n">lds_upsampled</span>
-        <span class="k">return</span> <span class="n">lds</span></div>
+                <span class="n">lds_upsampled</span> <span class="o">=</span> <span class="n">xp</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">all_lds</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">xp</span><span class="o">.</span><span class="n">asnumpy</span><span class="p">(</span><span class="n">lds_upsampled</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">xp</span><span class="o">.</span><span class="n">asnumpy</span><span class="p">(</span><span class="n">lds</span><span class="p">)</span></div>
 
     <span class="k">def</span> <span class="nf">_landscape_single</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
-        <span class="n">subvolume</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
-        <span class="n">template</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span>
-        <span class="n">mask</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
+        <span class="n">subvolume</span><span class="p">:</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
+        <span class="n">template</span><span class="p">:</span> <span class="n">_Template</span><span class="p">,</span>
+        <span class="n">mask</span><span class="p">:</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
         <span class="n">max_shifts</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="o">...</span><span class="p">],</span>
         <span class="n">quaternion</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
         <span class="n">pos</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
+        <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span><span class="p">,</span>
     <span class="p">):</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_landscape</span><span class="p">(</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">pre_transform</span><span class="p">(</span><span class="n">subvolume</span> <span class="o">*</span> <span class="n">mask</span><span class="p">),</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">pre_transform</span><span class="p">(</span><span class="n">subvolume</span> <span class="o">*</span> <span class="n">mask</span><span class="p">,</span> <span class="n">backend</span><span class="p">),</span>
             <span class="n">template</span><span class="p">,</span>
             <span class="n">max_shifts</span><span class="o">=</span><span class="n">max_shifts</span><span class="p">,</span>
             <span class="n">quaternion</span><span class="o">=</span><span class="n">quaternion</span><span class="p">,</span>
             <span class="n">pos</span><span class="o">=</span><span class="n">pos</span><span class="p">,</span>
+            <span class="n">backend</span><span class="o">=</span><span class="n">backend</span><span class="p">,</span>
         <span class="p">)</span>
 
     <span class="k">def</span> <span class="nf">_landscape_multiple</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
-        <span class="n">subvolume</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
-        <span class="n">template_list</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">]],</span>
-        <span class="n">mask_list</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]],</span>
+        <span class="n">subvolume</span><span class="p">:</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
+        <span class="n">template_list</span><span class="p">:</span> <span class="n">_Template</span><span class="p">,</span>
+        <span class="n">mask_list</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">[</span><span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]],</span>
         <span class="n">max_shifts</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">],</span>
         <span class="n">quaternion</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
         <span class="n">pos</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
-    <span class="p">):</span>
-        <span class="n">out</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
+        <span class="n">out</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
         <span class="k">for</span> <span class="n">template</span><span class="p">,</span> <span class="n">mask</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">template_list</span><span class="p">,</span> <span class="n">mask_list</span><span class="p">):</span>
             <span class="n">lnd</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_landscape</span><span class="p">(</span>
-                <span class="bp">self</span><span class="o">.</span><span class="n">pre_transform</span><span class="p">(</span><span class="n">subvolume</span> <span class="o">*</span> <span class="n">mask</span><span class="p">),</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">pre_transform</span><span class="p">(</span><span class="n">subvolume</span> <span class="o">*</span> <span class="n">mask</span><span class="p">,</span> <span class="n">backend</span><span class="p">),</span>
                 <span class="n">template</span><span class="p">,</span>
                 <span class="n">max_shifts</span><span class="o">=</span><span class="n">max_shifts</span><span class="p">,</span>
                 <span class="n">quaternion</span><span class="o">=</span><span class="n">quaternion</span><span class="p">,</span>
                 <span class="n">pos</span><span class="o">=</span><span class="n">pos</span><span class="p">,</span>
+                <span class="n">backend</span><span class="o">=</span><span class="n">backend</span><span class="p">,</span>
             <span class="p">)</span>
             <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">lnd</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">backend</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
 
     <span class="k">def</span> <span class="nf">_optimize_single</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
-        <span class="n">subvolume</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
-        <span class="n">template</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span>
-        <span class="n">mask</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
+        <span class="n">subvolume</span><span class="p">:</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
+        <span class="n">template</span><span class="p">:</span> <span class="n">_Template</span><span class="p">,</span>
+        <span class="n">mask</span><span class="p">:</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
         <span class="n">max_shifts</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">],</span>
         <span class="n">quaternion</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
         <span class="n">pos</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
+        <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AlignmentResult</span><span class="p">:</span>
         <span class="n">out</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_optimize</span><span class="p">(</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">pre_transform</span><span class="p">(</span><span class="n">subvolume</span> <span class="o">*</span> <span class="n">mask</span><span class="p">),</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">pre_transform</span><span class="p">(</span><span class="n">subvolume</span> <span class="o">*</span> <span class="n">mask</span><span class="p">,</span> <span class="n">backend</span><span class="p">),</span>
             <span class="n">template</span><span class="p">,</span>
             <span class="n">max_shifts</span><span class="o">=</span><span class="n">max_shifts</span><span class="p">,</span>
             <span class="n">quaternion</span><span class="o">=</span><span class="n">quaternion</span><span class="p">,</span>
             <span class="n">pos</span><span class="o">=</span><span class="n">pos</span><span class="p">,</span>
+            <span class="n">backend</span><span class="o">=</span><span class="n">backend</span><span class="p">,</span>
         <span class="p">)</span>
         <span class="k">return</span> <span class="n">AlignmentResult</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="o">*</span><span class="n">out</span><span class="p">)</span>
 
     <span class="k">def</span> <span class="nf">_optimize_multiple</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
-        <span class="n">subvolume</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
-        <span class="n">template_list</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">]],</span>
-        <span class="n">mask_list</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]],</span>
+        <span class="n">subvolume</span><span class="p">:</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
+        <span class="n">template_list</span><span class="p">:</span> <span class="n">_Template</span><span class="p">,</span>
+        <span class="n">mask_list</span><span class="p">:</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
         <span class="n">max_shifts</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">],</span>
         <span class="n">quaternion</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
         <span class="n">pos</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
+        <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AlignmentResult</span><span class="p">:</span>
         <span class="n">all_shifts</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
         <span class="n">all_quat</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
         <span class="n">all_score</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
         <span class="k">for</span> <span class="n">template</span><span class="p">,</span> <span class="n">mask</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">template_list</span><span class="p">,</span> <span class="n">mask_list</span><span class="p">):</span>
             <span class="n">shift</span><span class="p">,</span> <span class="n">quat</span><span class="p">,</span> <span class="n">score</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_optimize</span><span class="p">(</span>
-                <span class="bp">self</span><span class="o">.</span><span class="n">pre_transform</span><span class="p">(</span><span class="n">subvolume</span> <span class="o">*</span> <span class="n">mask</span><span class="p">),</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">pre_transform</span><span class="p">(</span><span class="n">subvolume</span> <span class="o">*</span> <span class="n">mask</span><span class="p">,</span> <span class="n">backend</span><span class="p">),</span>
                 <span class="n">template</span><span class="p">,</span>
                 <span class="n">max_shifts</span><span class="o">=</span><span class="n">max_shifts</span><span class="p">,</span>
                 <span class="n">quaternion</span><span class="o">=</span><span class="n">quaternion</span><span class="p">,</span>
                 <span class="n">pos</span><span class="o">=</span><span class="n">pos</span><span class="p">,</span>
+                <span class="n">backend</span><span class="o">=</span><span class="n">backend</span><span class="p">,</span>
             <span class="p">)</span>
             <span class="n">all_shifts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">shift</span><span class="p">)</span>
             <span class="n">all_quat</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">quat</span><span class="p">)</span>
@@ -557,14 +609,6 @@
     <span class="k">def</span> <span class="nf">niter</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Number of templates.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_n_templates</span></div>
-
-
-<span class="c1"># deprecated</span>
-<span class="k">def</span> <span class="nf">optimize</span><span class="p">(</span><span class="bp">self</span><span class="p">:</span> <span class="n">BaseAlignmentModel</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
-    <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
-        <span class="s2">&quot;`optimize` is deprecated. It is now a private method.&quot;</span><span class="p">,</span> <span class="ne">DeprecationWarning</span>
-    <span class="p">)</span>
-    <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_optimize</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
 
 
 <div class="viewcode-block" id="RotationImplemented"><a class="viewcode-back" href="../../../apidoc/acryo.alignment.html#acryo.alignment.RotationImplemented">[docs]</a><span class="k">class</span> <span class="nc">RotationImplemented</span><span class="p">(</span><span class="n">BaseAlignmentModel</span><span class="p">):</span>
@@ -606,6 +650,7 @@
         <span class="n">max_shifts</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">subpixel</span><span class="p">,</span> <span class="n">subpixel</span><span class="p">,</span> <span class="n">subpixel</span><span class="p">],</span>
         <span class="n">quaternion</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">pos</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AlignmentResult</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Align an image using current alignment parameters.</span>
@@ -622,7 +667,7 @@
 <span class="sd">        AlignmentResult</span>
 <span class="sd">            Result of alignment.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
-        <span class="n">iopt</span><span class="p">,</span> <span class="n">shift</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">corr</span> <span class="o">=</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">align</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">max_shifts</span><span class="p">,</span> <span class="n">quaternion</span><span class="p">,</span> <span class="n">pos</span><span class="p">)</span>
+        <span class="n">iopt</span><span class="p">,</span> <span class="n">shift</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">corr</span> <span class="o">=</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">align</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">max_shifts</span><span class="p">,</span> <span class="n">quaternion</span><span class="p">,</span> <span class="n">pos</span><span class="p">,</span> <span class="n">backend</span><span class="p">)</span>
         <span class="n">quat</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">quaternions</span><span class="p">[</span><span class="n">iopt</span> <span class="o">%</span> <span class="bp">self</span><span class="o">.</span><span class="n">_n_rotations</span><span class="p">]</span>
         <span class="k">return</span> <span class="n">AlignmentResult</span><span class="p">(</span><span class="n">label</span><span class="o">=</span><span class="n">iopt</span><span class="p">,</span> <span class="n">shift</span><span class="o">=</span><span class="n">shift</span><span class="p">,</span> <span class="n">quat</span><span class="o">=</span><span class="n">quat</span><span class="p">,</span> <span class="n">score</span><span class="o">=</span><span class="n">corr</span><span class="p">)</span></div>
 
@@ -631,6 +676,7 @@
         <span class="n">img</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
         <span class="n">max_shifts</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">subpixel</span><span class="p">,</span> <span class="n">subpixel</span><span class="p">,</span> <span class="n">subpixel</span><span class="p">],</span>
         <span class="n">cval</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span> <span class="n">AlignmentResult</span><span class="p">]:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Fit image to template based on the alignment model.</span>
@@ -652,17 +698,19 @@
 <span class="sd">        np.ndarray, AlignmentResult</span>
 <span class="sd">            Transformed input image and the alignment result.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">xp</span> <span class="o">=</span> <span class="n">backend</span> <span class="ow">or</span> <span class="n">Backend</span><span class="p">()</span>
         <span class="n">pool</span> <span class="o">=</span> <span class="n">DaskTaskPool</span><span class="o">.</span><span class="n">from_func</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_optimize</span><span class="p">)</span>
         <span class="n">pos</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
-        <span class="k">for</span> <span class="n">quat</span><span class="p">,</span> <span class="n">tmp</span><span class="p">,</span> <span class="n">mask</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">quaternions</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_template_input</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mask_input</span>
-        <span class="p">):</span>
+        <span class="n">img_input</span> <span class="o">=</span> <span class="n">xp</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">img</span><span class="p">)</span>
+        <span class="n">_template</span><span class="p">,</span> <span class="n">_mask</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_template_and_mask_input</span><span class="p">(</span><span class="n">backend</span><span class="o">=</span><span class="n">xp</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">quat</span><span class="p">,</span> <span class="n">tmp</span><span class="p">,</span> <span class="n">mask</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">quaternions</span><span class="p">,</span> <span class="n">_template</span><span class="p">,</span> <span class="n">_mask</span><span class="p">):</span>
             <span class="n">pool</span><span class="o">.</span><span class="n">add_task</span><span class="p">(</span>
-                <span class="bp">self</span><span class="o">.</span><span class="n">pre_transform</span><span class="p">(</span><span class="n">img</span> <span class="o">*</span> <span class="n">mask</span><span class="p">),</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">pre_transform</span><span class="p">(</span><span class="n">img_input</span> <span class="o">*</span> <span class="n">mask</span><span class="p">,</span> <span class="n">xp</span><span class="p">),</span>
                 <span class="n">tmp</span><span class="p">,</span>
                 <span class="n">max_shifts</span><span class="p">,</span>
                 <span class="n">quat</span><span class="p">,</span>
                 <span class="n">pos</span><span class="o">=</span><span class="n">pos</span><span class="p">,</span>
+                <span class="n">backend</span><span class="o">=</span><span class="n">xp</span><span class="p">,</span>
             <span class="p">)</span>
         <span class="n">results</span> <span class="o">=</span> <span class="n">pool</span><span class="o">.</span><span class="n">compute</span><span class="p">()</span>
         <span class="n">scores</span> <span class="o">=</span> <span class="p">[</span><span class="n">x</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">results</span><span class="p">]</span>
@@ -675,30 +723,30 @@
             <span class="n">score</span><span class="o">=</span><span class="n">opt_result</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span>
         <span class="p">)</span>
 
-        <span class="n">mtx</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">affine_matrix</span><span class="p">(</span><span class="n">img</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
-        <span class="n">_img_cval</span> <span class="o">=</span> <span class="n">_normalize_cval</span><span class="p">(</span><span class="n">cval</span><span class="p">,</span> <span class="n">img</span><span class="p">)</span>
-        <span class="n">img_trans</span> <span class="o">=</span> <span class="n">affine_transform</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">mtx</span><span class="p">,</span> <span class="n">cval</span><span class="o">=</span><span class="n">_img_cval</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">img_trans</span><span class="p">,</span> <span class="n">result</span></div>
+        <span class="n">mtx</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">affine_matrix</span><span class="p">(</span><span class="n">img_input</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
+        <span class="n">_img_cval</span> <span class="o">=</span> <span class="n">_normalize_cval</span><span class="p">(</span><span class="n">cval</span><span class="p">,</span> <span class="n">img_input</span><span class="p">,</span> <span class="n">xp</span><span class="p">)</span>
+        <span class="n">img_trans</span> <span class="o">=</span> <span class="n">xp</span><span class="o">.</span><span class="n">affine_transform</span><span class="p">(</span><span class="n">img_input</span><span class="p">,</span> <span class="n">mtx</span><span class="p">,</span> <span class="n">cval</span><span class="o">=</span><span class="n">_img_cval</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">xp</span><span class="o">.</span><span class="n">asnumpy</span><span class="p">(</span><span class="n">img_trans</span><span class="p">),</span> <span class="n">result</span></div>
 
     <span class="k">def</span> <span class="nf">_transform_template</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
-        <span class="n">temp</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
+        <span class="n">temp</span><span class="p">:</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
         <span class="n">matrix</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
         <span class="n">cval</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">order</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">3</span><span class="p">,</span>
         <span class="n">prefilter</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
-    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">]:</span>
-        <span class="n">_cval</span> <span class="o">=</span> <span class="n">_normalize_cval</span><span class="p">(</span><span class="n">cval</span><span class="p">,</span> <span class="n">temp</span><span class="p">)</span>
-
-        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">pre_transform</span><span class="p">(</span>
-            <span class="n">affine_transform</span><span class="p">(</span>
-                <span class="n">temp</span><span class="p">,</span> <span class="n">matrix</span><span class="o">=</span><span class="n">matrix</span><span class="p">,</span> <span class="n">cval</span><span class="o">=</span><span class="n">_cval</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="n">order</span><span class="p">,</span> <span class="n">prefilter</span><span class="o">=</span><span class="n">prefilter</span>
-            <span class="p">)</span>
+        <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span> <span class="o">=</span> <span class="n">NUMPY_BACKEND</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">_Template</span><span class="p">:</span>
+        <span class="n">_cval</span> <span class="o">=</span> <span class="n">_normalize_cval</span><span class="p">(</span><span class="n">cval</span><span class="p">,</span> <span class="n">temp</span><span class="p">,</span> <span class="n">backend</span><span class="p">)</span>
+        <span class="n">temp_transformed</span> <span class="o">=</span> <span class="n">backend</span><span class="o">.</span><span class="n">affine_transform</span><span class="p">(</span>
+            <span class="n">temp</span><span class="p">,</span> <span class="n">matrix</span><span class="o">=</span><span class="n">matrix</span><span class="p">,</span> <span class="n">cval</span><span class="o">=</span><span class="n">_cval</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="n">order</span><span class="p">,</span> <span class="n">prefilter</span><span class="o">=</span><span class="n">prefilter</span>
         <span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">pre_transform</span><span class="p">(</span><span class="n">temp_transformed</span><span class="p">,</span> <span class="n">backend</span><span class="p">)</span>
 
     <span class="k">def</span> <span class="nf">_get_template_and_mask_input</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
-    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]]:</span>
+        <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">_Template</span><span class="p">,</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]]:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Returns proper template image for alignment.</span>
 
@@ -718,6 +766,7 @@
 <span class="sd">              the first axis yielded images will be (rot0, temp0),</span>
 <span class="sd">              (rot0, temp1), ...</span>
 <span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">xp</span> <span class="o">=</span> <span class="n">backend</span> <span class="ow">or</span> <span class="n">Backend</span><span class="p">()</span>
         <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_n_rotations</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
             <span class="n">rotators</span> <span class="o">=</span> <span class="p">[</span><span class="n">Rotation</span><span class="o">.</span><span class="n">from_quat</span><span class="p">(</span><span class="n">r</span><span class="p">)</span><span class="o">.</span><span class="n">inv</span><span class="p">()</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">quaternions</span><span class="p">]</span>
             <span class="n">matrices</span> <span class="o">=</span> <span class="n">compose_matrices</span><span class="p">(</span>
@@ -725,10 +774,8 @@
             <span class="p">)</span>
             <span class="n">cval</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">percentile</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_template</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
             <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_n_templates</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
-                <span class="c1"># all_templates: list[da.Array] = []</span>
-                <span class="c1"># all_masks: list[da.Array] = []</span>
-                <span class="n">inputs_templates</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[</span>
-                    <span class="n">spline_filter</span><span class="p">(</span>
+                <span class="n">inputs_templates</span> <span class="o">=</span> <span class="p">[</span>
+                    <span class="n">xp</span><span class="o">.</span><span class="n">spline_filter</span><span class="p">(</span>
                         <span class="n">tmp</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mask</span><span class="p">,</span>
                         <span class="n">order</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>
                         <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;constant&quot;</span><span class="p">,</span>
@@ -737,75 +784,68 @@
                     <span class="k">for</span> <span class="n">tmp</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_template</span>
                 <span class="p">]</span>
                 <span class="n">pool_template</span> <span class="o">=</span> <span class="n">DaskTaskPool</span><span class="o">.</span><span class="n">from_func</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_transform_template</span><span class="p">)</span>
-                <span class="n">pool_mask</span> <span class="o">=</span> <span class="n">DaskTaskPool</span><span class="o">.</span><span class="n">from_func</span><span class="p">(</span><span class="n">affine_transform</span><span class="p">)</span>
+                <span class="n">pool_mask</span> <span class="o">=</span> <span class="n">DaskTaskPool</span><span class="o">.</span><span class="n">from_func</span><span class="p">(</span><span class="n">xp</span><span class="o">.</span><span class="n">affine_transform</span><span class="p">)</span>
                 <span class="n">ntmp</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">inputs_templates</span><span class="p">)</span>
                 <span class="k">for</span> <span class="n">mat</span> <span class="ow">in</span> <span class="n">matrices</span><span class="p">:</span>
                     <span class="k">for</span> <span class="n">tmp</span> <span class="ow">in</span> <span class="n">inputs_templates</span><span class="p">:</span>
                         <span class="n">pool_template</span><span class="o">.</span><span class="n">add_task</span><span class="p">(</span>
-                            <span class="n">tmp</span><span class="p">,</span> <span class="n">mat</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">cval</span><span class="o">=</span><span class="n">cval</span><span class="p">,</span> <span class="n">prefilter</span><span class="o">=</span><span class="kc">False</span>
+                            <span class="n">tmp</span><span class="p">,</span>
+                            <span class="n">mat</span><span class="p">,</span>
+                            <span class="n">order</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>
+                            <span class="n">cval</span><span class="o">=</span><span class="n">cval</span><span class="p">,</span>
+                            <span class="n">prefilter</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                            <span class="n">backend</span><span class="o">=</span><span class="n">xp</span><span class="p">,</span>
                         <span class="p">)</span>
-                        <span class="c1"># all_templates.append(</span>
-                        <span class="c1">#     da.from_delayed(</span>
-                        <span class="c1">#         self._transform_template_delayed(</span>
-                        <span class="c1">#             tmp, mat, order=3, cval=cval, prefilter=False</span>
-                        <span class="c1">#         ),</span>
-                        <span class="c1">#         shape=tmp.shape,</span>
-                        <span class="c1">#         dtype=tmp.dtype,</span>
-                        <span class="c1">#     )</span>
-                        <span class="c1"># )</span>
                     <span class="n">pool_mask</span><span class="o">.</span><span class="n">add_tasks</span><span class="p">(</span>
                         <span class="n">ntmp</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mask</span><span class="p">,</span> <span class="n">mat</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;nearest&quot;</span><span class="p">,</span> <span class="n">prefilter</span><span class="o">=</span><span class="kc">False</span>
                     <span class="p">)</span>
-
-                    <span class="c1"># all_masks.extend(</span>
-                    <span class="c1">#     [</span>
-                    <span class="c1">#         delayed_affine(</span>
-                    <span class="c1">#             self._mask,</span>
-                    <span class="c1">#             mat,</span>
-                    <span class="c1">#             order=3,</span>
-                    <span class="c1">#             mode=&quot;nearest&quot;,</span>
-                    <span class="c1">#             prefilter=False,</span>
-                    <span class="c1">#         )</span>
-                    <span class="c1">#     ]</span>
-                    <span class="c1">#     * len(inputs_templates)</span>
-                    <span class="c1"># )</span>
-                <span class="n">template_input</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">pool_template</span><span class="o">.</span><span class="n">compute</span><span class="p">(),</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
-                <span class="n">mask_input</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">pool_mask</span><span class="o">.</span><span class="n">compute</span><span class="p">(),</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
-                <span class="c1"># template_input, mask_input = da.compute(</span>
-                <span class="c1">#     da.stack(all_templates, axis=0), da.stack(all_masks, axis=0)</span>
-                <span class="c1"># )</span>
-
             <span class="k">else</span><span class="p">:</span>
-                <span class="n">template_masked</span> <span class="o">=</span> <span class="n">spline_filter</span><span class="p">(</span>
+                <span class="n">template_masked</span> <span class="o">=</span> <span class="n">xp</span><span class="o">.</span><span class="n">spline_filter</span><span class="p">(</span>
                     <span class="bp">self</span><span class="o">.</span><span class="n">_template</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mask</span><span class="p">,</span>
                     <span class="n">order</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>
                     <span class="n">output</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span>
                     <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;constant&quot;</span><span class="p">,</span>
                 <span class="p">)</span>
                 <span class="n">pool_template</span> <span class="o">=</span> <span class="n">DaskTaskPool</span><span class="o">.</span><span class="n">from_func</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_transform_template</span><span class="p">)</span>
-                <span class="n">pool_mask</span> <span class="o">=</span> <span class="n">DaskTaskPool</span><span class="o">.</span><span class="n">from_func</span><span class="p">(</span><span class="n">affine_transform</span><span class="p">)</span>
+                <span class="n">pool_mask</span> <span class="o">=</span> <span class="n">DaskTaskPool</span><span class="o">.</span><span class="n">from_func</span><span class="p">(</span><span class="n">xp</span><span class="o">.</span><span class="n">affine_transform</span><span class="p">)</span>
                 <span class="k">for</span> <span class="n">mat</span> <span class="ow">in</span> <span class="n">matrices</span><span class="p">:</span>
                     <span class="n">pool_template</span><span class="o">.</span><span class="n">add_task</span><span class="p">(</span>
-                        <span class="n">template_masked</span><span class="p">,</span> <span class="n">mat</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">cval</span><span class="o">=</span><span class="n">cval</span><span class="p">,</span> <span class="n">prefilter</span><span class="o">=</span><span class="kc">False</span>
+                        <span class="n">template_masked</span><span class="p">,</span>
+                        <span class="n">mat</span><span class="p">,</span>
+                        <span class="n">order</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>
+                        <span class="n">cval</span><span class="o">=</span><span class="n">cval</span><span class="p">,</span>
+                        <span class="n">prefilter</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                        <span class="n">backend</span><span class="o">=</span><span class="n">xp</span><span class="p">,</span>
                     <span class="p">)</span>
                     <span class="n">pool_mask</span><span class="o">.</span><span class="n">add_task</span><span class="p">(</span>
                         <span class="bp">self</span><span class="o">.</span><span class="n">_mask</span><span class="p">,</span> <span class="n">mat</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;nearest&quot;</span><span class="p">,</span> <span class="n">prefilter</span><span class="o">=</span><span class="kc">False</span>
                     <span class="p">)</span>
-                <span class="n">template_input</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">pool_template</span><span class="o">.</span><span class="n">compute</span><span class="p">(),</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
-                <span class="n">mask_input</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">pool_mask</span><span class="o">.</span><span class="n">compute</span><span class="p">(),</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+            <span class="n">_templates</span><span class="p">,</span> <span class="n">_masks</span> <span class="o">=</span> <span class="n">compute</span><span class="p">(</span>
+                <span class="p">(</span>
+                    <span class="n">pool_template</span><span class="o">.</span><span class="n">asarrays</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">input_shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">),</span>
+                    <span class="n">pool_mask</span><span class="o">.</span><span class="n">asarrays</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">input_shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">),</span>
+                <span class="p">)</span>
+            <span class="p">)</span>
+            <span class="n">template_input</span> <span class="o">=</span> <span class="n">xp</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">_templates</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+            <span class="n">mask_input</span> <span class="o">=</span> <span class="n">xp</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">_masks</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
         <span class="k">else</span><span class="p">:</span>
             <span class="n">pool</span> <span class="o">=</span> <span class="n">DaskTaskPool</span><span class="o">.</span><span class="n">from_func</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">pre_transform</span><span class="p">)</span>
             <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_n_templates</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
                 <span class="k">for</span> <span class="n">tmp</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_template</span><span class="p">:</span>
-                    <span class="n">pool</span><span class="o">.</span><span class="n">add_task</span><span class="p">(</span><span class="n">tmp</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mask</span><span class="p">)</span>
-                <span class="n">template_input</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">pool</span><span class="o">.</span><span class="n">compute</span><span class="p">(),</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
-                <span class="n">mask_input</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">([</span><span class="bp">self</span><span class="o">.</span><span class="n">_mask</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_template</span><span class="p">),</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+                    <span class="n">pool</span><span class="o">.</span><span class="n">add_task</span><span class="p">(</span><span class="n">tmp</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mask</span><span class="p">,</span> <span class="n">xp</span><span class="p">)</span>
+                <span class="n">template_input</span> <span class="o">=</span> <span class="n">xp</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">pool</span><span class="o">.</span><span class="n">compute</span><span class="p">(),</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+                <span class="n">mask_input</span> <span class="o">=</span> <span class="n">xp</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span>
+                    <span class="p">[</span><span class="n">xp</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_mask</span><span class="p">)]</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_n_templates</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span>
+                <span class="p">)</span>
 
             <span class="k">else</span><span class="p">:</span>
                 <span class="c1"># NOTE: dask.compute is always called once inside this method.</span>
-                <span class="n">template_input</span> <span class="o">=</span> <span class="n">pool</span><span class="o">.</span><span class="n">add_task</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_template</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mask</span><span class="p">)</span><span class="o">.</span><span class="n">compute</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
-                <span class="n">mask_input</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mask</span>
+                <span class="n">template_masked</span> <span class="o">=</span> <span class="n">xp</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_template</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mask</span><span class="p">)</span>
+                <span class="n">template_input</span> <span class="o">=</span> <span class="n">pool</span><span class="o">.</span><span class="n">add_task</span><span class="p">(</span><span class="n">template_masked</span><span class="p">,</span> <span class="n">xp</span><span class="p">)</span><span class="o">.</span><span class="n">compute</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
+                <span class="n">mask_input</span> <span class="o">=</span> <span class="n">xp</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_mask</span><span class="p">)</span>
 
+        <span class="bp">self</span><span class="o">.</span><span class="n">_template_mask_cache</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">xp</span><span class="p">,</span> <span class="n">template_input</span><span class="p">,</span> <span class="n">mask_input</span><span class="p">)</span>
         <span class="k">return</span> <span class="n">template_input</span><span class="p">,</span> <span class="n">mask_input</span>
 
     <span class="k">def</span> <span class="nf">_is_multiple</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
@@ -858,14 +898,17 @@
             <span class="n">tilt_range</span><span class="o">=</span><span class="n">tilt_range</span><span class="p">,</span>
         <span class="p">)</span></div>
 
-<div class="viewcode-block" id="TomographyInput.pre_transform"><a class="viewcode-back" href="../../../apidoc/acryo.alignment.html#acryo.alignment.TomographyInput.pre_transform">[docs]</a>    <span class="k">def</span> <span class="nf">pre_transform</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">]:</span>
+<div class="viewcode-block" id="TomographyInput.pre_transform"><a class="viewcode-back" href="../../../apidoc/acryo.alignment.html#acryo.alignment.TomographyInput.pre_transform">[docs]</a>    <span class="k">def</span> <span class="nf">pre_transform</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span> <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">]:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Apply low-pass filter without IFFT.&quot;&quot;&quot;</span>
-        <span class="k">return</span> <span class="n">lowpass_filter_ft</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">cutoff</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_cutoff</span><span class="p">)</span></div>
+        <span class="k">return</span> <span class="n">backend</span><span class="o">.</span><span class="n">lowpass_filter_ft</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">cutoff</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_cutoff</span><span class="p">)</span></div>
 
 <div class="viewcode-block" id="TomographyInput.masked_difference"><a class="viewcode-back" href="../../../apidoc/acryo.alignment.html#acryo.alignment.TomographyInput.masked_difference">[docs]</a>    <span class="k">def</span> <span class="nf">masked_difference</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">image</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
         <span class="n">quaternion</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
+        <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Difference between an image and the template, considering the missing wedge.</span>
@@ -887,25 +930,30 @@
             <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span>
                 <span class="s2">&quot;Masked difference is not implemented for multi-template.&quot;</span>
             <span class="p">)</span>
-        <span class="n">ft</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_template_input</span>  <span class="c1"># NOTE: ft.ndim == 3</span>
-        <span class="n">ft</span><span class="p">[:]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">mask_missing_wedge</span><span class="p">(</span><span class="n">ft</span><span class="p">,</span> <span class="n">quaternion</span><span class="p">)</span>
-        <span class="n">template_masked</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">real</span><span class="p">(</span><span class="n">ifftn</span><span class="p">(</span><span class="n">ft</span><span class="p">))</span>
-        <span class="n">img_input</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">real</span><span class="p">(</span><span class="n">ifftn</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">pre_transform</span><span class="p">(</span><span class="n">image</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mask</span><span class="p">)))</span>
-        <span class="k">return</span> <span class="n">img_input</span> <span class="o">-</span> <span class="n">template_masked</span></div>
+        <span class="n">xp</span> <span class="o">=</span> <span class="n">backend</span> <span class="ow">or</span> <span class="n">Backend</span><span class="p">()</span>
+        <span class="n">_template</span><span class="p">,</span> <span class="n">_mask</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_template_and_mask_input</span><span class="p">(</span><span class="n">xp</span><span class="p">)</span>
+        <span class="n">image_input</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">pre_transform</span><span class="p">(</span><span class="n">xp</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">image</span><span class="p">)</span> <span class="o">*</span> <span class="n">_mask</span><span class="p">,</span> <span class="n">xp</span><span class="p">)</span>
+        <span class="n">mw</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_missing_wedge_mask</span><span class="p">(</span><span class="n">quaternion</span><span class="p">,</span> <span class="n">xp</span><span class="p">)</span>
+        <span class="n">template_masked</span> <span class="o">=</span> <span class="n">xp</span><span class="o">.</span><span class="n">ifftn</span><span class="p">(</span><span class="n">_template</span> <span class="o">*</span> <span class="n">mw</span><span class="p">)</span><span class="o">.</span><span class="n">real</span>
+        <span class="n">img_input</span> <span class="o">=</span> <span class="n">xp</span><span class="o">.</span><span class="n">ifftn</span><span class="p">(</span><span class="n">image_input</span> <span class="o">*</span> <span class="n">mw</span><span class="p">)</span><span class="o">.</span><span class="n">real</span>
+        <span class="k">return</span> <span class="n">xp</span><span class="o">.</span><span class="n">asnumpy</span><span class="p">(</span><span class="n">img_input</span> <span class="o">-</span> <span class="n">template_masked</span><span class="p">)</span></div>
 
 <div class="viewcode-block" id="TomographyInput.mask_missing_wedge"><a class="viewcode-back" href="../../../apidoc/acryo.alignment.html#acryo.alignment.TomographyInput.mask_missing_wedge">[docs]</a>    <span class="k">def</span> <span class="nf">mask_missing_wedge</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">image</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span>
         <span class="n">quaternion</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
+        <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">]:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Apply missing wedge mask in the frequency domain.&quot;&quot;&quot;</span>
-        <span class="k">return</span> <span class="n">image</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_missing_wedge_mask</span><span class="p">(</span><span class="n">quaternion</span><span class="p">)</span></div>
+        <span class="n">xp</span> <span class="o">=</span> <span class="n">backend</span> <span class="ow">or</span> <span class="n">Backend</span><span class="p">()</span>
+        <span class="n">mask</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_missing_wedge_mask</span><span class="p">(</span><span class="n">quaternion</span><span class="p">,</span> <span class="n">xp</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">xp</span><span class="o">.</span><span class="n">asnumpy</span><span class="p">(</span><span class="n">xp</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">image</span><span class="p">)</span> <span class="o">*</span> <span class="n">mask</span><span class="p">)</span></div>
 
-    <span class="k">def</span> <span class="nf">_get_missing_wedge_mask</span><span class="p">(</span>
-        <span class="bp">self</span><span class="p">,</span> <span class="n">quat</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span>
-    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span> <span class="o">|</span> <span class="nb">int</span><span class="p">:</span>
+<div class="viewcode-block" id="TomographyInput.get_missing_wedge_mask"><a class="viewcode-back" href="../../../apidoc/acryo.alignment.html#acryo.alignment.TomographyInput.get_missing_wedge_mask">[docs]</a>    <span class="k">def</span> <span class="nf">get_missing_wedge_mask</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">quat</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span> <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">        Create a binary mask that covers tomographical missing wedge.</span>
+<span class="sd">        Create a mask that covers tomographical missing wedge.</span>
 
 <span class="sd">        Parameters</span>
 <span class="sd">        ----------</span>
@@ -914,42 +962,54 @@
 
 <span class="sd">        Returns</span>
 <span class="sd">        -------</span>
-<span class="sd">        np.ndarray or float</span>
-<span class="sd">            Missing wedge mask. If ``tilt_range`` is None, 1 will be returned.</span>
+<span class="sd">        np.ndarray or 1</span>
+<span class="sd">            Missing wedge mask array.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">xp</span> <span class="o">=</span> <span class="n">backend</span> <span class="ow">or</span> <span class="n">Backend</span><span class="p">()</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_missing_wedge_mask</span><span class="p">(</span><span class="n">quat</span><span class="p">,</span> <span class="n">xp</span><span class="p">)</span></div>
+
+    <span class="k">def</span> <span class="nf">_get_missing_wedge_mask</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">quat</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
+        <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span> <span class="o">|</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Create a mask that covers tomographical missing wedge.&quot;&quot;&quot;</span>
         <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tilt_range</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
             <span class="k">return</span> <span class="mi">1</span>
-        <span class="k">return</span> <span class="n">missing_wedge_mask</span><span class="p">(</span>
+        <span class="k">return</span> <span class="n">backend</span><span class="o">.</span><span class="n">missing_wedge_mask</span><span class="p">(</span>
             <span class="n">rotator</span><span class="o">=</span><span class="n">Rotation</span><span class="o">.</span><span class="n">from_quat</span><span class="p">(</span><span class="n">quat</span><span class="p">),</span>
             <span class="n">tilt_range</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_tilt_range</span><span class="p">,</span>
             <span class="n">shape</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">input_shape</span><span class="p">,</span>
         <span class="p">)</span></div>
 
 
-<span class="k">def</span> <span class="nf">_normalize_cval</span><span class="p">(</span><span class="n">cval</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">img</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<span class="k">def</span> <span class="nf">_normalize_cval</span><span class="p">(</span>
+    <span class="n">cval</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">img</span><span class="p">:</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span> <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
     <span class="k">if</span> <span class="n">cval</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="n">_cval</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">percentile</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+        <span class="n">_cval</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">backend</span><span class="o">.</span><span class="n">percentile</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
     <span class="k">else</span><span class="p">:</span>
         <span class="n">_cval</span> <span class="o">=</span> <span class="n">cval</span>
     <span class="k">return</span> <span class="n">_cval</span>
 
 
 <span class="nd">@lru_cache</span><span class="p">(</span><span class="n">maxsize</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
-<span class="k">def</span> <span class="nf">_create_mesh_for_landscape</span><span class="p">(</span>
+<span class="k">def</span> <span class="nf">_build_mesh</span><span class="p">(</span>
     <span class="n">shape</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span>
     <span class="n">max_shifts</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">],</span>
     <span class="n">upsample</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
-<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
+    <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
     <span class="n">upsampled_max_shifts</span> <span class="o">=</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">max_shifts</span><span class="p">)</span> <span class="o">*</span> <span class="n">upsample</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">)</span>
     <span class="n">center</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">shape</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span> <span class="o">-</span> <span class="mf">0.5</span>
-    <span class="n">mesh</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">meshgrid</span><span class="p">(</span>
+    <span class="n">mesh</span> <span class="o">=</span> <span class="n">backend</span><span class="o">.</span><span class="n">meshgrid</span><span class="p">(</span>
         <span class="o">*</span><span class="p">[</span>
-            <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="o">-</span><span class="n">width</span><span class="p">,</span> <span class="n">width</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="n">upsample</span> <span class="o">+</span> <span class="n">c</span>
+            <span class="n">backend</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="o">-</span><span class="n">width</span><span class="p">,</span> <span class="n">width</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="n">upsample</span> <span class="o">+</span> <span class="n">c</span>
             <span class="k">for</span> <span class="n">c</span><span class="p">,</span> <span class="n">width</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">center</span><span class="p">,</span> <span class="n">upsampled_max_shifts</span><span class="p">)</span>
         <span class="p">],</span>
         <span class="n">indexing</span><span class="o">=</span><span class="s2">&quot;ij&quot;</span><span class="p">,</span>
     <span class="p">)</span>
-    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">mesh</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">backend</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">mesh</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
 </pre></div>
 
            </div>

@@ -188,13 +188,14 @@ calculate the optimal shift/rotation parameters. To transform the sub-volume, us
 .. code-block:: python
 
     result = model.align(
-        subvolume,
+        img,
         max_shifts,
         quaternion,
         pos,
+        backend,
     )
 
-- ``subvolume`` is the sub-volume to be aligned. It must be a 3D array with the same shape
+- ``img`` is the sub-volume to be aligned. It must be a 3D array with the same shape
   as the template.
 - ``max_shifts`` is a tuple of maximum shifts in z, y and x direction. The unit is pixel but
   it can be a float number.
@@ -203,6 +204,7 @@ calculate the optimal shift/rotation parameters. To transform the sub-volume, us
   its quaternions can directly be used here. This is basically used to mask the missing wedge.
 - ``pos`` is the position of the sub-volume in the original tomogram. It must be a (3,)
   :class:`numpy.ndarray` object. Default alignment models does not use this parameter.
+- ``backend`` is the array API backend. It can be ``"numpy"`` or ``"cupy"``.
 
 The return value ``result`` is a named-tuple :class:`AlignmentResult` object. It contains the
 following fields.
@@ -231,12 +233,13 @@ because it parallelizes the rotation and alignment processes.
 .. code-block:: python
 
     result = model.fit(
-        subvolume,
+        img,
         max_shifts,
         cval=0.0,
+        backend=None,
     )
 
-- ``subvolume`` and ``max_shifts`` is the same as :meth:`align`.
+- ``img`` and ``max_shifts`` is the same as :meth:`align`.
 - ``cval`` is the constant value used for Affine transformations. 1% percentile will be used
   by default.
 
@@ -250,11 +253,15 @@ image.
 .. code-block:: python
 
     arr = model.landscape(
-        subvolume,
-        max_shifts,
+        img,
+        max_shifts: tuple[float, float, float],
+        quaternion: NDArray[np.float32] | None = None,
+        pos: NDArray[np.float32] | None = None,
+        upsample: int = 1,
+        backend: Backend | None = None,
     )
 
-- ``subvolume`` is the sub-volume to be aligned. It must be a 3D array with the same shape
+- ``img`` is the sub-volume to be aligned. It must be a 3D array with the same shape
   as the template.
 - ``max_shifts`` is a tuple of maximum shifts in z, y and x direction. The unit is pixel but
   it can be a float number.
@@ -286,13 +293,18 @@ When you override methods, the following should be noted.
 
     .. code-block:: python
 
-        def pre_transform(self, image: NDArray[np.float32]) -> NDArray[np.complex64]:
+        def pre_transform(
+            self,
+            image: NDArray[np.float32],
+            backend=None,
+        ) -> NDArray[np.complex64]:
             ...
 
     The input image could be either the sub-volume or the template image. It is masked by
     the input mask image but is not masked by the missing wedge mask in :class:`TomographyInput`.
     The output image will be directly passed to the :meth:`_optimize` method, so the data
-    type depends on the implementation.
+    type depends on the implementation. ``backend`` is the backend array API object. You don't
+    have to use it unless you want to implement same method for GPU.
 
 - :meth:`_optimize`
 
@@ -307,6 +319,7 @@ When you override methods, the following should be noted.
             max_shifts: tuple[float, float, float],
             quaternion: NDArray[np.float32],
             pos: NDArray[np.float32],
+            backend=None,
         ) -> tuple[NDArray[np.float32], NDArray[np.float32], float]:
             ...
 
@@ -319,6 +332,8 @@ When you override methods, the following should be noted.
       to mask the missing wedge.
     - ``pos`` is the position of the sub-volume in the original tomogram. Its
       unit is pixel. This parameter can be used for CTF correction of defocusing.
+    - ``backend`` is the backend array API object. You don't have to use it unless
+      you want to implement same method for GPU.
     - The return value must be a tuple of ``(shift, rotation, score)``.
 
       - ``shift`` is the optimal shift in z, y and x direction. More precisely,

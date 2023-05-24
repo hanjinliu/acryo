@@ -8,6 +8,7 @@ Subpackages
    :maxdepth: 4
 
    acryo.alignment
+   acryo.backend
    acryo.classification
    acryo.loader
    acryo.molecules

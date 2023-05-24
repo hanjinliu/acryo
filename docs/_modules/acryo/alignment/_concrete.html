@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo.alignment._concrete &mdash; acryo 0.3.0 documentation</title>
+  <title>acryo.alignment._concrete &mdash; acryo 0.4.0 documentation</title>
       <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -33,7 +33,7 @@
             acryo
           </a>
               <div class="version">
-                0.3.0
+                0.4.0
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
@@ -82,14 +82,10 @@
 <span class="kn">from</span> <span class="nn">numpy.typing</span> <span class="kn">import</span> <span class="n">NDArray</span>
 
 <span class="kn">from</span> <span class="nn">._base</span> <span class="kn">import</span> <span class="n">TomographyInput</span>
-<span class="kn">from</span> <span class="nn">acryo._correlation</span> <span class="kn">import</span> <span class="p">(</span>
-    <span class="n">subpixel_pcc</span><span class="p">,</span>
-    <span class="n">subpixel_zncc</span><span class="p">,</span>
-    <span class="n">zncc_landscape_with_crop</span><span class="p">,</span>
-    <span class="n">pcc_landscape</span><span class="p">,</span>
-<span class="p">)</span>
-<span class="kn">from</span> <span class="nn">acryo._typed_scipy</span> <span class="kn">import</span> <span class="n">ifftn</span>
 <span class="kn">from</span> <span class="nn">acryo._types</span> <span class="kn">import</span> <span class="n">pixel</span>
+<span class="kn">from</span> <span class="nn">acryo.backend</span> <span class="kn">import</span> <span class="n">Backend</span><span class="p">,</span> <span class="n">AnyArray</span>
+<span class="kn">from</span> <span class="nn">acryo.backend._pcc</span> <span class="kn">import</span> <span class="n">subpixel_pcc</span><span class="p">,</span> <span class="n">pcc_landscape</span>
+<span class="kn">from</span> <span class="nn">acryo.backend._zncc</span> <span class="kn">import</span> <span class="n">subpixel_zncc</span><span class="p">,</span> <span class="n">zncc_landscape_with_crop</span>
 
 
 <div class="viewcode-block" id="PCCAlignment"><a class="viewcode-back" href="../../../apidoc/acryo.alignment.html#acryo.alignment.PCCAlignment">[docs]</a><span class="k">class</span> <span class="nc">PCCAlignment</span><span class="p">(</span><span class="n">TomographyInput</span><span class="p">):</span>
@@ -97,34 +93,40 @@
 
     <span class="k">def</span> <span class="nf">_optimize</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
-        <span class="n">subvolume</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span>
-        <span class="n">template</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span>
+        <span class="n">subvolume</span><span class="p">:</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span>
+        <span class="n">template</span><span class="p">:</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span>
         <span class="n">max_shifts</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pixel</span><span class="p">,</span> <span class="n">pixel</span><span class="p">,</span> <span class="n">pixel</span><span class="p">],</span>
         <span class="n">quaternion</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
         <span class="n">pos</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
+        <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span> <span class="nb">float</span><span class="p">]:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Optimize.&quot;&quot;&quot;</span>
+        <span class="n">mw</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_missing_wedge_mask</span><span class="p">(</span><span class="n">quaternion</span><span class="p">,</span> <span class="n">backend</span><span class="p">)</span>
         <span class="n">shift</span><span class="p">,</span> <span class="n">pcc</span> <span class="o">=</span> <span class="n">subpixel_pcc</span><span class="p">(</span>
-            <span class="n">subvolume</span><span class="p">,</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">mask_missing_wedge</span><span class="p">(</span><span class="n">template</span><span class="p">,</span> <span class="n">quaternion</span><span class="p">),</span>
+            <span class="n">subvolume</span> <span class="o">*</span> <span class="n">mw</span><span class="p">,</span>
+            <span class="n">template</span> <span class="o">*</span> <span class="n">mw</span><span class="p">,</span>
             <span class="n">upsample_factor</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>
             <span class="n">max_shifts</span><span class="o">=</span><span class="n">max_shifts</span><span class="p">,</span>
+            <span class="n">backend</span><span class="o">=</span><span class="n">backend</span><span class="p">,</span>
         <span class="p">)</span>
         <span class="k">return</span> <span class="n">shift</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_DUMMY_QUAT</span><span class="p">,</span> <span class="n">pcc</span>
 
     <span class="k">def</span> <span class="nf">_landscape</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
-        <span class="n">subvolume</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span>
-        <span class="n">template</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span>
+        <span class="n">subvolume</span><span class="p">:</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span>
+        <span class="n">template</span><span class="p">:</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span>
         <span class="n">max_shifts</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">],</span>
         <span class="n">quaternion</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
         <span class="n">pos</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
-    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
+        <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Compute landscape.&quot;&quot;&quot;</span>
+        <span class="n">mw</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_missing_wedge_mask</span><span class="p">(</span><span class="n">quaternion</span><span class="p">,</span> <span class="n">backend</span><span class="p">)</span>
         <span class="k">return</span> <span class="n">pcc_landscape</span><span class="p">(</span>
-            <span class="n">subvolume</span><span class="p">,</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">mask_missing_wedge</span><span class="p">(</span><span class="n">template</span><span class="p">,</span> <span class="n">quaternion</span><span class="p">),</span>
+            <span class="n">subvolume</span> <span class="o">*</span> <span class="n">mw</span><span class="p">,</span>
+            <span class="n">template</span> <span class="o">*</span> <span class="n">mw</span><span class="p">,</span>
             <span class="n">max_shifts</span><span class="o">=</span><span class="n">max_shifts</span><span class="p">,</span>
+            <span class="n">backend</span><span class="o">=</span><span class="n">backend</span><span class="p">,</span>
         <span class="p">)</span></div>
 
 
@@ -133,34 +135,40 @@
 
     <span class="k">def</span> <span class="nf">_optimize</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
-        <span class="n">subvolume</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span>
-        <span class="n">template</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span>
+        <span class="n">subvolume</span><span class="p">:</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span>
+        <span class="n">template</span><span class="p">:</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span>
         <span class="n">max_shifts</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pixel</span><span class="p">,</span> <span class="n">pixel</span><span class="p">,</span> <span class="n">pixel</span><span class="p">],</span>
         <span class="n">quaternion</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
         <span class="n">pos</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
+        <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span> <span class="nb">float</span><span class="p">]:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Optimize.&quot;&quot;&quot;</span>
+        <span class="n">mw</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_missing_wedge_mask</span><span class="p">(</span><span class="n">quaternion</span><span class="p">,</span> <span class="n">backend</span><span class="p">)</span>
         <span class="n">shift</span><span class="p">,</span> <span class="n">zncc</span> <span class="o">=</span> <span class="n">subpixel_zncc</span><span class="p">(</span>
-            <span class="n">np</span><span class="o">.</span><span class="n">real</span><span class="p">(</span><span class="n">ifftn</span><span class="p">(</span><span class="n">subvolume</span><span class="p">)),</span>
-            <span class="n">np</span><span class="o">.</span><span class="n">real</span><span class="p">(</span><span class="n">ifftn</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">mask_missing_wedge</span><span class="p">(</span><span class="n">template</span><span class="p">,</span> <span class="n">quaternion</span><span class="p">))),</span>
+            <span class="n">backend</span><span class="o">.</span><span class="n">ifftn</span><span class="p">(</span><span class="n">subvolume</span> <span class="o">*</span> <span class="n">mw</span><span class="p">)</span><span class="o">.</span><span class="n">real</span><span class="p">,</span>
+            <span class="n">backend</span><span class="o">.</span><span class="n">ifftn</span><span class="p">(</span><span class="n">template</span> <span class="o">*</span> <span class="n">mw</span><span class="p">)</span><span class="o">.</span><span class="n">real</span><span class="p">,</span>
             <span class="n">upsample_factor</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>
             <span class="n">max_shifts</span><span class="o">=</span><span class="n">max_shifts</span><span class="p">,</span>
+            <span class="n">backend</span><span class="o">=</span><span class="n">backend</span><span class="p">,</span>
         <span class="p">)</span>
         <span class="k">return</span> <span class="n">shift</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_DUMMY_QUAT</span><span class="p">,</span> <span class="n">zncc</span>
 
     <span class="k">def</span> <span class="nf">_landscape</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
-        <span class="n">subvolume</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span>
-        <span class="n">template</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span>
+        <span class="n">subvolume</span><span class="p">:</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span>
+        <span class="n">template</span><span class="p">:</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">],</span>
         <span class="n">max_shifts</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">],</span>
         <span class="n">quaternion</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
         <span class="n">pos</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
-    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
+        <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Compute landscape.&quot;&quot;&quot;</span>
+        <span class="n">mw</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_missing_wedge_mask</span><span class="p">(</span><span class="n">quaternion</span><span class="p">,</span> <span class="n">backend</span><span class="p">)</span>
         <span class="k">return</span> <span class="n">zncc_landscape_with_crop</span><span class="p">(</span>
-            <span class="n">np</span><span class="o">.</span><span class="n">real</span><span class="p">(</span><span class="n">ifftn</span><span class="p">(</span><span class="n">subvolume</span><span class="p">)),</span>
-            <span class="n">np</span><span class="o">.</span><span class="n">real</span><span class="p">(</span><span class="n">ifftn</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">mask_missing_wedge</span><span class="p">(</span><span class="n">template</span><span class="p">,</span> <span class="n">quaternion</span><span class="p">))),</span>
+            <span class="n">backend</span><span class="o">.</span><span class="n">ifftn</span><span class="p">(</span><span class="n">subvolume</span> <span class="o">*</span> <span class="n">mw</span><span class="p">)</span><span class="o">.</span><span class="n">real</span><span class="p">,</span>
+            <span class="n">backend</span><span class="o">.</span><span class="n">ifftn</span><span class="p">(</span><span class="n">template</span> <span class="o">*</span> <span class="n">mw</span><span class="p">)</span><span class="o">.</span><span class="n">real</span><span class="p">,</span>
             <span class="n">max_shifts</span><span class="o">=</span><span class="n">max_shifts</span><span class="p">,</span>
+            <span class="n">backend</span><span class="o">=</span><span class="n">backend</span><span class="p">,</span>
         <span class="p">)</span></div>
 </pre></div>
 
