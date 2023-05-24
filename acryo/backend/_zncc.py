@@ -189,8 +189,11 @@ def _create_mesh(
         ],  # type: ignore
         indexing="ij",
     )
-    offset = [s0 for s0, s1 in local_shifts]
-    return backend.stack(mesh, axis=0), backend.array(offset) / upsample_factor
+    offset = (
+        backend.array([s0 for s0, s1 in local_shifts], dtype=np.float32)
+        / upsample_factor
+    )
+    return backend.stack(mesh, axis=0), offset
 
 
 def fftconvolve(
