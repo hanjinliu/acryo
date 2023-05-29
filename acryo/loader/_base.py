@@ -658,7 +658,8 @@ class LoaderBase(ABC):
         else:
             task_shape = tuple(2 * np.ceil(_max_shifts_px).astype(np.int32) + 1)
         task_arrays = (
-            self.iter_mapping_tasks(
+            self.replace(output_shape=model.input_shape)
+            .iter_mapping_tasks(
                 model.landscape,
                 max_shifts=_max_shifts_px,
                 upsample=upsample,
