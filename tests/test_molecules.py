@@ -214,3 +214,27 @@ def test_cutby():
     assert len(grouped[0][1]) == 2
     assert grouped[1][0] == (0.2, 0.4)
     assert len(grouped[1][1]) == 2
+
+
+def test_append():
+    mol = Molecules(np.zeros((2, 3)), features={"A": [0.1, 0.2], "B": [5, 3]})
+    other = Molecules(np.zeros((2, 3)), features={"A": [0.3, 0.4], "B": [2, 1]})
+    mol.append(other)
+    assert mol.count() == 4
+    assert mol.features["B"].to_list() == [5, 3, 2, 1]
+
+    other = Molecules(np.zeros((1, 3)), features={"A": [0.0]})
+    mol.append(other)
+    assert mol.count() == 5
+    assert mol.features["B"].to_list() == [5, 3, 2, 1, None]
+
+    with pytest.raises(ValueError):
+        mol.append(Molecules(np.zeros((2, 3)), features={"A": [0.3, 0.4], "C": [2, 1]}))
+
+
+def test_append_empty():
+    mol = Molecules.empty()
+    other = Molecules(np.zeros((2, 3)), features={"A": [0.3, 0.4], "B": [2, 1]})
+    mol.append(other)
+    assert mol.count() == 2
+    assert mol.features["B"].to_list() == [2, 1]

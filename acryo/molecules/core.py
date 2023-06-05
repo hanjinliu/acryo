@@ -614,7 +614,7 @@ class Molecules:
         Molecules
             Instance with updated positional coordinates.
         """
-        coords = self._pos + np.asarray(shifts)
+        coords = self._pos + np.asarray(shifts, dtype=np.float32)
         if copy:
             features = self._features
             if features is not None:
@@ -1011,6 +1011,40 @@ class Molecules:
             self.rotator,
             features=self.features.drop(columns, *more_columns),
         )
+
+    def append(self, other: Molecules) -> Self:
+        """
+        Mutably append molecules.
+
+        Parameters
+        ----------
+        other : Molecules
+            Molecules to be appended. They must only have the subset of features,
+            otherwise this method will raise ValueError.
+
+        Returns
+        -------
+        Molecules
+            Same instance with updated values.
+        """
+        if not isinstance(other, Molecules):
+            raise TypeError(f"Expected Molecules, got {type(other)}")
+        pos = np.concatenate([self.pos, other.pos], axis=0)
+        rot = np.concatenate([self.rotator.as_quat(), other.rotator.as_quat()], axis=0)
+
+        if self.count() == 0:
+            feat = other.features
+        else:
+            feat = pl.concat([self.features, other.features], how="diagonal")
+            if len(feat.columns) != len(self.features.columns):
+                extra = set(other.features.columns) - set(self.features.columns)
+                raise ValueError(
+                    f"Cannot append molecules with extra columns: {extra}."
+                )
+        self._pos = pos
+        self._rotator = Rotation.from_quat(rot)
+        self._features = feat
+        return self
 
 
 def _is_boolean_array(a: Any) -> TypeGuard[NDArray[np.bool_]]:
