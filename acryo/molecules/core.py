@@ -57,27 +57,27 @@ class Molecules:
         rot: Rotation | None = None,
         features: pl.DataFrame | ArrayLike | dict[str, ArrayLike] | None = None,
     ):
-        pos = np.atleast_2d(pos).astype(np.float32)
+        _pos = np.atleast_2d(pos).astype(np.float32)
 
-        if pos.shape[1] != 3:
+        if _pos.shape[1] != 3:
             raise ValueError("Shape of pos must be (N, 3).")
 
         if rot is None:
-            nmol = pos.shape[0]
+            nmol = _pos.shape[0]
             if nmol > 0:
-                quat = np.stack([np.array([0, 0, 0, 1])] * pos.shape[0], axis=0)
+                quat = np.stack([np.array([0, 0, 0, 1])] * _pos.shape[0], axis=0)
             else:
                 quat = np.zeros((0, 4))
             rot = Rotation.from_quat(quat)
         elif not isinstance(rot, Rotation):
             raise TypeError(f"`rot` must be a Rotation object, got {type(rot)}.")
-        elif pos.shape[0] != len(rot):
+        elif _pos.shape[0] != len(rot):
             raise ValueError(
-                f"Length mismatch. There are {pos.shape[0]} molecules but {len(rot)} "
+                f"Length mismatch. There are {_pos.shape[0]} molecules but {len(rot)} "
                 "rotation were given."
             )
 
-        self._pos = pos
+        self._pos = _pos
         self._rotator = rot
         self._features: pl.DataFrame | None = None
         self.features = features
@@ -934,17 +934,16 @@ class Molecules:
         df = self.to_dataframe()
         return MoleculeGroup(df.groupby(by, *more_by, maintain_order=True))
 
-    def cutby(self, by: str, bins: list[float]):
-        cat_label = "__category"
-        if cat_label in self.features.columns:
-            raise ValueError(f"Feature name {cat_label!r} should not be used.")
+    def cutby(self, by: str, bins: list[float]) -> MoleculeCutGroup:
+        """Cut molecules into sub-groups by binning."""
+        label = "__category"
+        if label in self.features.columns:
+            raise ValueError(f"Feature name {label!r} should not be used.")
         feature = self.features[by]
-        result = feature.cut(bins=bins, category_label=cat_label)
-        cat = result[cat_label]
+        result = feature.cut(bins=bins, category_label=label, maintain_order=True)
+        cat = result[label]
         df = self.to_dataframe().with_columns(cat)
-        return MoleculeCutGroup(
-            df.groupby(cat_label, maintain_order=True), label=cat_label
-        )
+        return MoleculeCutGroup(df.groupby(label, maintain_order=True), label=label)
 
     def filter(
         self,

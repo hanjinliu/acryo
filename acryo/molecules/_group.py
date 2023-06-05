@@ -6,7 +6,6 @@ from typing import (
     TypeVar,
     Generic,
 )
-import polars as pl
 
 if TYPE_CHECKING:
     from polars.dataframe.groupby import GroupBy
@@ -18,7 +17,7 @@ _K = TypeVar("_K", bound=Hashable)
 class MoleculeGroup(Generic[_K]):
     """A groupby-like object for molecules."""
 
-    def __init__(self, group: GroupBy[pl.DataFrame]):
+    def __init__(self, group: GroupBy):
         self._group = group
 
     def __iter__(self) -> Iterator[tuple[_K, Molecules]]:

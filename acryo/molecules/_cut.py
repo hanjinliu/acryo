@@ -5,7 +5,6 @@ from typing import (
     NamedTuple,
     cast,
 )
-import polars as pl
 
 if TYPE_CHECKING:
     from polars.dataframe.groupby import GroupBy
@@ -15,7 +14,7 @@ if TYPE_CHECKING:
 class MoleculeCutGroup:
     """A groupby-like object for molecules created by :meth:`cutby`."""
 
-    def __init__(self, group: GroupBy[pl.DataFrame], label: str):
+    def __init__(self, group: GroupBy, label: str):
         self._group = group
         self._label = label
 
@@ -30,6 +29,8 @@ class MoleculeCutGroup:
 
 
 class CutEdges(NamedTuple):
+    """Tuple of cut edges."""
+
     gt: float
     le: float
 
