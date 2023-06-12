@@ -102,5 +102,5 @@ def open_mrc(path: str):
 def as_dask(mmap: np.memmap, chunks: Any = "auto") -> da.Array:
     img = da.from_array(mmap, chunks=chunks, meta=np.array([])).map_blocks(
         np.asarray, dtype=mmap.dtype
-    )
+    )  # type: ignore
     return img

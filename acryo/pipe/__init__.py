@@ -6,7 +6,14 @@ from ._transform import (
     highpass_filter,
 )
 from ._curry import provider_function, converter_function
-from ._imread import from_file, from_gaussian, from_array, from_atoms
+from ._imread import (
+    from_file,
+    from_files,
+    from_gaussian,
+    from_array,
+    from_arrays,
+    from_atoms,
+)
 
 __all__ = [
     "gaussian_smooth",
@@ -18,8 +25,10 @@ __all__ = [
     "lowpass_filter",
     "highpass_filter",
     "from_file",
+    "from_files",
     "from_gaussian",
     "from_array",
+    "from_arrays",
     "from_atoms",
     "provider_function",
     "converter_function",

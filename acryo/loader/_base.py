@@ -49,8 +49,10 @@ if TYPE_CHECKING:
 _R = TypeVar("_R")
 
 _ShapeType = Union[pixel, tuple[pixel, ...], None]
-TemplateInputType = Union[NDArray[np.float32], ImageProvider]
-MaskInputType = Union[NDArray[np.float32], ImageProvider, ImageConverter, None]
+TemplateInputType = Union[NDArray[np.float32], ImageProvider[np.ndarray]]
+MaskInputType = Union[
+    NDArray[np.float32], ImageProvider[np.ndarray], ImageConverter, None
+]
 AggFunction = Callable[[NDArray[np.float32]], _R]
 IntoExpr = Union[str, pl.Expr]
 
@@ -450,6 +452,15 @@ class LoaderBase(ABC):
             self.normalize_mask(mask),
             **align_kwargs,
         )
+        if model._n_templates > 1:
+            return self.align_multi_templates(
+                list(model.template),
+                mask=mask,
+                max_shifts=max_shifts,
+                alignment_model=alignment_model,
+                backend=backend,
+                **align_kwargs,
+            )
         tasks = self.construct_mapping_tasks(
             model.align,
             max_shifts=_max_shifts_px,
@@ -535,11 +546,12 @@ class LoaderBase(ABC):
 
     def align_multi_templates(
         self,
-        templates: list[TemplateInputType],
+        templates: list[TemplateInputType] | ImageProvider[list[NDArray[np.float32]]],
         *,
         mask: MaskInputType = None,
         max_shifts: nm | tuple[nm, nm, nm] = 1.0,
-        alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
+        alignment_model: type[BaseAlignmentModel] | AlignmentFactory = ZNCCAlignment,
+        backend: Backend | None = None,
         label_name: str = "labels",
         **align_kwargs,
     ) -> Self:
@@ -570,11 +582,15 @@ class LoaderBase(ABC):
         subtomogram loader object
             A loader instance of the same type with updated molecules.
         """
-
+        _backend = backend or Backend()
         _max_shifts_px = np.asarray(max_shifts) / self.scale
 
+        if isinstance(templates, ImageProvider):
+            _templates = templates(self.scale)
+        else:
+            _templates = [self.normalize_template(t) for t in templates]
         model = alignment_model(
-            template=[self.normalize_template(t) for t in templates],
+            template=_templates,
             mask=self.normalize_mask(mask),
             **align_kwargs,
         )
@@ -582,7 +598,7 @@ class LoaderBase(ABC):
             model.align,
             max_shifts=_max_shifts_px,
             output_shape=model.input_shape,
-            backend=Backend(),
+            backend=_backend,
             var_kwarg=dict(
                 quaternion=self.molecules.quaternion(),
                 pos=self.molecules.pos / self.scale,
@@ -590,7 +606,7 @@ class LoaderBase(ABC):
         )
         all_results = tasks.compute()
         if isinstance(model, RotationImplemented) and model._n_rotations > 1:
-            remainder = len(templates)
+            remainder = len(_templates)
         else:
             remainder = -1
         return self._post_align_multi_templates(
@@ -985,8 +1001,7 @@ class LoaderBase(ABC):
         if isinstance(template, np.ndarray):
             return template
         elif isinstance(template, ImageProvider):
-            out = template(self.scale)
-            return np.asarray(out, dtype=np.float32)
+            return template(self.scale)
         raise TypeError(f"Invalid template type: {type(template)}")
 
     def normalize_mask(self, mask: MaskInputType) -> MaskType:

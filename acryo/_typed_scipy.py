@@ -62,6 +62,17 @@ if TYPE_CHECKING:
     ) -> NDArray[np.float32]:
         ...
 
+    def zoom(
+        input: NDArray[np.float32],
+        zoom: float | tuple[float, ...] | NDArray[np.float32],
+        output: NDArray[np.float32] | None = None,
+        order: int = 3,
+        mode: Mode = "constant",
+        cval: float = 0.0,
+        prefilter: bool = True,
+    ) -> NDArray[np.float32]:
+        ...
+
     def map_coordinates(
         input: NDArray[np.float32],
         coordinates: NDArray[np.float32],
