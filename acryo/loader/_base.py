@@ -452,7 +452,7 @@ class LoaderBase(ABC):
             self.normalize_mask(mask),
             **align_kwargs,
         )
-        if model._n_templates > 1:
+        if model.has_hetero_templates:
             return self.align_multi_templates(
                 list(model.template),
                 mask=mask,

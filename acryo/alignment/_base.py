@@ -171,6 +171,11 @@ class BaseAlignmentModel(ABC):
         """If the alignment model has rotation optimization."""
         return False
 
+    @property
+    def has_hetero_templates(self) -> bool:
+        """If the alignment model has different type of templates."""
+        return self._n_templates > 1
+
     @classmethod
     def with_params(
         cls,
