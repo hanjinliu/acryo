@@ -108,23 +108,27 @@ class BaseAlignmentModel(ABC):
         mask: MaskType = None,
     ):
         if isinstance(template, np.ndarray):
-            if template.dtype != np.float32:
-                template = template.astype(np.float32)
-            self._template = template
+            self._template = template.astype(np.float32, copy=False)
             self._n_templates = 1
             self._ndim = template.ndim
         else:
-            self._template = np.stack(template, axis=0)
-            if self._template.dtype != np.float32:
-                self._template: NDArray[np.float32] = self._template.astype(np.float32)
+            self._template = np.stack(template, axis=0).astype(np.float32, copy=False)
             self._n_templates = self._template.shape[0]
             self._ndim = self._template.ndim - 1
 
         if callable(mask):
             if self._n_templates != 1:
-                raise ValueError("Cannot create a mask using multiple templates")
-            self._mask: NDArray[np.float32] = mask(self._template)
-            if self._template.shape != self._mask.shape:
+                # To calculate scores in a consistent way, we need to use the same mask.
+                # Here, we use the maximum value of the mask, with which all the template density.
+                # will be equally considered.
+                self._mask: NDArray[np.float32] = np.stack(
+                    [mask(tmp) for tmp in self._template], axis=0
+                ).max(axis=0)
+                _shape_matches = self._template.shape[1:] == self._mask.shape
+            else:
+                self._mask: NDArray[np.float32] = mask(self._template)
+                _shape_matches = self._template.shape == self._mask.shape
+            if not _shape_matches:
                 raise ValueError(
                     "Shape mismatch in between template image "
                     f"{self._template.shape} and mask image {self._mask.shape})."
@@ -166,6 +170,11 @@ class BaseAlignmentModel(ABC):
     def has_rotation(self) -> bool:
         """If the alignment model has rotation optimization."""
         return False
+
+    @property
+    def has_hetero_templates(self) -> bool:
+        """If the alignment model has different type of templates."""
+        return self._n_templates > 1
 
     @classmethod
     def with_params(

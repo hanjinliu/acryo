@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from typing import Callable, overload, Union
+from typing import Callable, overload, TypeVar, Generic
 from typing_extensions import Self
 
 import numpy as np
 from numpy.typing import NDArray
 from acryo._types import nm
 
-_Quatity = Union[int, float, NDArray[np.float32]]
+_R = TypeVar("_R", np.ndarray, "list[np.ndarray]")
 
 
 class _Pipeline:
@@ -35,19 +35,19 @@ class _Pipeline:
         return self / other
 
 
-class ImageProvider(_Pipeline):
+class ImageProvider(_Pipeline, Generic[_R]):
     """Function that provides an image at a given scale."""
 
-    def __init__(self, provider: Callable[[nm], NDArray[np.float32]]):
+    def __init__(self, provider: Callable[[nm], _R]):
         super().__init__(provider)
 
-    def provide(self, scale: nm) -> NDArray[np.float32]:
+    def provide(self, scale: nm) -> _R:
         """Provide an image at a given scale."""
         out = self._func(scale)
-        _assert_3d_array(out, self._func)
+        assert_n_3d_arrays(out, self._func)
         return out
 
-    def __call__(self, scale: nm) -> NDArray[np.float32]:
+    def __call__(self, scale: nm) -> _R:
         return self.provide(scale)
 
     def __add__(self, other) -> ImageProvider:
@@ -289,6 +289,13 @@ class ImageConverter(_Pipeline):
 
     def __neg__(self) -> ImageConverter:
         return self.__class__(lambda x, scale: -self(x, scale))
+
+
+def assert_n_3d_arrays(out, func):
+    if isinstance(out, np.ndarray):
+        return _assert_3d_array(out, func)
+    for o in out:
+        _assert_3d_array(o, func)
 
 
 def _assert_3d_array(out, func):

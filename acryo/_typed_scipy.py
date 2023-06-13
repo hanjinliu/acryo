@@ -62,6 +62,17 @@ if TYPE_CHECKING:
     ) -> NDArray[np.float32]:
         ...
 
+    def zoom(
+        input: NDArray[np.float32],
+        zoom: float | tuple[float, ...] | NDArray[np.float32],
+        output: NDArray[np.float32] | None = None,
+        order: int = 3,
+        mode: Mode = "constant",
+        cval: float = 0.0,
+        prefilter: bool = True,
+    ) -> NDArray[np.float32]:
+        ...
+
     def map_coordinates(
         input: NDArray[np.float32],
         coordinates: NDArray[np.float32],
@@ -75,7 +86,13 @@ if TYPE_CHECKING:
 
 else:
     from scipy.fft import rfftn, irfftn, fftn, ifftn
-    from scipy.ndimage import spline_filter, affine_transform, map_coordinates, shift
+    from scipy.ndimage import (
+        spline_filter,
+        affine_transform,
+        map_coordinates,
+        shift,
+        zoom,
+    )
     from scipy.signal import convolve
 
 __all__ = [
@@ -86,6 +103,7 @@ __all__ = [
     "spline_filter",
     "affine_transform",
     "shift",
+    "zoom",
     "map_coordinates",
     "convolve",
 ]

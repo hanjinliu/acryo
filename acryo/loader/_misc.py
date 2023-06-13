@@ -40,15 +40,17 @@ def dict_iterrows(d: dict[str, Iterable[Any]]):
             break
 
 
-def allocate(size: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def allocate(
+    size: int,
+) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
     # shift in local Cartesian
-    local_shifts = np.zeros((size, 3))
+    local_shifts = np.zeros((size, 3), dtype=np.float32)
 
     # maximum ZNCC
-    corr_max = np.zeros(size)
+    corr_max = np.zeros(size, dtype=np.float32)
 
     # rotation (quaternion) in local Cartesian
-    local_rot = np.zeros((size, 4))
+    local_rot = np.zeros((size, 4), dtype=np.float32)
     local_rot[:, 3] = 1  # identity map in quaternion
 
     return local_shifts, local_rot, corr_max

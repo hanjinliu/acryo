@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable, Any
+from typing import Callable, Any, TypeVar
 from typing_extensions import ParamSpec, Concatenate
 import inspect
 import numpy as np
@@ -8,11 +8,12 @@ from acryo.pipe._classes import ImageProvider, ImageConverter
 from acryo._types import nm
 
 _P = ParamSpec("_P")
+_R = TypeVar("_R", np.ndarray, "list[np.ndarray]")
 
 
 def provider_function(
-    fn: Callable[Concatenate[nm | float, _P], np.ndarray]
-) -> Callable[_P, ImageProvider]:
+    fn: Callable[Concatenate[nm | float, _P], _R]
+) -> Callable[_P, ImageProvider[_R]]:
     """
     Convert a function into a curried function that returns a image provider.
 
