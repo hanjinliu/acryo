@@ -445,7 +445,6 @@ class LoaderBase(ABC):
         """
         _backend = backend or Backend()
         max_shifts = _normalize_max_shifts(max_shifts)
-        _max_shifts_px = np.asarray(max_shifts) / self.scale
 
         model = alignment_model(
             self.normalize_template(template),
@@ -461,6 +460,8 @@ class LoaderBase(ABC):
                 backend=backend,
                 **align_kwargs,
             )
+
+        _max_shifts_px = np.asarray(max_shifts) / self.scale
         tasks = self.construct_mapping_tasks(
             model.align,
             max_shifts=_max_shifts_px,
@@ -481,13 +482,11 @@ class LoaderBase(ABC):
     ) -> Self:
         local_shifts, local_rot, scores = _misc.allocate(len(results))
         for i, result in enumerate(results):
-            _, local_shifts[i], local_rot[i], scores[i] = result
+            _, loc_shift, local_rot[i], scores[i] = result
+            local_shifts[i] = loc_shift * self.scale
 
         rotator = Rotation.from_quat(local_rot)
-        mole_aligned = self.molecules.linear_transform(
-            local_shifts * self.scale,
-            rotator,
-        )
+        mole_aligned = self.molecules.linear_transform(local_shifts, rotator)
 
         mole_aligned.features = self.molecules.features.with_columns(
             _misc.get_feature_list(scores, local_shifts, rotator.as_rotvec()),
@@ -623,13 +622,11 @@ class LoaderBase(ABC):
         local_shifts, local_rot, scores = _misc.allocate(len(results))
         labels = np.zeros(len(results), dtype=np.uint32)
         for i, result in enumerate(results):
-            labels[i], local_shifts[i], local_rot[i], scores[i] = result
+            labels[i], loc_shift, local_rot[i], scores[i] = result
+            local_shifts[i] = loc_shift * self.scale
 
         rotator = Rotation.from_quat(local_rot)
-        mole_aligned = self.molecules.linear_transform(
-            local_shifts * self.scale,
-            rotator,
-        )
+        mole_aligned = self.molecules.linear_transform(local_shifts, rotator)
 
         if remainder > 1:
             labels %= remainder  # type: ignore
