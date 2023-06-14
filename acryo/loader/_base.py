@@ -654,6 +654,14 @@ class LoaderBase(ABC):
 
         This method internally calls the ``landscape`` method of the input alignment
         model.
+
+        Returns
+        -------
+        dask array
+            If input alignment model has rotation or multiple templates, the output shape will
+            be (P, M, Nz, Ny, Nx), otherwise (P, Nz, Ny, Nx), where P is for each molecules, M
+            is the number of created template images, and Nz, Ny and Nx is the up-sampled shape
+            of search range.
         """
         max_shifts = _normalize_max_shifts(max_shifts)
         _max_shifts_px = tuple(np.asarray(max_shifts) / self.scale)
