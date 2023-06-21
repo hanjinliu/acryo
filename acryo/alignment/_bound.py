@@ -13,6 +13,8 @@ _T = TypeVar("_T", bound="BaseAlignmentModel")
 
 
 class ParametrizedModel(Generic[_T]):
+    """Parametrized, alignment model factory function."""
+
     def __init__(self, cls: type[_T], **params):
         self._cls = cls
         self._params = params
