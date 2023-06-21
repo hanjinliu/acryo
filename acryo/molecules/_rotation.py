@@ -25,8 +25,10 @@ def axes_to_rotator(z: ArrayLike, y: ArrayLike) -> Rotation:
 def _get_align_rotator(src, dst) -> Rotation:
     """R.apply(src) == dst. Both length must be 1."""
     cross = np.cross(src, dst)
-    norm = np.sqrt(np.sum(cross**2, axis=1, keepdims=True))
-    theta = np.arcsin(norm)
+    sin = norm = np.sqrt(np.sum(cross**2, axis=1, keepdims=True))
+    cos = np.sum(src * dst, axis=1, keepdims=True)
+    theta = np.arctan2(sin, cos)
+
     norm[norm == 0] = np.inf
     return Rotation.from_rotvec(cross / norm * theta)
 
