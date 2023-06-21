@@ -8,37 +8,27 @@ from scipy.spatial.transform import Rotation
 _T = TypeVar("_T", bound=np.number)
 
 
-def axes_to_rotator(z, y) -> Rotation:
-    ref = _normalize(np.atleast_2d(y))
-
-    n = ref.shape[0]
-    yx = np.arctan2(ref[:, 2], ref[:, 1])
-    zy = np.arctan(-ref[:, 0] / np.abs(ref[:, 1]))
-
-    rot_vec_yx = np.zeros((n, 3))
-    rot_vec_yx[:, 0] = yx
-    rot_yx = Rotation.from_rotvec(rot_vec_yx)
-
-    rot_vec_zy = np.zeros((n, 3))
-    rot_vec_zy[:, 2] = zy
-    rot_zy = Rotation.from_rotvec(rot_vec_zy)
-
-    rot1 = rot_yx * rot_zy
-
+def axes_to_rotator(z: ArrayLike, y: ArrayLike) -> Rotation:
+    """Determine the Rotation object that rotates the z-axis to z and the y-axis to y."""
+    y0 = _normalize(np.atleast_2d(y))
+    rot_y = _get_align_rotator([[0, 1, 0]], y0)
     if z is None:
-        return rot1
+        z = np.array([[1, 0, 0]])
+    else:
+        z = np.atleast_2d(z)
+    z0 = _normalize(np.atleast_2d(_extract_orthogonal(y0, z)))
+    z0_trans = rot_y.apply(z0, inverse=True)
+    rot_z = _get_align_rotator([[1, 0, 0]], z0_trans)
+    return rot_y * rot_z
 
-    vec = _normalize(np.atleast_2d(_extract_orthogonal(ref, z)))
 
-    vec_trans = rot1.apply(vec, inverse=True)  # in zx-plane
-
-    thetas = np.arctan2(vec_trans[..., 0], vec_trans[..., 2]) - np.pi / 2
-
-    rot_vec_zx = np.zeros((n, 3))
-    rot_vec_zx[:, 1] = thetas
-    rot2 = Rotation.from_rotvec(rot_vec_zx)
-
-    return rot1 * rot2
+def _get_align_rotator(src, dst) -> Rotation:
+    """R.apply(src) == dst. Both length must be 1."""
+    cross = np.cross(src, dst)
+    norm = np.sqrt(np.sum(cross**2, axis=1, keepdims=True))
+    theta = np.arcsin(norm)
+    norm[norm == 0] = np.inf
+    return Rotation.from_rotvec(cross / norm * theta)
 
 
 def from_euler_xyz_coords(

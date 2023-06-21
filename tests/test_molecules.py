@@ -1,6 +1,7 @@
 from pathlib import Path
 import tempfile
 from acryo import Molecules
+from acryo.molecules import axes_to_rotator
 import numpy as np
 import polars as pl
 from numpy.testing import assert_allclose
@@ -238,3 +239,28 @@ def test_append_empty():
     mol.append(other)
     assert mol.count() == 2
     assert mol.features["B"].to_list() == [2, 1]
+
+
+@pytest.mark.parametrize(
+    "rotvec",
+    [
+        [0.0, 0.2, 0.0],
+        [0.1, 0.1, 0.2],
+        [0.1, 0.0, -0.2],
+        [0.1, -0.4, 0.3],
+        [-1, 0.3, 0.2],
+        [-1, -0.3, 0.2],
+        [-1, 0.3, -0.2],
+        [1, -0.3, -0.2],
+        [-0.2, -0.8, -1.3],
+        [0.0, 0.0, 0.0],
+    ],
+)
+def test_axes_to_rotator(rotvec: list[float]):
+    rot = Rotation.from_rotvec(rotvec)
+    z = [1, 0, 0]
+    y = [0, 1, 0]
+    z0 = rot.apply(z)
+    y0 = rot.apply(y)
+    out = axes_to_rotator(z0, y0)
+    assert_allclose(out.as_rotvec(), [rotvec], rtol=1e-8, atol=1e-8)

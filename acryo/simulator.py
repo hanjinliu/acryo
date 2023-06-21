@@ -8,7 +8,7 @@ from typing import (
     NamedTuple,
     Sequence,
     TYPE_CHECKING,
-    Tuple,
+    Union,
     TypeVar,
 )
 import numpy as np
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from scipy.spatial.transform import Rotation
     import polars as pl
 
-ColorType = Tuple[float, float, float]
+ColorType = Union[tuple[float, float, float], tuple[float, float, float, float]]
 
 
 class Component(NamedTuple):
@@ -207,7 +207,9 @@ class TomogramSimulator:
     def simulate(
         self,
         shape: tuple[pixel, pixel, pixel],
-        colormap: Callable[[pl.DataFrame], ColorType] | None = None,
+        colormap: Callable[[pl.DataFrame], ColorType]
+        | NDArray[np.float32]
+        | None = None,
     ) -> NDArray[np.float32]:
         """
         Simulate a tomogram.
@@ -256,9 +258,20 @@ class TomogramSimulator:
     def _simulate_with_color(
         self,
         shape: tuple[pixel, pixel, pixel],
-        colormap: Callable[[pl.DataFrame], ColorType],
+        colormap: Callable[[pl.DataFrame], ColorType] | NDArray[np.float32],
     ):
         """Simulate a colored tomogram."""
+        if isinstance(colormap, np.ndarray):
+            if len(self._components) != 1:
+                raise ValueError(
+                    "If an array is given as the colormap, cannot simulate colored tomogram"
+                )
+            if colormap.shape[1] not in (3, 4):
+                raise ValueError(f"Wrong shape as a colormap {colormap.shape}.")
+            cmap = lambda df, i: colormap[i]
+        else:
+            cmap = lambda df, i: colormap(df[i])
+
         tomogram = np.zeros((3,) + shape, dtype=np.float32)
         pool = DaskTaskPool.from_func(_simulate_color_one)
         for mol, image in self._components.values():
@@ -266,7 +279,8 @@ class TomogramSimulator:
             starts, stops, mtxs = _prep_iterators(mol, img.shape, self._scale)
             feat = mol.features
             for i, (start, stop, mtx) in enumerate(zip(starts, stops, mtxs)):
-                f0 = colormap(feat[i])
+                f0 = cmap(feat, i)
+                # f0 = colormap(feat[i])
                 pool.add_task(img, start, stop, mtx, shape, self.order, f0)
 
         results = pool.compute()
@@ -526,9 +540,13 @@ def _simulate_color_one(
     mtx: NDArray[np.float32],
     shape: tuple[int, int, int],
     order: int,
-    color: tuple[float, float, float],
+    color: tuple[float, float, float] | tuple[float, float, float, float],
 ) -> tuple[tuple[slice, ...], NDArray[np.float32] | None]:
-    _cr, _cg, _cb = color
+    if len(color) == 4:
+        _cr, _cg, _cb, _alpha = color
+    else:
+        _cr, _cg, _cb = color
+        _alpha = 1.0
     sl_src, sl_dst = _prep_slices(start, stop, shape, img.shape)
     if sl_dst is None:
         return (slice(None),), None
@@ -545,7 +563,7 @@ def _simulate_color_one(
     )
     img_min = img.min()
     img_max = img.max()
-    _a = (transformed[sl_src] - img_min) / (img_max - img_min)
+    _a = (transformed[sl_src] - img_min) / (img_max - img_min) * _alpha
     color_array = np.stack([_cr * _a, _cg * _a, _cb * _a], axis=0)
 
     return sl_dst, color_array
