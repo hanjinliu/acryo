@@ -8,15 +8,15 @@ from scipy.spatial.transform import Rotation
 _T = TypeVar("_T", bound=np.number)
 
 
-def axes_to_rotator(z: ArrayLike, y: ArrayLike) -> Rotation:
+def axes_to_rotator(z: ArrayLike | None, y: ArrayLike) -> Rotation:
     """Determine the Rotation object that rotates the z-axis to z and the y-axis to y."""
     y0 = _normalize(np.atleast_2d(y))
     rot_y = _get_align_rotator([[0, 1, 0]], y0)
     if z is None:
-        z = np.array([[1, 0, 0]])
+        z0 = np.array([[1, 0, 0]])
     else:
-        z = np.atleast_2d(z)
-    z0 = _normalize(np.atleast_2d(_extract_orthogonal(y0, z)))
+        z_ortho = _extract_orthogonal(y0, np.atleast_2d(z))
+        z0 = _normalize(z_ortho)
     z0_trans = rot_y.apply(z0, inverse=True)
     rot_z = _get_align_rotator([[1, 0, 0]], z0_trans)
     return rot_y * rot_z
@@ -24,6 +24,9 @@ def axes_to_rotator(z: ArrayLike, y: ArrayLike) -> Rotation:
 
 def _get_align_rotator(src, dst) -> Rotation:
     """R.apply(src) == dst. Both length must be 1."""
+    if np.all(np.abs(src + dst) < 1e-6):
+        # cross product cannot be used for antiparallel vectors
+        return Rotation.from_matrix(-np.eye(3))
     cross = np.cross(src, dst)
     sin = norm = np.sqrt(np.sum(cross**2, axis=1, keepdims=True))
     cos = np.sum(src * dst, axis=1, keepdims=True)

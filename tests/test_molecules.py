@@ -254,6 +254,8 @@ def test_append_empty():
         [1, -0.3, -0.2],
         [-0.2, -0.8, -1.3],
         [0.0, 0.0, 0.0],
+        [0.0, -1.0, 0.0],
+        [-1.0, 0.0, 0.0],
     ],
 )
 def test_axes_to_rotator(rotvec: list[float]):
