@@ -13,10 +13,9 @@ def axes_to_rotator(z: ArrayLike | None, y: ArrayLike) -> Rotation:
     y0 = _normalize(np.atleast_2d(y))
     rot_y = _get_align_rotator([[0, 1, 0]], y0)
     if z is None:
-        z0 = np.array([[1, 0, 0]])
+        z0 = _extract_orthogonal(y0, np.array([[1, 0, 0]]))
     else:
-        z_ortho = _extract_orthogonal(y0, np.atleast_2d(z))
-        z0 = _normalize(z_ortho)
+        z0 = _extract_orthogonal(y0, _normalize(np.atleast_2d(z)))
     z0_trans = rot_y.apply(z0, inverse=True)
     rot_z = _get_align_rotator([[1, 0, 0]], z0_trans)
     return rot_y * rot_z
