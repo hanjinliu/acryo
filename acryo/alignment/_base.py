@@ -677,7 +677,7 @@ class RotationImplemented(BaseAlignmentModel):
     def _get_template_and_mask_input(
         self,
         backend: Backend | None = None,
-    ) -> tuple[_Template, NDArray[np.float32]]:
+    ) -> tuple[_Template, AnyArray[np.float32]]:
         """
         Returns proper template image for alignment.
 
@@ -698,6 +698,8 @@ class RotationImplemented(BaseAlignmentModel):
               (rot0, temp1), ...
         """
         xp = backend or Backend()
+        if out := self._template_mask_cache.get(xp):
+            return out
         if self._n_rotations > 1:
             rotators = [Rotation.from_quat(r).inv() for r in self.quaternions]
             matrices = compose_matrices(
