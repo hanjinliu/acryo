@@ -263,9 +263,12 @@ class Molecules:
 
     def to_dataframe(self) -> pl.DataFrame:
         """Convert coordinates, rotation and features into a single data frame."""
-        import polars as pl
-
-        rotvec = self.rotvec()
+        if dup := set(self.features.columns).intersection(_CSV_COLUMNS):
+            raise ValueError(
+                "Duplication between feature columns and postion, rotation columns. "
+                f"Features should not contain {dup!r}. Please rename them."
+            )
+        rotvec = self.rotvec().astype(np.float32)
         data = np.concatenate([self.pos, rotvec], axis=1)
         df = pl.DataFrame(data, schema=_CSV_COLUMNS)
         if self._features is not None:

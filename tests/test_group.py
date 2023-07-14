@@ -8,11 +8,12 @@ def _get_group():
     rng = np.random.default_rng()
     img = rng.normal(0, 1, size=(30, 30, 35)).astype(np.float32)
     mole = Molecules(
-        pos=[[15, 15, 10 + i] for i in range(15)], features={"x": np.arange(15) % 3}
+        pos=[[15, 15, 10 + i] for i in range(15)],
+        features={"some_feature": np.arange(15) % 3},
     )
 
     loader = SubtomogramLoader(img, mole, output_shape=(9, 9, 9))
-    return loader.groupby("x")
+    return loader.groupby("some_feature")
 
 
 def test_average():

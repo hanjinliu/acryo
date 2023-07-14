@@ -979,7 +979,7 @@ class LoaderBase(ABC):
     ) -> LoaderGroup[tuple[str, ...], Self]:
         ...
 
-    def groupby(self, by: IntoExpr | Sequence[IntoExpr] | tuple[IntoExpr, ...]):
+    def groupby(self, by):
         """
         Group loader by given feature column(s).
 
