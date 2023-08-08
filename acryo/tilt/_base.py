@@ -8,7 +8,7 @@ from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
 
 
-class MissingWedgeBase(ABC):
+class TiltSeriesModel(ABC):
     @abstractmethod
     def create_mask(
         self,
@@ -18,7 +18,7 @@ class MissingWedgeBase(ABC):
         """Create a missing wedge mask."""
 
 
-class NoWedge(ABC):
+class NoWedge(TiltSeriesModel):
     def create_mask(
         self,
         rotator: Rotation,
@@ -27,8 +27,8 @@ class NoWedge(ABC):
         return np.ones(shape, dtype=np.float32)
 
 
-class UnionAxes(MissingWedgeBase):
-    def __init__(self, wedges: Iterable[MissingWedgeBase]):
+class UnionAxes(TiltSeriesModel):
+    def __init__(self, wedges: Iterable[TiltSeriesModel]):
         self._wedges = list(wedges)
 
     def __repr__(self) -> str:

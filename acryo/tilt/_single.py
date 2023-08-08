@@ -4,10 +4,10 @@ from abc import abstractmethod
 import numpy as np
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
-from acryo.wedge import _base, _utils
+from acryo.tilt import _base, _utils
 
 
-class SingleAxis(_base.MissingWedgeBase):
+class SingleAxis(_base.TiltSeriesModel):
     def __init__(self, tilt_range=(-60.0, 60.0)):
         _min, _max = tilt_range
         if _min >= _max:

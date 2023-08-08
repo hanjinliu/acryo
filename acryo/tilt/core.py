@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from acryo.wedge._single import SingleAxisY, SingleAxisX, SingleAxis
-from acryo.wedge._base import UnionAxes
+from acryo.tilt._single import SingleAxisY, SingleAxisX, SingleAxis
+from acryo.tilt._base import UnionAxes, NoWedge
 
 
 def single_axis(tilt_range: tuple[float, float], axis: str = "y") -> SingleAxis:
@@ -43,3 +43,8 @@ def dual_axis(
             SingleAxisX(tilt_range_x),
         ]
     )
+
+
+def no_wedge() -> NoWedge:
+    """Create a no-wedge missing wedge model."""
+    return NoWedge()

@@ -139,7 +139,7 @@ method of alignment model classes, or directly pass them to the ``**kwargs``.
         alignment_model=ZNCCAlignment.with_params(
             rotations=[(6, 2), (6, 2), (6, 2)],
             cutoff=0.5,
-            tilt_range=(-50, 50)
+            tilt=(-50, 50)
         ),
     )
 
@@ -150,7 +150,7 @@ method of alignment model classes, or directly pass them to the ``**kwargs``.
         alignment_model=ZNCCAlignment,
         rotations=[(6, 2), (6, 2), (6, 2)],
         cutoff=0.5,
-        tilt_range=(-50, 50),
+        tilt=(-50, 50),
     )
 
 
