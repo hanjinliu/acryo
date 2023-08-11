@@ -47,6 +47,22 @@ class BatchLoader(LoaderBase):
         self._images: dict[Hashable, NDArray[np.float32] | da.Array] = {}
         self._molecules: Molecules = Molecules.empty([IMAGE_ID_LABEL])
 
+    def __repr__(self) -> str:
+        loaders_repr = []
+        for loader in self.loaders:
+            shape = loader.image.shape
+            mole_repr = repr(loader.molecules)
+            loaders_repr.append(
+                f"{loader.__class__.__name__}(tomogram={shape}, "
+                f"molecules={mole_repr})"
+            )
+        loaders_repr = ", ".join(loaders_repr)
+        return (
+            f"{self.__class__.__name__}(loaders=[{loaders_repr}], "
+            f"output_shape={self.output_shape}, order={self.order}, "
+            f"scale={self.scale:.4f})"
+        )
+
     @property
     def loaders(self) -> LoaderAccessor:
         """Interface to access the subtomogram loaders."""

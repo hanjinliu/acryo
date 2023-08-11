@@ -225,13 +225,19 @@ class SubtomogramLoader(LoaderBase):
         else:
             _prep = _utils.prepare_affine
         pool = DaskTaskPool.from_func(xp.rotated_crop)
-        for i in range(len(self)):
-            subvol, mtx = _prep(
-                image,
-                center=self.molecules.pos[i] / scale,
-                output_shape=output_shape,
-                rot=self.molecules.rotator[i],
-            )
+        for i in range(len(self.molecules)):
+            try:
+                subvol, mtx = _prep(
+                    image,
+                    center=self.molecules.pos[i] / scale,
+                    output_shape=output_shape,
+                    rot=self.molecules.rotator[i],
+                )
+            except _utils.SubvolumeOutOfBoundError as e:
+                raise e.with_msg(
+                    f"The {i}-th molecule at {tuple(self.molecules.pos[i])} is "
+                    f"out of bound. {e.msg}"
+                )
             pool.add_task(
                 subvol,
                 mtx,

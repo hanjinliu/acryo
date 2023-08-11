@@ -8,12 +8,39 @@ from functools import lru_cache, reduce, wraps
 import numpy as np
 from numpy.typing import NDArray
 from dask import array as da
-from scipy import ndimage as ndi
 from scipy.spatial.transform import Rotation
-from acryo._typed_scipy import fftn, rfftn, irfftn
+from acryo._typed_scipy import fftn, rfftn, irfftn, sum_labels
 
 if TYPE_CHECKING:
     from acryo._types import degree
+
+
+class SubvolumeOutOfBoundError(ValueError):
+    """Raised when a subvolume is out of bound."""
+
+    def __init__(self, sl: slice, size: int, msg: str | None = None):
+        if msg is None:
+            msg = (
+                f"Cannot slice by {sl.start}:{sl.stop} in the axis " f"of size {size}."
+            )
+        super().__init__(msg)
+        self._slice = sl
+        self._size = size
+
+    @property
+    def slice(self) -> slice:
+        return self._slice
+
+    @property
+    def size(self) -> int:
+        return self._size
+
+    @property
+    def msg(self) -> str:
+        return self.args[0]
+
+    def with_msg(self, msg: str) -> SubvolumeOutOfBoundError:
+        return SubvolumeOutOfBoundError(self.slice, self.size, msg)
 
 
 def make_slice_and_pad(
@@ -31,13 +58,13 @@ def make_slice_and_pad(
         z0_pad = -z0
         z0 = 0
     elif size < z0:
-        raise ValueError(f"Specified size is {size} but need to slice at {z0}:{z1}.")
+        raise SubvolumeOutOfBoundError(slice(z0, z1), size)
 
     if size < z1:
         z1_pad = z1 - size
         z1 = size
     elif z1 < 0:
-        raise ValueError(f"Specified size is {size} but need to slice at {z0}:{z1}.")
+        raise SubvolumeOutOfBoundError(slice(z0, z1), size)
 
     out_of_bound = z0_pad != 0 or z1_pad != 0
     return slice(z0, z1), (z0_pad, z1_pad), out_of_bound
@@ -121,7 +148,7 @@ def fourier_shell_correlation(
 
     def radial_sum(arr: NDArray[np.float32]) -> NDArray[np.float32]:
         arr = np.asarray(arr)
-        return ndi.sum_labels(arr, labels=labels, index=np.arange(0, nlabels))
+        return sum_labels(arr, labels=labels, index=np.arange(0, nlabels))
 
     f0 = np.fft.fftshift(fftn(img0))
     f1 = np.fft.fftshift(fftn(img1))

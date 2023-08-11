@@ -95,7 +95,7 @@ class LoaderGroup(Generic[_K, _L]):
         output_shape: _ShapeType = None,
         *,
         backend: Backend | None = None,
-    ) -> dict[_K, NDArray[np.float32]]:
+    ) -> ArrayDict[_K]:
         """Calculate average images."""
         xp = backend or Backend()
         tasks = []
@@ -107,7 +107,7 @@ class LoaderGroup(Generic[_K, _L]):
             tasks.append(da.mean(dsk, axis=0))
 
         out: list[AnyArray[np.float32]] = da.compute(tasks)[0]
-        return {key: xp.asnumpy(img) for key, img in zip(keys, out)}
+        return ArrayDict({key: xp.asnumpy(img) for key, img in zip(keys, out)})
 
     def average_split(
         self,
@@ -117,7 +117,7 @@ class LoaderGroup(Generic[_K, _L]):
         output_shape: _ShapeType = None,
         *,
         backend: Backend | None = None,
-    ) -> dict[_K, NDArray[np.float32]]:
+    ) -> ArrayDict[_K]:
         """
         Split subtomograms into two set and average separately.
 
@@ -163,13 +163,13 @@ class LoaderGroup(Generic[_K, _L]):
                 tasks.append(_stack)
             all_tasks.append(tasks)
 
-        computed = da.compute(all_tasks)[0]
-        out: dict[_K, NDArray[np.float32]] = {}
+        computed: list[list[AnyArray[np.float32]]] = da.compute(all_tasks)[0]
+        out = ArrayDict()
         for (key, loader), stack in zip(self, computed):
-            stack = xp.asnumpy(xp.stack(stack, axis=0))
+            stack_np = xp.asnumpy(xp.stack(stack, axis=0))
             if squeeze and n_set == 1:
-                stack = stack[0]
-            out[key] = stack
+                stack_np: NDArray[np.float32] = stack_np[0]
+            out[key] = stack_np
         return out
 
     def align(
@@ -372,7 +372,7 @@ class LoaderGroup(Generic[_K, _L]):
         self,
         funcs: AggFunction[_R] | Sequence[AggFunction[_R]],
         schema: list[str] | None = None,
-    ) -> dict[_K, pl.DataFrame]:
+    ) -> DataFrameDict[_K]:
         """
         Apply functions to subtomograms for each group.
 
@@ -413,7 +413,7 @@ class LoaderGroup(Generic[_K, _L]):
             all_tasks.append(taskset)
             keys.append(key)
         all_results = da.compute(all_tasks)[0]
-        out: dict[_K, pl.DataFrame] = {}
+        out = DataFrameDict()
         for key, result in zip(keys, all_results):
             out[key] = pl.DataFrame(np.array(result), schema=schema)
         return out
@@ -424,7 +424,7 @@ class LoaderGroup(Generic[_K, _L]):
         seed: int | None = 0,
         n_set: int = 1,
         dfreq: float = 0.05,
-    ) -> dict[_K, pl.DataFrame]:
+    ) -> DataFrameDict[_K]:
         """
         Calculate Fourier shell correlation for each group.
 
@@ -463,7 +463,7 @@ class LoaderGroup(Generic[_K, _L]):
             squeeze=False,
             output_shape=output_shape,
         )
-        out: dict[_K, pl.DataFrame] = {}
+        out = DataFrameDict()
         for key, img in imgs.items():
             fsc_all: dict[str, np.ndarray] = {}
             freq = np.zeros(0, dtype=np.float32)
@@ -552,3 +552,28 @@ def _normalize_template(template: _T | Mapping[_K, _T]) -> Mapping[_K, _T]:
     from collections import defaultdict
 
     return defaultdict(lambda: template)
+
+
+class ArrayDict(dict[_K, NDArray[np.float32]]):
+    def value_list(self) -> list[NDArray[np.float32]]:
+        """Return values as a list."""
+        return list(self.values())
+
+    def value_stack(self, axis: int = 0) -> NDArray[np.float32]:
+        """Return values as a stack."""
+        return np.stack(self.value_list(), axis=axis)
+
+
+class DataFrameDict(dict[_K, pl.DataFrame]):
+    def value_list(self) -> list[pl.DataFrame]:
+        """Return values as a list."""
+        return list(self.values())
+
+    def value_melt(self, key_label: str = "group") -> pl.DataFrame:
+        """Return values as a melted data frame."""
+        df_melt = []
+        for key, df in self.items():
+            df_melt.append(
+                df.with_columns(pl.repeat(str(key), pl.count()).alias(key_label))
+            )
+        return pl.concat(df_melt)

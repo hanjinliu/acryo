@@ -84,6 +84,13 @@ if TYPE_CHECKING:
     ) -> NDArray[np.float32]:
         ...
 
+    def sum_labels(
+        arr: NDArray[np.float32],
+        labels: NDArray[np.integer],
+        index: NDArray[np.integer],
+    ) -> NDArray[np.float32]:
+        ...
+
 else:
     from scipy.fft import rfftn, irfftn, fftn, ifftn
     from scipy.ndimage import (
@@ -92,6 +99,7 @@ else:
         map_coordinates,
         shift,
         zoom,
+        sum_labels,
     )
     from scipy.signal import convolve
 
@@ -104,6 +112,7 @@ __all__ = [
     "affine_transform",
     "shift",
     "zoom",
+    "sum_labels",
     "map_coordinates",
     "convolve",
 ]
