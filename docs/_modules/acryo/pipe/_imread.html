@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo.pipe._imread &mdash; acryo 0.3.0 documentation</title>
+  <title>acryo.pipe._imread &mdash; acryo 0.4.4 documentation</title>
       <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -11,9 +11,8 @@
   <![endif]-->
 
         <script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
-        <script src="../../../_static/jquery.js"></script>
-        <script src="../../../_static/underscore.js"></script>
         <script src="../../../_static/doctools.js"></script>
+        <script src="../../../_static/sphinx_highlight.js"></script>
         <script src="https://unpkg.com/mermaid@9.4.0/dist/mermaid.min.js"></script>
         <script>mermaid.initialize({startOnLoad:true});</script>
     <script src="../../../_static/js/theme.js"></script>
@@ -33,7 +32,7 @@
             acryo
           </a>
               <div class="version">
-                0.3.0
+                0.4.4
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
@@ -78,15 +77,26 @@
   <h1>Source code for acryo.pipe._imread</h1><div class="highlight"><pre>
 <span></span><span class="kn">from</span> <span class="nn">__future__</span> <span class="kn">import</span> <span class="n">annotations</span>
 
+<span class="kn">from</span> <span class="nn">pathlib</span> <span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Iterable</span><span class="p">,</span> <span class="n">Union</span>
+
 <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
-<span class="kn">from</span> <span class="nn">scipy</span> <span class="kn">import</span> <span class="n">ndimage</span> <span class="k">as</span> <span class="n">ndi</span>
+<span class="kn">from</span> <span class="nn">numpy.typing</span> <span class="kn">import</span> <span class="n">NDArray</span>
 <span class="kn">from</span> <span class="nn">acryo.pipe._curry</span> <span class="kn">import</span> <span class="n">provider_function</span>
 <span class="kn">from</span> <span class="nn">acryo._reader</span> <span class="kn">import</span> <span class="n">REG</span>
+<span class="kn">from</span> <span class="nn">acryo._typed_scipy</span> <span class="kn">import</span> <span class="n">zoom</span>
 <span class="kn">from</span> <span class="nn">acryo._types</span> <span class="kn">import</span> <span class="n">nm</span>
+
+<span class="n">PathLike</span> <span class="o">=</span> <span class="n">Union</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Path</span><span class="p">,</span> <span class="nb">bytes</span><span class="p">]</span>
 
 
 <div class="viewcode-block" id="from_file"><a class="viewcode-back" href="../../../apidoc/acryo.pipe.html#acryo.pipe.from_file">[docs]</a><span class="nd">@provider_function</span>
-<span class="k">def</span> <span class="nf">from_file</span><span class="p">(</span><span class="n">scale</span><span class="p">:</span> <span class="n">nm</span><span class="p">,</span> <span class="n">path</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">original_scale</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">tol</span><span class="o">=</span><span class="mf">0.01</span><span class="p">):</span>
+<span class="k">def</span> <span class="nf">from_file</span><span class="p">(</span>
+    <span class="n">scale</span><span class="p">:</span> <span class="n">nm</span><span class="p">,</span>
+    <span class="n">path</span><span class="p">:</span> <span class="n">PathLike</span><span class="p">,</span>
+    <span class="n">original_scale</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">tol</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.01</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    An image provider function with rescaling.</span>
 
@@ -100,7 +110,7 @@
 
 <span class="sd">    Parameters</span>
 <span class="sd">    ----------</span>
-<span class="sd">    path : str</span>
+<span class="sd">    path : path-like</span>
 <span class="sd">        Path to the image.</span>
 <span class="sd">    original_scale : float, optional</span>
 <span class="sd">        If given, this value will be used as the image scale (nm/pixel) instead</span>
@@ -111,13 +121,46 @@
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="k">if</span> <span class="n">original_scale</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">original_scale</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
         <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;original_scale must be positive&quot;</span><span class="p">)</span>
-    <span class="n">img</span><span class="p">,</span> <span class="n">img_scale</span> <span class="o">=</span> <span class="n">REG</span><span class="o">.</span><span class="n">imread_array</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+    <span class="n">img</span><span class="p">,</span> <span class="n">img_scale</span> <span class="o">=</span> <span class="n">REG</span><span class="o">.</span><span class="n">imread_array</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">path</span><span class="p">))</span>
     <span class="k">if</span> <span class="n">original_scale</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
         <span class="n">original_scale</span> <span class="o">=</span> <span class="n">img_scale</span>
     <span class="n">ratio</span> <span class="o">=</span> <span class="n">original_scale</span> <span class="o">/</span> <span class="n">scale</span>
     <span class="k">if</span> <span class="nb">abs</span><span class="p">(</span><span class="n">ratio</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">&lt;</span> <span class="n">tol</span><span class="p">:</span>
         <span class="k">return</span> <span class="n">img</span>
-    <span class="k">return</span> <span class="n">ndi</span><span class="o">.</span><span class="n">zoom</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">ratio</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">prefilter</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;reflect&quot;</span><span class="p">)</span></div>
+    <span class="k">return</span> <span class="n">zoom</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">ratio</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">prefilter</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;reflect&quot;</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="from_files"><a class="viewcode-back" href="../../../apidoc/acryo.pipe.html#acryo.pipe.from_files">[docs]</a><span class="nd">@provider_function</span>
+<span class="k">def</span> <span class="nf">from_files</span><span class="p">(</span>
+    <span class="n">scale</span><span class="p">:</span> <span class="n">nm</span><span class="p">,</span>
+    <span class="n">path</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">[</span><span class="n">PathLike</span><span class="p">],</span>
+    <span class="n">original_scale</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">tol</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.01</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Batch image provider function with rescaling.</span>
+
+<span class="sd">    This function will provide a subtomogram loader with resized images from files.</span>
+<span class="sd">    Will be used for the template images.</span>
+
+<span class="sd">    &gt;&gt;&gt; from glob import glob</span>
+<span class="sd">    &gt;&gt;&gt; loader.align(</span>
+<span class="sd">    ...     template=from_files(glob(&quot;path/to/template_*.mrc&quot;)),</span>
+<span class="sd">    ...     mask=from_file(&quot;path/to/mask.mrc&quot;),</span>
+<span class="sd">    ... )</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    paths : iterable of path-like</span>
+<span class="sd">        Paths to the image.</span>
+<span class="sd">    original_scale : float, optional</span>
+<span class="sd">        If given, this value will be used as the image scale (nm/pixel) instead</span>
+<span class="sd">        of the scale extracted from the image metadata.</span>
+<span class="sd">    tol : float</span>
+<span class="sd">        Tolerance of the scale difference. If the relative difference is smaller than</span>
+<span class="sd">        this, the image will not be resized.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="p">[</span><span class="n">from_file</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">original_scale</span><span class="p">,</span> <span class="n">tol</span><span class="p">)</span><span class="o">.</span><span class="n">provide</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">path</span><span class="p">]</span></div>
 
 
 <div class="viewcode-block" id="from_gaussian"><a class="viewcode-back" href="../../../apidoc/acryo.pipe.html#acryo.pipe.from_gaussian">[docs]</a><span class="nd">@provider_function</span>
@@ -126,7 +169,7 @@
     <span class="n">shape</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">nm</span><span class="p">,</span> <span class="n">nm</span><span class="p">,</span> <span class="n">nm</span><span class="p">],</span>
     <span class="n">sigma</span><span class="p">:</span> <span class="n">nm</span> <span class="o">|</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">nm</span><span class="p">,</span> <span class="n">nm</span><span class="p">,</span> <span class="n">nm</span><span class="p">]</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">,</span>
     <span class="n">shift</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">nm</span><span class="p">,</span> <span class="n">nm</span><span class="p">,</span> <span class="n">nm</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">),</span>
-<span class="p">):</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    An image provider function by a Gaussian function.</span>
 
@@ -147,12 +190,8 @@
 <span class="sd">    shift : tuple of float, optional</span>
 <span class="sd">        Shift of the Gaussian particle from the center in nm.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
-    <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">isscalar</span><span class="p">(</span><span class="n">sigma</span><span class="p">):</span>
-        <span class="n">sigma</span> <span class="o">=</span> <span class="p">(</span><span class="n">sigma</span><span class="p">,)</span> <span class="o">*</span> <span class="mi">3</span>
-    <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">isscalar</span><span class="p">(</span><span class="n">shape</span><span class="p">):</span>
-        <span class="n">shape</span> <span class="o">=</span> <span class="p">(</span><span class="n">shape</span><span class="p">,)</span> <span class="o">*</span> <span class="mi">3</span>
-    <span class="n">sigma_px</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">sigma</span><span class="p">)</span> <span class="o">/</span> <span class="n">scale</span>
-    <span class="n">shape_subpix</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">shape</span><span class="p">)</span> <span class="o">/</span> <span class="n">scale</span>
+    <span class="n">sigma_px</span> <span class="o">=</span> <span class="n">_as_3_array</span><span class="p">(</span><span class="n">sigma</span><span class="p">)</span> <span class="o">/</span> <span class="n">scale</span>
+    <span class="n">shape_subpix</span> <span class="o">=</span> <span class="n">_as_3_array</span><span class="p">(</span><span class="n">shape</span><span class="p">)</span> <span class="o">/</span> <span class="n">scale</span>
     <span class="n">center_subpix</span> <span class="o">=</span> <span class="n">shape_subpix</span> <span class="o">+</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">shift</span><span class="p">)</span> <span class="o">/</span> <span class="n">scale</span>
     <span class="n">shape_px</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">shape_subpix</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">))</span>
 
@@ -166,8 +205,11 @@
 
 <div class="viewcode-block" id="from_array"><a class="viewcode-back" href="../../../apidoc/acryo.pipe.html#acryo.pipe.from_array">[docs]</a><span class="nd">@provider_function</span>
 <span class="k">def</span> <span class="nf">from_array</span><span class="p">(</span>
-    <span class="n">scale</span><span class="p">:</span> <span class="n">nm</span><span class="p">,</span> <span class="n">img</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">original_scale</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">,</span> <span class="n">tol</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.01</span>
-<span class="p">):</span>
+    <span class="n">scale</span><span class="p">:</span> <span class="n">nm</span><span class="p">,</span>
+    <span class="n">img</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
+    <span class="n">original_scale</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">,</span>
+    <span class="n">tol</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.01</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    An image provider function using existing image array.</span>
 
@@ -197,10 +239,20 @@
     <span class="n">ratio</span> <span class="o">=</span> <span class="n">original_scale</span> <span class="o">/</span> <span class="n">scale</span>
     <span class="k">if</span> <span class="nb">abs</span><span class="p">(</span><span class="n">ratio</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">&lt;</span> <span class="n">tol</span><span class="p">:</span>
         <span class="k">return</span> <span class="n">img</span>
-    <span class="n">out</span> <span class="o">=</span> <span class="n">ndi</span><span class="o">.</span><span class="n">zoom</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">ratio</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">prefilter</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;reflect&quot;</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">zoom</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">ratio</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">prefilter</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;reflect&quot;</span><span class="p">)</span>
     <span class="k">if</span> <span class="ow">not</span> <span class="n">out</span><span class="o">.</span><span class="n">dtype</span> <span class="o">==</span> <span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">:</span>
         <span class="n">out</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
     <span class="k">return</span> <span class="n">out</span></div>
+
+
+<div class="viewcode-block" id="from_arrays"><a class="viewcode-back" href="../../../apidoc/acryo.pipe.html#acryo.pipe.from_arrays">[docs]</a><span class="nd">@provider_function</span>
+<span class="k">def</span> <span class="nf">from_arrays</span><span class="p">(</span>
+    <span class="n">scale</span><span class="p">:</span> <span class="n">nm</span><span class="p">,</span>
+    <span class="n">imgs</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]],</span>
+    <span class="n">original_scale</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">,</span>
+    <span class="n">tol</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.01</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]]:</span>
+    <span class="k">return</span> <span class="p">[</span><span class="n">from_array</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">original_scale</span><span class="p">,</span> <span class="n">tol</span><span class="p">)</span><span class="o">.</span><span class="n">provide</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span> <span class="k">for</span> <span class="n">img</span> <span class="ow">in</span> <span class="n">imgs</span><span class="p">]</span></div>
 
 
 <div class="viewcode-block" id="from_atoms"><a class="viewcode-back" href="../../../apidoc/acryo.pipe.html#acryo.pipe.from_atoms">[docs]</a><span class="nd">@provider_function</span>
@@ -209,7 +261,7 @@
     <span class="n">atoms</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
     <span class="n">weights</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="n">center</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">nm</span><span class="p">,</span> <span class="n">nm</span><span class="p">,</span> <span class="n">nm</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-<span class="p">):</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    An image provider function using a point cloud.</span>
 
@@ -230,8 +282,8 @@
         <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;atoms must be a 2D array with shape (n, 3)&quot;</span><span class="p">)</span>
     <span class="k">if</span> <span class="n">center</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
         <span class="n">center</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">atoms</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
-    <span class="n">center</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">center</span><span class="p">)[</span><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>
-    <span class="n">coords</span> <span class="o">=</span> <span class="p">(</span><span class="n">atoms</span> <span class="o">-</span> <span class="n">center</span><span class="p">)</span> <span class="o">/</span> <span class="n">scale</span>
+    <span class="n">_center</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">center</span><span class="p">)[</span><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>
+    <span class="n">coords</span> <span class="o">=</span> <span class="p">(</span><span class="n">atoms</span> <span class="o">-</span> <span class="n">_center</span><span class="p">)</span> <span class="o">/</span> <span class="n">scale</span>
     <span class="n">rmax</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">coords</span><span class="o">**</span><span class="mi">2</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)))</span>  <span class="c1"># the furthest in pixels</span>
     <span class="n">size</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span><span class="n">rmax</span> <span class="o">*</span> <span class="mi">2</span><span class="p">))</span>
     <span class="n">lims</span> <span class="o">=</span> <span class="p">(</span><span class="o">-</span><span class="n">size</span> <span class="o">/</span> <span class="mi">2</span><span class="p">,</span> <span class="n">size</span> <span class="o">/</span> <span class="mi">2</span><span class="p">)</span>
@@ -240,6 +292,12 @@
         <span class="n">coords</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="p">(</span><span class="n">size</span><span class="p">,)</span> <span class="o">*</span> <span class="mi">3</span><span class="p">,</span> <span class="nb">range</span><span class="o">=</span><span class="p">(</span><span class="n">lims</span><span class="p">,)</span> <span class="o">*</span> <span class="mi">3</span><span class="p">,</span> <span class="n">weights</span><span class="o">=</span><span class="n">weights</span>
     <span class="p">)</span>
     <span class="k">return</span> <span class="n">counts</span></div>
+
+
+<span class="k">def</span> <span class="nf">_as_3_array</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">floating</span><span class="p">]:</span>
+    <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">isscalar</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">x</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">x</span><span class="p">])</span>  <span class="c1"># type: ignore</span>
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
 </pre></div>
 
            </div>

@@ -13,7 +13,7 @@ from acryo.pipe._classes import ImageProvider
 from acryo.molecules import Molecules
 from acryo._rotation import normalize_rotations
 from acryo._utils import compose_matrices, missing_wedge_mask
-from acryo._types import nm, Ranges
+from acryo._types import nm, RotationType
 from acryo._typed_scipy import spline_filter, affine_transform
 from acryo._dask import DaskTaskPool
 
@@ -77,7 +77,7 @@ class BaseTemplateMatcher(BasePickerModel):
     def __init__(
         self,
         template: NDArray[np.float32] | ImageProvider,
-        rotation: Ranges,
+        rotation: RotationType,
         tilt_range: tuple[float, float] = (-60, 60),
         order: int = 1,
     ) -> None:

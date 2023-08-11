@@ -17,6 +17,15 @@ class TiltSeriesModel(ABC):
     ) -> NDArray[np.float32]:
         """Create a missing wedge mask."""
 
+    def apply_mask(
+        self,
+        rotator: Rotation,
+        img: NDArray[np.float32],
+    ) -> NDArray[np.float32]:
+        """Apply the missing wedge mask."""
+        mask = self.create_mask(rotator, img.shape)
+        return img * mask
+
 
 class NoWedge(TiltSeriesModel):
     def create_mask(

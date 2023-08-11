@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo.alignment._base &mdash; acryo 0.4.0 documentation</title>
+  <title>acryo.alignment._base &mdash; acryo 0.4.4 documentation</title>
       <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -11,9 +11,8 @@
   <![endif]-->
 
         <script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
-        <script src="../../../_static/jquery.js"></script>
-        <script src="../../../_static/underscore.js"></script>
         <script src="../../../_static/doctools.js"></script>
+        <script src="../../../_static/sphinx_highlight.js"></script>
         <script src="https://unpkg.com/mermaid@9.4.0/dist/mermaid.min.js"></script>
         <script>mermaid.initialize({startOnLoad:true});</script>
     <script src="../../../_static/js/theme.js"></script>
@@ -33,7 +32,7 @@
             acryo
           </a>
               <div class="version">
-                0.4.0
+                0.4.4
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
@@ -89,17 +88,19 @@
     <span class="n">Union</span><span class="p">,</span>
 <span class="p">)</span>
 <span class="kn">from</span> <span class="nn">typing_extensions</span> <span class="kn">import</span> <span class="n">Self</span>
+<span class="kn">import</span> <span class="nn">warnings</span>
 
 <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
 <span class="kn">from</span> <span class="nn">numpy.typing</span> <span class="kn">import</span> <span class="n">NDArray</span>
 <span class="kn">from</span> <span class="nn">scipy.spatial.transform</span> <span class="kn">import</span> <span class="n">Rotation</span>
 
 <span class="kn">from</span> <span class="nn">acryo._rotation</span> <span class="kn">import</span> <span class="n">normalize_rotations</span>
-<span class="kn">from</span> <span class="nn">acryo._types</span> <span class="kn">import</span> <span class="n">Ranges</span><span class="p">,</span> <span class="n">subpixel</span><span class="p">,</span> <span class="n">degree</span>
+<span class="kn">from</span> <span class="nn">acryo._types</span> <span class="kn">import</span> <span class="n">RotationType</span><span class="p">,</span> <span class="n">subpixel</span><span class="p">,</span> <span class="n">degree</span>
 <span class="kn">from</span> <span class="nn">acryo._utils</span> <span class="kn">import</span> <span class="n">compose_matrices</span>
 <span class="kn">from</span> <span class="nn">acryo._dask</span> <span class="kn">import</span> <span class="n">DaskTaskPool</span><span class="p">,</span> <span class="n">compute</span>
 <span class="kn">from</span> <span class="nn">acryo.backend</span> <span class="kn">import</span> <span class="n">Backend</span><span class="p">,</span> <span class="n">AnyArray</span><span class="p">,</span> <span class="n">NUMPY_BACKEND</span>
 <span class="kn">from</span> <span class="nn">acryo.alignment._bound</span> <span class="kn">import</span> <span class="n">ParametrizedModel</span>
+<span class="kn">from</span> <span class="nn">acryo.tilt</span> <span class="kn">import</span> <span class="n">single_axis</span><span class="p">,</span> <span class="n">TiltSeriesModel</span><span class="p">,</span> <span class="n">no_wedge</span>
 
 
 <span class="n">TemplateType</span> <span class="o">=</span> <span class="n">Union</span><span class="p">[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span> <span class="n">Sequence</span><span class="p">[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]]]</span>
@@ -186,23 +187,27 @@
         <span class="n">mask</span><span class="p">:</span> <span class="n">MaskType</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="p">):</span>
         <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">template</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">):</span>
-            <span class="k">if</span> <span class="n">template</span><span class="o">.</span><span class="n">dtype</span> <span class="o">!=</span> <span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">:</span>
-                <span class="n">template</span> <span class="o">=</span> <span class="n">template</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">_template</span> <span class="o">=</span> <span class="n">template</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_template</span> <span class="o">=</span> <span class="n">template</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">copy</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">_n_templates</span> <span class="o">=</span> <span class="mi">1</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">_ndim</span> <span class="o">=</span> <span class="n">template</span><span class="o">.</span><span class="n">ndim</span>
         <span class="k">else</span><span class="p">:</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">_template</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">template</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
-            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_template</span><span class="o">.</span><span class="n">dtype</span> <span class="o">!=</span> <span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">:</span>
-                <span class="bp">self</span><span class="o">.</span><span class="n">_template</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_template</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_template</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">template</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">copy</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">_n_templates</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_template</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">_ndim</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_template</span><span class="o">.</span><span class="n">ndim</span> <span class="o">-</span> <span class="mi">1</span>
 
         <span class="k">if</span> <span class="n">callable</span><span class="p">(</span><span class="n">mask</span><span class="p">):</span>
             <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_n_templates</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
-                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Cannot create a mask using multiple templates&quot;</span><span class="p">)</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">_mask</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span> <span class="o">=</span> <span class="n">mask</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_template</span><span class="p">)</span>
-            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_template</span><span class="o">.</span><span class="n">shape</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mask</span><span class="o">.</span><span class="n">shape</span><span class="p">:</span>
+                <span class="c1"># To calculate scores in a consistent way, we need to use the same mask.</span>
+                <span class="c1"># Here, we use the maximum value of the mask, with which all the template density.</span>
+                <span class="c1"># will be equally considered.</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_mask</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span>
+                    <span class="p">[</span><span class="n">mask</span><span class="p">(</span><span class="n">tmp</span><span class="p">)</span> <span class="k">for</span> <span class="n">tmp</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_template</span><span class="p">],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span>
+                <span class="p">)</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+                <span class="n">_shape_matches</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_template</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mask</span><span class="o">.</span><span class="n">shape</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_mask</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span> <span class="o">=</span> <span class="n">mask</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_template</span><span class="p">)</span>
+                <span class="n">_shape_matches</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_template</span><span class="o">.</span><span class="n">shape</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mask</span><span class="o">.</span><span class="n">shape</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">_shape_matches</span><span class="p">:</span>
                 <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
                     <span class="s2">&quot;Shape mismatch in between template image &quot;</span>
                     <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_template</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2"> and mask image </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_mask</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2">).&quot;</span>
@@ -244,6 +249,11 @@
     <span class="k">def</span> <span class="nf">has_rotation</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;If the alignment model has rotation optimization.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="kc">False</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">has_hetero_templates</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;If the alignment model has different type of templates.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_n_templates</span> <span class="o">&gt;</span> <span class="mi">1</span>
 
 <div class="viewcode-block" id="BaseAlignmentModel.with_params"><a class="viewcode-back" href="../../../apidoc/acryo.alignment.html#acryo.alignment.BaseAlignmentModel.with_params">[docs]</a>    <span class="nd">@classmethod</span>
     <span class="k">def</span> <span class="nf">with_params</span><span class="p">(</span>
@@ -624,7 +634,7 @@
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">template</span><span class="p">:</span> <span class="n">TemplateType</span><span class="p">,</span>
         <span class="n">mask</span><span class="p">:</span> <span class="n">MaskType</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-        <span class="n">rotations</span><span class="p">:</span> <span class="n">Ranges</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">rotations</span><span class="p">:</span> <span class="n">RotationType</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="p">):</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">quaternions</span> <span class="o">=</span> <span class="n">normalize_rotations</span><span class="p">(</span><span class="n">rotations</span><span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_n_rotations</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">quaternions</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
@@ -634,7 +644,7 @@
     <span class="k">def</span> <span class="nf">with_params</span><span class="p">(</span>
         <span class="bp">cls</span><span class="p">,</span>
         <span class="o">*</span><span class="p">,</span>
-        <span class="n">rotations</span><span class="p">:</span> <span class="n">Ranges</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">rotations</span><span class="p">:</span> <span class="n">RotationType</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ParametrizedModel</span><span class="p">[</span><span class="n">Self</span><span class="p">]:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Create an alignment model instance with parameters.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="n">ParametrizedModel</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">rotations</span><span class="o">=</span><span class="n">rotations</span><span class="p">)</span></div>
@@ -746,7 +756,7 @@
     <span class="k">def</span> <span class="nf">_get_template_and_mask_input</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">_Template</span><span class="p">,</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]]:</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">_Template</span><span class="p">,</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]]:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Returns proper template image for alignment.</span>
 
@@ -767,6 +777,8 @@
 <span class="sd">              (rot0, temp1), ...</span>
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="n">xp</span> <span class="o">=</span> <span class="n">backend</span> <span class="ow">or</span> <span class="n">Backend</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">out</span> <span class="o">:=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_template_mask_cache</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">xp</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">out</span>
         <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_n_rotations</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
             <span class="n">rotators</span> <span class="o">=</span> <span class="p">[</span><span class="n">Rotation</span><span class="o">.</span><span class="n">from_quat</span><span class="p">(</span><span class="n">r</span><span class="p">)</span><span class="o">.</span><span class="n">inv</span><span class="p">()</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">quaternions</span><span class="p">]</span>
             <span class="n">matrices</span> <span class="o">=</span> <span class="n">compose_matrices</span><span class="p">(</span>
@@ -870,24 +882,36 @@
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">template</span><span class="p">:</span> <span class="n">TemplateType</span><span class="p">,</span>
         <span class="n">mask</span><span class="p">:</span> <span class="n">MaskType</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-        <span class="n">rotations</span><span class="p">:</span> <span class="n">Ranges</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">rotations</span><span class="p">:</span> <span class="n">RotationType</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">cutoff</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">tilt</span><span class="p">:</span> <span class="n">TiltSeriesModel</span> <span class="o">|</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">degree</span><span class="p">,</span> <span class="n">degree</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">tilt_range</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">degree</span><span class="p">,</span> <span class="n">degree</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="p">):</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_cutoff</span> <span class="o">=</span> <span class="n">cutoff</span> <span class="ow">or</span> <span class="mf">1.0</span>
         <span class="k">if</span> <span class="n">tilt_range</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-            <span class="n">deg0</span><span class="p">,</span> <span class="n">deg1</span> <span class="o">=</span> <span class="n">tilt_range</span>
-            <span class="k">if</span> <span class="n">deg0</span> <span class="o">&gt;=</span> <span class="n">deg1</span><span class="p">:</span>
-                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Tilt range must be in form of (min, max).&quot;</span><span class="p">)</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_tilt_range</span> <span class="o">=</span> <span class="n">tilt_range</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+                <span class="s2">&quot;`tilt_range` is deprecated. Use `tilt` for more precise setting &quot;</span>
+                <span class="s2">&quot;of the tilt series model.&quot;</span><span class="p">,</span>
+                <span class="ne">DeprecationWarning</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">tilt_model</span> <span class="o">=</span> <span class="n">single_axis</span><span class="p">(</span><span class="n">tilt_range</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">tilt</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">tilt_model</span> <span class="o">=</span> <span class="n">no_wedge</span><span class="p">()</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">tilt</span><span class="p">,</span> <span class="n">TiltSeriesModel</span><span class="p">):</span>
+            <span class="n">tilt_model</span> <span class="o">=</span> <span class="n">tilt</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">tilt_model</span> <span class="o">=</span> <span class="n">single_axis</span><span class="p">(</span><span class="n">tilt</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_tilt_model</span><span class="p">:</span> <span class="n">TiltSeriesModel</span> <span class="o">=</span> <span class="n">tilt_model</span>
         <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">template</span><span class="p">,</span> <span class="n">mask</span><span class="p">,</span> <span class="n">rotations</span><span class="p">)</span>
 
 <div class="viewcode-block" id="TomographyInput.with_params"><a class="viewcode-back" href="../../../apidoc/acryo.alignment.html#acryo.alignment.TomographyInput.with_params">[docs]</a>    <span class="nd">@classmethod</span>
     <span class="k">def</span> <span class="nf">with_params</span><span class="p">(</span>
         <span class="bp">cls</span><span class="p">,</span>
         <span class="o">*</span><span class="p">,</span>
-        <span class="n">rotations</span><span class="p">:</span> <span class="n">Ranges</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">rotations</span><span class="p">:</span> <span class="n">RotationType</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">cutoff</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">tilt</span><span class="p">:</span> <span class="n">TiltSeriesModel</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">tilt_range</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">degree</span><span class="p">,</span> <span class="n">degree</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ParametrizedModel</span><span class="p">[</span><span class="n">Self</span><span class="p">]:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Create an alignment model instance with parameters.&quot;&quot;&quot;</span>
@@ -895,6 +919,7 @@
             <span class="bp">cls</span><span class="p">,</span>
             <span class="n">rotations</span><span class="o">=</span><span class="n">rotations</span><span class="p">,</span>
             <span class="n">cutoff</span><span class="o">=</span><span class="n">cutoff</span><span class="p">,</span>
+            <span class="n">tilt</span><span class="o">=</span><span class="n">tilt</span><span class="p">,</span>
             <span class="n">tilt_range</span><span class="o">=</span><span class="n">tilt_range</span><span class="p">,</span>
         <span class="p">)</span></div>
 
@@ -974,13 +999,11 @@
         <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AnyArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span> <span class="o">|</span> <span class="nb">int</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Create a mask that covers tomographical missing wedge.&quot;&quot;&quot;</span>
-        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tilt_range</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-            <span class="k">return</span> <span class="mi">1</span>
-        <span class="k">return</span> <span class="n">backend</span><span class="o">.</span><span class="n">missing_wedge_mask</span><span class="p">(</span>
-            <span class="n">rotator</span><span class="o">=</span><span class="n">Rotation</span><span class="o">.</span><span class="n">from_quat</span><span class="p">(</span><span class="n">quat</span><span class="p">),</span>
-            <span class="n">tilt_range</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_tilt_range</span><span class="p">,</span>
-            <span class="n">shape</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">input_shape</span><span class="p">,</span>
-        <span class="p">)</span></div>
+        <span class="n">mask</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tilt_model</span><span class="o">.</span><span class="n">create_mask</span><span class="p">(</span>
+            <span class="n">Rotation</span><span class="o">.</span><span class="n">from_quat</span><span class="p">(</span><span class="n">quat</span><span class="p">),</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">input_shape</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">backend</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">mask</span><span class="p">)</span></div>
 
 
 <span class="k">def</span> <span class="nf">_normalize_cval</span><span class="p">(</span>

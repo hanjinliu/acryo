@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo.molecules._rotation &mdash; acryo 0.3.0 documentation</title>
+  <title>acryo.molecules._rotation &mdash; acryo 0.4.4 documentation</title>
       <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -11,9 +11,8 @@
   <![endif]-->
 
         <script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
-        <script src="../../../_static/jquery.js"></script>
-        <script src="../../../_static/underscore.js"></script>
         <script src="../../../_static/doctools.js"></script>
+        <script src="../../../_static/sphinx_highlight.js"></script>
         <script src="https://unpkg.com/mermaid@9.4.0/dist/mermaid.min.js"></script>
         <script>mermaid.initialize({startOnLoad:true});</script>
     <script src="../../../_static/js/theme.js"></script>
@@ -33,7 +32,7 @@
             acryo
           </a>
               <div class="version">
-                0.3.0
+                0.4.4
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
@@ -86,37 +85,31 @@
 <span class="n">_T</span> <span class="o">=</span> <span class="n">TypeVar</span><span class="p">(</span><span class="s2">&quot;_T&quot;</span><span class="p">,</span> <span class="n">bound</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">number</span><span class="p">)</span>
 
 
-<div class="viewcode-block" id="axes_to_rotator"><a class="viewcode-back" href="../../../apidoc/acryo.molecules.html#acryo.molecules.axes_to_rotator">[docs]</a><span class="k">def</span> <span class="nf">axes_to_rotator</span><span class="p">(</span><span class="n">z</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Rotation</span><span class="p">:</span>
-    <span class="n">ref</span> <span class="o">=</span> <span class="n">_normalize</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">atleast_2d</span><span class="p">(</span><span class="n">y</span><span class="p">))</span>
-
-    <span class="n">n</span> <span class="o">=</span> <span class="n">ref</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
-    <span class="n">yx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arctan2</span><span class="p">(</span><span class="n">ref</span><span class="p">[:,</span> <span class="mi">2</span><span class="p">],</span> <span class="n">ref</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">])</span>
-    <span class="n">zy</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arctan</span><span class="p">(</span><span class="o">-</span><span class="n">ref</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">ref</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]))</span>
-
-    <span class="n">rot_vec_yx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">n</span><span class="p">,</span> <span class="mi">3</span><span class="p">))</span>
-    <span class="n">rot_vec_yx</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">yx</span>
-    <span class="n">rot_yx</span> <span class="o">=</span> <span class="n">Rotation</span><span class="o">.</span><span class="n">from_rotvec</span><span class="p">(</span><span class="n">rot_vec_yx</span><span class="p">)</span>
-
-    <span class="n">rot_vec_zy</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">n</span><span class="p">,</span> <span class="mi">3</span><span class="p">))</span>
-    <span class="n">rot_vec_zy</span><span class="p">[:,</span> <span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">zy</span>
-    <span class="n">rot_zy</span> <span class="o">=</span> <span class="n">Rotation</span><span class="o">.</span><span class="n">from_rotvec</span><span class="p">(</span><span class="n">rot_vec_zy</span><span class="p">)</span>
-
-    <span class="n">rot1</span> <span class="o">=</span> <span class="n">rot_yx</span> <span class="o">*</span> <span class="n">rot_zy</span>
-
+<div class="viewcode-block" id="axes_to_rotator"><a class="viewcode-back" href="../../../apidoc/acryo.molecules.html#acryo.molecules.axes_to_rotator">[docs]</a><span class="k">def</span> <span class="nf">axes_to_rotator</span><span class="p">(</span><span class="n">z</span><span class="p">:</span> <span class="n">ArrayLike</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">y</span><span class="p">:</span> <span class="n">ArrayLike</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Rotation</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Determine the Rotation object that rotates the z-axis to z and the y-axis to y.&quot;&quot;&quot;</span>
+    <span class="n">y0</span> <span class="o">=</span> <span class="n">_normalize</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">atleast_2d</span><span class="p">(</span><span class="n">y</span><span class="p">))</span>
+    <span class="n">rot_y</span> <span class="o">=</span> <span class="n">_get_align_rotator</span><span class="p">([[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">]],</span> <span class="n">y0</span><span class="p">)</span>
     <span class="k">if</span> <span class="n">z</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="k">return</span> <span class="n">rot1</span>
+        <span class="n">z0</span> <span class="o">=</span> <span class="n">_extract_orthogonal</span><span class="p">(</span><span class="n">y0</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]]))</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">z0</span> <span class="o">=</span> <span class="n">_extract_orthogonal</span><span class="p">(</span><span class="n">y0</span><span class="p">,</span> <span class="n">_normalize</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">atleast_2d</span><span class="p">(</span><span class="n">z</span><span class="p">)))</span>
+    <span class="n">z0_trans</span> <span class="o">=</span> <span class="n">rot_y</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="n">z0</span><span class="p">,</span> <span class="n">inverse</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">rot_z</span> <span class="o">=</span> <span class="n">_get_align_rotator</span><span class="p">([[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]],</span> <span class="n">z0_trans</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">rot_y</span> <span class="o">*</span> <span class="n">rot_z</span></div>
 
-    <span class="n">vec</span> <span class="o">=</span> <span class="n">_normalize</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">atleast_2d</span><span class="p">(</span><span class="n">_extract_orthogonal</span><span class="p">(</span><span class="n">ref</span><span class="p">,</span> <span class="n">z</span><span class="p">)))</span>
 
-    <span class="n">vec_trans</span> <span class="o">=</span> <span class="n">rot1</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="n">vec</span><span class="p">,</span> <span class="n">inverse</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>  <span class="c1"># in zx-plane</span>
+<span class="k">def</span> <span class="nf">_get_align_rotator</span><span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="n">dst</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Rotation</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;R.apply(src) == dst. Both length must be 1.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">src</span> <span class="o">+</span> <span class="n">dst</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mf">1e-6</span><span class="p">):</span>
+        <span class="c1"># cross product cannot be used for antiparallel vectors</span>
+        <span class="k">return</span> <span class="n">Rotation</span><span class="o">.</span><span class="n">from_matrix</span><span class="p">(</span><span class="o">-</span><span class="n">np</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="mi">3</span><span class="p">))</span>
+    <span class="n">cross</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">cross</span><span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="n">dst</span><span class="p">)</span>
+    <span class="n">sin</span> <span class="o">=</span> <span class="n">norm</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">cross</span><span class="o">**</span><span class="mi">2</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdims</span><span class="o">=</span><span class="kc">True</span><span class="p">))</span>
+    <span class="n">cos</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">src</span> <span class="o">*</span> <span class="n">dst</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdims</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">theta</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arctan2</span><span class="p">(</span><span class="n">sin</span><span class="p">,</span> <span class="n">cos</span><span class="p">)</span>
 
-    <span class="n">thetas</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arctan2</span><span class="p">(</span><span class="n">vec_trans</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">vec_trans</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="mi">2</span><span class="p">])</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mi">2</span>
-
-    <span class="n">rot_vec_zx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">n</span><span class="p">,</span> <span class="mi">3</span><span class="p">))</span>
-    <span class="n">rot_vec_zx</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">thetas</span>
-    <span class="n">rot2</span> <span class="o">=</span> <span class="n">Rotation</span><span class="o">.</span><span class="n">from_rotvec</span><span class="p">(</span><span class="n">rot_vec_zx</span><span class="p">)</span>
-
-    <span class="k">return</span> <span class="n">rot1</span> <span class="o">*</span> <span class="n">rot2</span></div>
+    <span class="n">norm</span><span class="p">[</span><span class="n">norm</span> <span class="o">==</span> <span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">inf</span>
+    <span class="k">return</span> <span class="n">Rotation</span><span class="o">.</span><span class="n">from_rotvec</span><span class="p">(</span><span class="n">cross</span> <span class="o">/</span> <span class="n">norm</span> <span class="o">*</span> <span class="n">theta</span><span class="p">)</span>
 
 
 <div class="viewcode-block" id="from_euler_xyz_coords"><a class="viewcode-back" href="../../../apidoc/acryo.molecules.html#acryo.molecules.from_euler_xyz_coords">[docs]</a><span class="k">def</span> <span class="nf">from_euler_xyz_coords</span><span class="p">(</span>

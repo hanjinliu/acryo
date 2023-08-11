@@ -15,6 +15,7 @@ Subpackages
    acryo.pick
    acryo.pipe
    acryo.testing
+   acryo.tilt
 
 Submodules
 ----------

@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html class="writer-html5" lang="en" >
 <head>
-  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.18.1: http://docutils.sourceforge.net/" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Subtomogram Loader &mdash; acryo 0.4.0 documentation</title>
+  <title>Subtomogram Loader &mdash; acryo 0.4.4 documentation</title>
       <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -12,9 +12,8 @@
   <![endif]-->
 
         <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
-        <script src="../_static/jquery.js"></script>
-        <script src="../_static/underscore.js"></script>
         <script src="../_static/doctools.js"></script>
+        <script src="../_static/sphinx_highlight.js"></script>
         <script src="https://unpkg.com/mermaid@9.4.0/dist/mermaid.min.js"></script>
         <script>mermaid.initialize({startOnLoad:true});</script>
     <script src="../_static/js/theme.js"></script>
@@ -36,7 +35,7 @@
             acryo
           </a>
               <div class="version">
-                0.4.0
+                0.4.4
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
@@ -94,7 +93,7 @@
            <div itemprop="articleBody">
 
   <section id="subtomogram-loader">
-<h1>Subtomogram Loader<a class="headerlink" href="#subtomogram-loader" title="Permalink to this headline"></a></h1>
+<h1>Subtomogram Loader<a class="headerlink" href="#subtomogram-loader" title="Permalink to this heading"></a></h1>
 <p>The main classes that actually perform subtomogram analysis are called “subtomogram loaders”.
 A subtomogram loader is a pair of image(s) and a <code class="xref py py-class docutils literal notranslate"><span class="pre">Molecules</span></code> object, with
 efficient mothods for loading, averaging or aligning subtomograms.</p>
@@ -116,7 +115,7 @@ a <code class="xref py py-class docutils literal notranslate"><span class="pre">
 </ol>
 <p>These loaders have the same API. Here, I start with the <code class="xref py py-class docutils literal notranslate"><span class="pre">SubtomogramLoader</span></code> class to
 show the basic usage of subtomogram loaders.</p>
-<div class="contents local topic" id="contents">
+<nav class="contents local" id="contents">
 <p class="topic-title">Contents</p>
 <ul class="simple">
 <li><p><a class="reference internal" href="#creating-a-subtomogramloader" id="id1">Creating a <code class="xref py py-class docutils literal notranslate"><span class="pre">SubtomogramLoader</span></code></a></p></li>
@@ -127,9 +126,9 @@ show the basic usage of subtomogram loaders.</p>
 <li><p><a class="reference internal" href="#loading-from-collection-of-tomograms" id="id6">Loading from Collection of Tomograms</a></p></li>
 <li><p><a class="reference internal" href="#mock-loader-for-testing" id="id7">Mock Loader for Testing</a></p></li>
 </ul>
-</div>
+</nav>
 <section id="creating-a-subtomogramloader">
-<h2><a class="toc-backref" href="#id1">Creating a <code class="xref py py-class docutils literal notranslate"><span class="pre">SubtomogramLoader</span></code></a><a class="headerlink" href="#creating-a-subtomogramloader" title="Permalink to this headline"></a></h2>
+<h2><a class="toc-backref" href="#id1" role="doc-backlink">Creating a <code class="xref py py-class docutils literal notranslate"><span class="pre">SubtomogramLoader</span></code></a><a class="headerlink" href="#creating-a-subtomogramloader" title="Permalink to this heading"></a></h2>
 <p><a class="reference internal" href="../_images/subtomogram_loader.png"><img alt="pic1" src="../_images/subtomogram_loader.png" style="width: 40%;" /></a></p>
 <p>A <code class="xref py py-class docutils literal notranslate"><span class="pre">SubtomogramLoader</span></code> is a pair of a 3D tomogram image and a
 <code class="xref py py-class docutils literal notranslate"><span class="pre">Molecules</span></code> object, with some additional parameters.</p>
@@ -157,7 +156,7 @@ or the public <code class="xref py py-func docutils literal notranslate"><span c
 </div>
 </section>
 <section id="subtomogram-averaging">
-<h2><a class="toc-backref" href="#id2">Subtomogram Averaging</a><a class="headerlink" href="#subtomogram-averaging" title="Permalink to this headline"></a></h2>
+<h2><a class="toc-backref" href="#id2" role="doc-backlink">Subtomogram Averaging</a><a class="headerlink" href="#subtomogram-averaging" title="Permalink to this heading"></a></h2>
 <p><code class="xref py py-meth docutils literal notranslate"><span class="pre">average()</span></code> crops all the subtomograms around the molecules and
 average them. This method always returns a 3D <code class="xref py py-class docutils literal notranslate"><span class="pre">numpy.ndarray</span></code> object.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">dask</span> <span class="kn">import</span> <span class="n">array</span> <span class="k">as</span> <span class="n">da</span>
@@ -177,9 +176,9 @@ average them. This method always returns a 3D <code class="xref py py-class docu
 </div>
 </section>
 <section id="subtomogram-alignment">
-<h2><a class="toc-backref" href="#id3">Subtomogram Alignment</a><a class="headerlink" href="#subtomogram-alignment" title="Permalink to this headline"></a></h2>
+<h2><a class="toc-backref" href="#id3" role="doc-backlink">Subtomogram Alignment</a><a class="headerlink" href="#subtomogram-alignment" title="Permalink to this heading"></a></h2>
 <section id="templated-alignment">
-<h3>Templated alignment<a class="headerlink" href="#templated-alignment" title="Permalink to this headline"></a></h3>
+<h3>Templated alignment<a class="headerlink" href="#templated-alignment" title="Permalink to this heading"></a></h3>
 <p><code class="xref py py-meth docutils literal notranslate"><span class="pre">align()</span></code> crops all the subtomograms around the molecules and
 align them to the given template image (reference image). This method will return
 a new <code class="xref py py-class docutils literal notranslate"><span class="pre">SubtomogramLoader</span></code> object with the updated <code class="xref py py-class docutils literal notranslate"><span class="pre">Molecules</span></code> object.</p>
@@ -210,7 +209,7 @@ method of alignment model classes, or directly pass them to the <code class="doc
     <span class="n">alignment_model</span><span class="o">=</span><span class="n">ZNCCAlignment</span><span class="o">.</span><span class="n">with_params</span><span class="p">(</span>
         <span class="n">rotations</span><span class="o">=</span><span class="p">[(</span><span class="mi">6</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="p">(</span><span class="mi">6</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="p">(</span><span class="mi">6</span><span class="p">,</span> <span class="mi">2</span><span class="p">)],</span>
         <span class="n">cutoff</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span>
-        <span class="n">tilt_range</span><span class="o">=</span><span class="p">(</span><span class="o">-</span><span class="mi">50</span><span class="p">,</span> <span class="mi">50</span><span class="p">)</span>
+        <span class="n">tilt</span><span class="o">=</span><span class="p">(</span><span class="o">-</span><span class="mi">50</span><span class="p">,</span> <span class="mi">50</span><span class="p">)</span>
     <span class="p">),</span>
 <span class="p">)</span>
 
@@ -221,13 +220,13 @@ method of alignment model classes, or directly pass them to the <code class="doc
     <span class="n">alignment_model</span><span class="o">=</span><span class="n">ZNCCAlignment</span><span class="p">,</span>
     <span class="n">rotations</span><span class="o">=</span><span class="p">[(</span><span class="mi">6</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="p">(</span><span class="mi">6</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="p">(</span><span class="mi">6</span><span class="p">,</span> <span class="mi">2</span><span class="p">)],</span>
     <span class="n">cutoff</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span>
-    <span class="n">tilt_range</span><span class="o">=</span><span class="p">(</span><span class="o">-</span><span class="mi">50</span><span class="p">,</span> <span class="mi">50</span><span class="p">),</span>
+    <span class="n">tilt</span><span class="o">=</span><span class="p">(</span><span class="o">-</span><span class="mi">50</span><span class="p">,</span> <span class="mi">50</span><span class="p">),</span>
 <span class="p">)</span>
 </pre></div>
 </div>
 </section>
 <section id="template-free-alignment">
-<h3>Template-free alignment<a class="headerlink" href="#template-free-alignment" title="Permalink to this headline"></a></h3>
+<h3>Template-free alignment<a class="headerlink" href="#template-free-alignment" title="Permalink to this heading"></a></h3>
 <p>If no a priori information is available for the template image, you’ll use the subtomogram
 averaging result as the template image. During this task, each subtomogram will be loaded
 twice so it is not efficient to call <code class="xref py py-meth docutils literal notranslate"><span class="pre">average()</span></code> and <code class="xref py py-meth docutils literal notranslate"><span class="pre">align()</span></code> separately.</p>
@@ -239,7 +238,7 @@ faster.</p>
 </div>
 </section>
 <section id="multi-template-alignment">
-<h3>Multi-template alignment<a class="headerlink" href="#multi-template-alignment" title="Permalink to this headline"></a></h3>
+<h3>Multi-template alignment<a class="headerlink" href="#multi-template-alignment" title="Permalink to this heading"></a></h3>
 <p>If a tomogram is composed of heterogeneous molecules, you can use multiple templates to
 align the molecules and determine the best template for each molecule.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">loader</span> <span class="o">=</span> <span class="n">SubtomogramLoader</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">molecules</span><span class="p">)</span>
@@ -255,14 +254,14 @@ align the molecules and determine the best template for each molecule.</p>
 same shape. <code class="docutils literal notranslate"><span class="pre">label_name</span></code> is the name used for the feature colummn of the best template.</p>
 </section>
 <section id="image-preprocessing-workflow">
-<h3>Image preprocessing workflow<a class="headerlink" href="#image-preprocessing-workflow" title="Permalink to this headline"></a></h3>
+<h3>Image preprocessing workflow<a class="headerlink" href="#image-preprocessing-workflow" title="Permalink to this heading"></a></h3>
 <p>During subtomogram alignment, template images and mask images are usually provided from
 image files. They also need preprocessing such as rescaling and smoothing.</p>
 <p>See <a class="reference internal" href="pipe.html"><span class="doc">Piping Images to the Loader</span></a> for the details.</p>
 </section>
 </section>
 <section id="filtering-loader">
-<h2><a class="toc-backref" href="#id4">Filtering Loader</a><a class="headerlink" href="#filtering-loader" title="Permalink to this headline"></a></h2>
+<h2><a class="toc-backref" href="#id4" role="doc-backlink">Filtering Loader</a><a class="headerlink" href="#filtering-loader" title="Permalink to this heading"></a></h2>
 <p><code class="xref py py-meth docutils literal notranslate"><span class="pre">filter()</span></code> is the method quite similar to that in <code class="xref py py-class docutils literal notranslate"><span class="pre">Molecules</span></code> or <code class="xref py py-class docutils literal notranslate"><span class="pre">DataFrame</span></code>.
 It returns a new <code class="xref py py-class docutils literal notranslate"><span class="pre">SubtomogramLoader</span></code> object with the filtered molecules.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">loader</span> <span class="o">=</span> <span class="n">SubtomogramLoader</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">molecules</span><span class="p">)</span>
@@ -287,14 +286,14 @@ It returns a new <code class="xref py py-class docutils literal notranslate"><sp
 <p>and so on.</p>
 </section>
 <section id="grouping-loader">
-<h2><a class="toc-backref" href="#id5">Grouping Loader</a><a class="headerlink" href="#grouping-loader" title="Permalink to this headline"></a></h2>
+<h2><a class="toc-backref" href="#id5" role="doc-backlink">Grouping Loader</a><a class="headerlink" href="#grouping-loader" title="Permalink to this heading"></a></h2>
 <p>Subtomogram loaders have a <code class="xref py py-meth docutils literal notranslate"><span class="pre">groupby()</span></code> method. You can group molecules by a feature, create
 corresponding subtomogram loaders and perform the same subtomogram analysis workflow efficiently.</p>
 <a class="reference internal image-reference" href="../_images/loader_group.png"><img alt="../_images/loader_group.png" src="../_images/loader_group.png" style="width: 50%;" /></a>
 <p>See <a class="reference internal" href="group.html"><span class="doc">Loader Group</span></a> for the details.</p>
 </section>
 <section id="loading-from-collection-of-tomograms">
-<h2><a class="toc-backref" href="#id6">Loading from Collection of Tomograms</a><a class="headerlink" href="#loading-from-collection-of-tomograms" title="Permalink to this headline"></a></h2>
+<h2><a class="toc-backref" href="#id6" role="doc-backlink">Loading from Collection of Tomograms</a><a class="headerlink" href="#loading-from-collection-of-tomograms" title="Permalink to this heading"></a></h2>
 <p><a class="reference internal" href="../_images/batch_loader.png"><img alt="pic2" src="../_images/batch_loader.png" style="width: 40%;" /></a></p>
 <p>Cryo-ET image analysis is usually performed on a collection of tomograms. Data management
 becomes very complicated in this case.</p>
@@ -322,7 +321,7 @@ shares the same interface with <code class="xref py py-class docutils literal no
 </div>
 </section>
 <section id="mock-loader-for-testing">
-<h2><a class="toc-backref" href="#id7">Mock Loader for Testing</a><a class="headerlink" href="#mock-loader-for-testing" title="Permalink to this headline"></a></h2>
+<h2><a class="toc-backref" href="#id7" role="doc-backlink">Mock Loader for Testing</a><a class="headerlink" href="#mock-loader-for-testing" title="Permalink to this heading"></a></h2>
 <p><a class="reference internal" href="../_images/mock_loader.png"><img alt="pic3" src="../_images/mock_loader.png" style="width: 40%;" /></a></p>
 <p><code class="xref py py-class docutils literal notranslate"><span class="pre">MockLoader</span></code> is for testing purpose only. The tomogram does not actually exist
 but subtomograms are generated on the fly based on the template image. Subtomograms

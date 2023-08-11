@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo.loader._loader &mdash; acryo 0.4.0 documentation</title>
+  <title>acryo.loader._loader &mdash; acryo 0.4.4 documentation</title>
       <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -11,9 +11,8 @@
   <![endif]-->
 
         <script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
-        <script src="../../../_static/jquery.js"></script>
-        <script src="../../../_static/underscore.js"></script>
         <script src="../../../_static/doctools.js"></script>
+        <script src="../../../_static/sphinx_highlight.js"></script>
         <script src="https://unpkg.com/mermaid@9.4.0/dist/mermaid.min.js"></script>
         <script>mermaid.initialize({startOnLoad:true});</script>
     <script src="../../../_static/js/theme.js"></script>
@@ -33,7 +32,7 @@
             acryo
           </a>
               <div class="version">
-                0.4.0
+                0.4.4
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
@@ -291,7 +290,7 @@
         <span class="n">output_shape</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_output_shape</span><span class="p">(</span><span class="n">output_shape</span><span class="p">)</span>
         <span class="n">xp</span> <span class="o">=</span> <span class="n">backend</span> <span class="ow">or</span> <span class="n">Backend</span><span class="p">()</span>
         <span class="k">if</span> <span class="p">(</span><span class="n">cached</span> <span class="o">:=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_cached_array</span><span class="p">(</span><span class="n">output_shape</span><span class="p">,</span> <span class="n">xp</span><span class="p">))</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-            <span class="k">return</span> <span class="n">DaskArrayList</span><span class="p">(</span><span class="n">cached</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">)))</span>
+            <span class="k">return</span> <span class="n">DaskArrayList</span><span class="p">(</span><span class="n">cached</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">molecules</span><span class="o">.</span><span class="n">count</span><span class="p">()))</span>
 
         <span class="n">image</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">image</span>
         <span class="n">scale</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">scale</span>
@@ -303,13 +302,19 @@
         <span class="k">else</span><span class="p">:</span>
             <span class="n">_prep</span> <span class="o">=</span> <span class="n">_utils</span><span class="o">.</span><span class="n">prepare_affine</span>
         <span class="n">pool</span> <span class="o">=</span> <span class="n">DaskTaskPool</span><span class="o">.</span><span class="n">from_func</span><span class="p">(</span><span class="n">xp</span><span class="o">.</span><span class="n">rotated_crop</span><span class="p">)</span>
-        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">)):</span>
-            <span class="n">subvol</span><span class="p">,</span> <span class="n">mtx</span> <span class="o">=</span> <span class="n">_prep</span><span class="p">(</span>
-                <span class="n">image</span><span class="p">,</span>
-                <span class="n">center</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">molecules</span><span class="o">.</span><span class="n">pos</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">/</span> <span class="n">scale</span><span class="p">,</span>
-                <span class="n">output_shape</span><span class="o">=</span><span class="n">output_shape</span><span class="p">,</span>
-                <span class="n">rot</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">molecules</span><span class="o">.</span><span class="n">rotator</span><span class="p">[</span><span class="n">i</span><span class="p">],</span>
-            <span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">molecules</span><span class="o">.</span><span class="n">count</span><span class="p">()):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">subvol</span><span class="p">,</span> <span class="n">mtx</span> <span class="o">=</span> <span class="n">_prep</span><span class="p">(</span>
+                    <span class="n">image</span><span class="p">,</span>
+                    <span class="n">center</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">molecules</span><span class="o">.</span><span class="n">pos</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">/</span> <span class="n">scale</span><span class="p">,</span>
+                    <span class="n">output_shape</span><span class="o">=</span><span class="n">output_shape</span><span class="p">,</span>
+                    <span class="n">rot</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">molecules</span><span class="o">.</span><span class="n">rotator</span><span class="p">[</span><span class="n">i</span><span class="p">],</span>
+                <span class="p">)</span>
+            <span class="k">except</span> <span class="n">_utils</span><span class="o">.</span><span class="n">SubvolumeOutOfBoundError</span> <span class="k">as</span> <span class="n">err</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">err</span><span class="o">.</span><span class="n">with_msg</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;The </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">-th molecule at </span><span class="si">{</span><span class="nb">tuple</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">molecules</span><span class="o">.</span><span class="n">pos</span><span class="p">[</span><span class="n">i</span><span class="p">])</span><span class="si">}</span><span class="s2"> is &quot;</span>
+                    <span class="sa">f</span><span class="s2">&quot;out of bound. </span><span class="si">{</span><span class="n">err</span><span class="o">.</span><span class="n">msg</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="p">)</span>
             <span class="n">pool</span><span class="o">.</span><span class="n">add_task</span><span class="p">(</span>
                 <span class="n">subvol</span><span class="p">,</span>
                 <span class="n">mtx</span><span class="p">,</span>

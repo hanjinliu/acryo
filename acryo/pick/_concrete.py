@@ -9,7 +9,8 @@ from scipy import ndimage as ndi
 
 from acryo.pick._base import BasePickerModel, BaseTemplateMatcher
 from acryo.molecules import Molecules
-from acryo._correlation import ncc_landscape_no_pad
+from acryo.backend import NUMPY_BACKEND
+from acryo.backend._zncc import ncc_landscape_no_pad
 from acryo._types import nm
 
 
@@ -51,7 +52,9 @@ class ZNCCTemplateMatcher(BaseTemplateMatcher):
         all_landscapes = np.stack(
             [
                 ncc_landscape_no_pad(
-                    image - np.mean(image), template - np.mean(template)
+                    image - np.mean(image),
+                    template - np.mean(template),
+                    NUMPY_BACKEND,
                 )
                 for template in templates
             ],

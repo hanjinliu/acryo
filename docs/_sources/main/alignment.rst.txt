@@ -178,6 +178,13 @@ Model construction
 
 - ``tilt`` is the tilt series model.
 
+  - If a (float, float) tuple is given, it will be interpreted as the minimum and maximum tilt
+    angle in degree. The rotation axis is assumed to be the y axis.
+
+  - You can use classes provided in :mod:`acryo.tilt` to define more complex tilt series
+    models. For instance, :meth:`single_axis` for single-axis tilt series and
+    :meth:`dual_axis` for dual-axis tilt series.
+
 Align images
 ------------
 

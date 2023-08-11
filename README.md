@@ -39,7 +39,7 @@ pip install -e .
 ```Python
 import polars as pl
 from acryo import SubtomogramLoader, Molecules  # acryo objects
-from acryo.tilt import single_axis
+from acryo.tilt import single_axis  # missing wedge model
 from acryo.pipe import soft_otsu  # data input pipelines
 
 # construct a loader

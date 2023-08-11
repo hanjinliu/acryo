@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html class="writer-html5" lang="en" >
 <head>
-  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.18.1: http://docutils.sourceforge.net/" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo.pipe package &mdash; acryo 0.4.0 documentation</title>
+  <title>acryo.pipe package &mdash; acryo 0.4.4 documentation</title>
       <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -12,9 +12,8 @@
   <![endif]-->
 
         <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
-        <script src="../_static/jquery.js"></script>
-        <script src="../_static/underscore.js"></script>
         <script src="../_static/doctools.js"></script>
+        <script src="../_static/sphinx_highlight.js"></script>
         <script src="https://unpkg.com/mermaid@9.4.0/dist/mermaid.min.js"></script>
         <script>mermaid.initialize({startOnLoad:true});</script>
     <script src="../_static/js/theme.js"></script>
@@ -34,7 +33,7 @@
             acryo
           </a>
               <div class="version">
-                0.4.0
+                0.4.4
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
@@ -77,18 +76,18 @@
            <div itemprop="articleBody">
 
   <section id="acryo-pipe-package">
-<h1>acryo.pipe package<a class="headerlink" href="#acryo-pipe-package" title="Permalink to this headline"></a></h1>
+<h1>acryo.pipe package<a class="headerlink" href="#acryo-pipe-package" title="Permalink to this heading"></a></h1>
 <section id="module-acryo.pipe">
-<span id="module-contents"></span><h2>Module contents<a class="headerlink" href="#module-acryo.pipe" title="Permalink to this headline"></a></h2>
+<span id="module-contents"></span><h2>Module contents<a class="headerlink" href="#module-acryo.pipe" title="Permalink to this heading"></a></h2>
 <dl class="py function">
 <dt class="sig sig-object py" id="acryo.pipe.center_by_mass">
-<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">center_by_mass</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">*args:</span> <span class="pre">typing.~_P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">**kwargs:</span> <span class="pre">typing.~_P</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/pipe/_transform.html#center_by_mass"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.center_by_mass" title="Permalink to this definition"></a></dt>
+<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">center_by_mass</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">*args:</span> <span class="pre">~typing.~_P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">**kwargs:</span> <span class="pre">~typing.~_P</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/pipe/_transform.html#center_by_mass"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.center_by_mass" title="Permalink to this definition"></a></dt>
 <dd><p>Centering an image by its center of mass.</p>
 </dd></dl>
 
 <dl class="py function">
 <dt class="sig sig-object py" id="acryo.pipe.converter_function">
-<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">converter_function</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">fn</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Callable</span><span class="p"><span class="pre">[</span></span><span class="p"><span class="pre">[</span></span><span class="pre">Concatenate</span><span class="p"><span class="pre">[</span></span><span class="pre">numpy.ndarray</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">_P</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">numpy.ndarray</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Callable</span><span class="p"><span class="pre">[</span></span><span class="p"><span class="pre">[</span></span><span class="pre">_P</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">acryo.pipe._classes.ImageConverter</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/acryo/pipe/_curry.html#converter_function"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.converter_function" title="Permalink to this definition"></a></dt>
+<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">converter_function</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">fn</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Callable</span><span class="p"><span class="pre">[</span></span><span class="p"><span class="pre">[</span></span><span class="pre">Concatenate</span><span class="p"><span class="pre">[</span></span><span class="pre">ndarray</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">_P</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">ndarray</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Callable</span><span class="p"><span class="pre">[</span></span><span class="p"><span class="pre">[</span></span><span class="pre">_P</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">ImageConverter</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/acryo/pipe/_curry.html#converter_function"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.converter_function" title="Permalink to this definition"></a></dt>
 <dd><p>Convert a function into a curried function that returns a image converter.</p>
 <p>Input function must accept <cite>fn(img, scale)</cite>.</p>
 <p class="rubric">Examples</p>
@@ -104,10 +103,10 @@
 
 <dl class="py function">
 <dt class="sig sig-object py" id="acryo.pipe.dilation">
-<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">dilation</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">*args:</span> <span class="pre">typing.~_P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">**kwargs:</span> <span class="pre">typing.~_P</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/pipe/_masking.html#dilation"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.dilation" title="Permalink to this definition"></a></dt>
+<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">dilation</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">*args:</span> <span class="pre">~typing.~_P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">**kwargs:</span> <span class="pre">~typing.~_P</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/pipe/_masking.html#dilation"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.dilation" title="Permalink to this definition"></a></dt>
 <dd><p>Pipe operation that dilate (or erode) a binary image using a circular structure.</p>
 <dl class="field-list simple">
-<dt class="field-odd">Parameters</dt>
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><p><strong>radius</strong> (<em>float</em>) – Radius of the structure element in nanometer. If negative, erosion is applied.</p>
 </dd>
 </dl>
@@ -115,7 +114,7 @@
 
 <dl class="py function">
 <dt class="sig sig-object py" id="acryo.pipe.from_array">
-<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">from_array</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">*args:</span> <span class="pre">typing.~_P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">**kwargs:</span> <span class="pre">typing.~_P</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/pipe/_imread.html#from_array"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.from_array" title="Permalink to this definition"></a></dt>
+<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">from_array</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">*args:</span> <span class="pre">~typing.~_P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">**kwargs:</span> <span class="pre">~typing.~_P</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/pipe/_imread.html#from_array"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.from_array" title="Permalink to this definition"></a></dt>
 <dd><p>An image provider function using existing image array.</p>
 <p>This function will provide a subtomogram loader with a resized image from an array.
 Will be used for the template images or the mask images.</p>
@@ -126,7 +125,7 @@ Will be used for the template images or the mask images.</p>
 </pre></div>
 </div>
 <dl class="field-list simple">
-<dt class="field-odd">Parameters</dt>
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>img</strong> (<em>np.ndarray</em>) – Input image array. Must be 3D.</p></li>
 <li><p><strong>original_scale</strong> (<em>float</em><em>, </em><em>optional</em>) – If given, this value will be used as the image scale (nm/pixel) instead
@@ -139,17 +138,22 @@ this, the image will not be resized.</p></li>
 </dd></dl>
 
 <dl class="py function">
+<dt class="sig sig-object py" id="acryo.pipe.from_arrays">
+<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">from_arrays</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">*args:</span> <span class="pre">~typing.~_P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">**kwargs:</span> <span class="pre">~typing.~_P</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/pipe/_imread.html#from_arrays"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.from_arrays" title="Permalink to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
 <dt class="sig sig-object py" id="acryo.pipe.from_atoms">
-<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">from_atoms</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">*args:</span> <span class="pre">typing.~_P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">**kwargs:</span> <span class="pre">typing.~_P</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/pipe/_imread.html#from_atoms"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.from_atoms" title="Permalink to this definition"></a></dt>
+<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">from_atoms</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">*args:</span> <span class="pre">~typing.~_P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">**kwargs:</span> <span class="pre">~typing.~_P</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/pipe/_imread.html#from_atoms"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.from_atoms" title="Permalink to this definition"></a></dt>
 <dd><p>An image provider function using a point cloud.</p>
 <p>Given an array of atoms, such as data extracted from a PDB file, this function
 can generate a 3D image of the atoms by simply building a histogram.</p>
 <dl class="field-list simple">
-<dt class="field-odd">Parameters</dt>
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>atoms</strong> (<em>(</em><em>N</em><em>, </em><em>3</em><em>) </em><em>array</em>) – Atoms coordinates in nanometer.</p></li>
 <li><p><strong>weights</strong> (<em>np.ndarray</em><em>, </em><em>optional</em>) – weights of the atoms.</p></li>
-<li><p><strong>center</strong> (<em>tuple of float</em><em>, </em><em>optional</em>) – Coordinates of the image center. If not given, the geometric center of the atoms
+<li><p><strong>center</strong> (<em>tuple</em><em> of </em><em>float</em><em>, </em><em>optional</em>) – Coordinates of the image center. If not given, the geometric center of the atoms
 will be used.</p></li>
 </ul>
 </dd>
@@ -158,7 +162,7 @@ will be used.</p></li>
 
 <dl class="py function">
 <dt class="sig sig-object py" id="acryo.pipe.from_file">
-<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">from_file</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">*args:</span> <span class="pre">typing.~_P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">**kwargs:</span> <span class="pre">typing.~_P</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/pipe/_imread.html#from_file"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.from_file" title="Permalink to this definition"></a></dt>
+<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">from_file</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">*args:</span> <span class="pre">~typing.~_P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">**kwargs:</span> <span class="pre">~typing.~_P</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/pipe/_imread.html#from_file"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.from_file" title="Permalink to this definition"></a></dt>
 <dd><p>An image provider function with rescaling.</p>
 <p>This function will provide a subtomogram loader with a resized image from a file.
 Will be used for the template images or the mask images.</p>
@@ -169,9 +173,35 @@ Will be used for the template images or the mask images.</p>
 </pre></div>
 </div>
 <dl class="field-list simple">
-<dt class="field-odd">Parameters</dt>
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>path</strong> (<em>str</em>) – Path to the image.</p></li>
+<li><p><strong>path</strong> (<em>path-like</em>) – Path to the image.</p></li>
+<li><p><strong>original_scale</strong> (<em>float</em><em>, </em><em>optional</em>) – If given, this value will be used as the image scale (nm/pixel) instead
+of the scale extracted from the image metadata.</p></li>
+<li><p><strong>tol</strong> (<em>float</em>) – Tolerance of the scale difference. If the relative difference is smaller than
+this, the image will not be resized.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="acryo.pipe.from_files">
+<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">from_files</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">*args:</span> <span class="pre">~typing.~_P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">**kwargs:</span> <span class="pre">~typing.~_P</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/pipe/_imread.html#from_files"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.from_files" title="Permalink to this definition"></a></dt>
+<dd><p>Batch image provider function with rescaling.</p>
+<p>This function will provide a subtomogram loader with resized images from files.
+Will be used for the template images.</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span> <span class="nn">glob</span> <span class="kn">import</span> <span class="n">glob</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">loader</span><span class="o">.</span><span class="n">align</span><span class="p">(</span>
+<span class="gp">... </span>    <span class="n">template</span><span class="o">=</span><span class="n">from_files</span><span class="p">(</span><span class="n">glob</span><span class="p">(</span><span class="s2">&quot;path/to/template_*.mrc&quot;</span><span class="p">)),</span>
+<span class="gp">... </span>    <span class="n">mask</span><span class="o">=</span><span class="n">from_file</span><span class="p">(</span><span class="s2">&quot;path/to/mask.mrc&quot;</span><span class="p">),</span>
+<span class="gp">... </span><span class="p">)</span>
+</pre></div>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>paths</strong> (<em>iterable</em><em> of </em><em>path-like</em>) – Paths to the image.</p></li>
 <li><p><strong>original_scale</strong> (<em>float</em><em>, </em><em>optional</em>) – If given, this value will be used as the image scale (nm/pixel) instead
 of the scale extracted from the image metadata.</p></li>
 <li><p><strong>tol</strong> (<em>float</em>) – Tolerance of the scale difference. If the relative difference is smaller than
@@ -183,7 +213,7 @@ this, the image will not be resized.</p></li>
 
 <dl class="py function">
 <dt class="sig sig-object py" id="acryo.pipe.from_gaussian">
-<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">from_gaussian</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">*args:</span> <span class="pre">typing.~_P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">**kwargs:</span> <span class="pre">typing.~_P</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/pipe/_imread.html#from_gaussian"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.from_gaussian" title="Permalink to this definition"></a></dt>
+<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">from_gaussian</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">*args:</span> <span class="pre">~typing.~_P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">**kwargs:</span> <span class="pre">~typing.~_P</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/pipe/_imread.html#from_gaussian"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.from_gaussian" title="Permalink to this definition"></a></dt>
 <dd><p>An image provider function by a Gaussian function.</p>
 <p>This function will provide a Gaussian particle with given shape, sigma and shift from
 the center.</p>
@@ -194,11 +224,11 @@ the center.</p>
 </pre></div>
 </div>
 <dl class="field-list simple">
-<dt class="field-odd">Parameters</dt>
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>shape</strong> (<em>float</em><em> or </em><em>tuple of float</em>) – Shape of the output image in nm.</p></li>
-<li><p><strong>sigma</strong> (<em>float</em><em> or </em><em>tuple of float</em>) – Standard deviation of the Gaussian particle in nm.</p></li>
-<li><p><strong>shift</strong> (<em>tuple of float</em><em>, </em><em>optional</em>) – Shift of the Gaussian particle from the center in nm.</p></li>
+<li><p><strong>shape</strong> (<em>float</em><em> or </em><em>tuple</em><em> of </em><em>float</em>) – Shape of the output image in nm.</p></li>
+<li><p><strong>sigma</strong> (<em>float</em><em> or </em><em>tuple</em><em> of </em><em>float</em>) – Standard deviation of the Gaussian particle in nm.</p></li>
+<li><p><strong>shift</strong> (<em>tuple</em><em> of </em><em>float</em><em>, </em><em>optional</em>) – Shift of the Gaussian particle from the center in nm.</p></li>
 </ul>
 </dd>
 </dl>
@@ -206,16 +236,16 @@ the center.</p>
 
 <dl class="py function">
 <dt class="sig sig-object py" id="acryo.pipe.gaussian_filter">
-<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">gaussian_filter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">*args:</span> <span class="pre">typing.~_P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">**kwargs:</span> <span class="pre">typing.~_P</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/pipe/_transform.html#gaussian_filter"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.gaussian_filter" title="Permalink to this definition"></a></dt>
+<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">gaussian_filter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">*args:</span> <span class="pre">~typing.~_P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">**kwargs:</span> <span class="pre">~typing.~_P</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/pipe/_transform.html#gaussian_filter"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.gaussian_filter" title="Permalink to this definition"></a></dt>
 <dd><p>Gaussian filtering an image.</p>
 </dd></dl>
 
 <dl class="py function">
 <dt class="sig sig-object py" id="acryo.pipe.gaussian_smooth">
-<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">gaussian_smooth</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">*args:</span> <span class="pre">typing.~_P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">**kwargs:</span> <span class="pre">typing.~_P</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/pipe/_masking.html#gaussian_smooth"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.gaussian_smooth" title="Permalink to this definition"></a></dt>
+<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">gaussian_smooth</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">*args:</span> <span class="pre">~typing.~_P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">**kwargs:</span> <span class="pre">~typing.~_P</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/pipe/_masking.html#gaussian_smooth"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.gaussian_smooth" title="Permalink to this definition"></a></dt>
 <dd><p>Pipe operation that smooth a binary image using a Gaussian kernel.</p>
 <dl class="field-list simple">
-<dt class="field-odd">Parameters</dt>
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><p><strong>sigma</strong> (<em>float</em>) – Standard deviation of the Gaussian kernel.</p>
 </dd>
 </dl>
@@ -223,17 +253,17 @@ the center.</p>
 
 <dl class="py function">
 <dt class="sig sig-object py" id="acryo.pipe.highpass_filter">
-<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">highpass_filter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">*args:</span> <span class="pre">typing.~_P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">**kwargs:</span> <span class="pre">typing.~_P</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/pipe/_transform.html#highpass_filter"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.highpass_filter" title="Permalink to this definition"></a></dt>
+<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">highpass_filter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">*args:</span> <span class="pre">~typing.~_P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">**kwargs:</span> <span class="pre">~typing.~_P</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/pipe/_transform.html#highpass_filter"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.highpass_filter" title="Permalink to this definition"></a></dt>
 <dd></dd></dl>
 
 <dl class="py function">
 <dt class="sig sig-object py" id="acryo.pipe.lowpass_filter">
-<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">lowpass_filter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">*args:</span> <span class="pre">typing.~_P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">**kwargs:</span> <span class="pre">typing.~_P</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/pipe/_transform.html#lowpass_filter"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.lowpass_filter" title="Permalink to this definition"></a></dt>
+<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">lowpass_filter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">*args:</span> <span class="pre">~typing.~_P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">**kwargs:</span> <span class="pre">~typing.~_P</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/pipe/_transform.html#lowpass_filter"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.lowpass_filter" title="Permalink to this definition"></a></dt>
 <dd></dd></dl>
 
 <dl class="py function">
 <dt class="sig sig-object py" id="acryo.pipe.provider_function">
-<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">provider_function</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">fn</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Callable</span><span class="p"><span class="pre">[</span></span><span class="p"><span class="pre">[</span></span><span class="pre">Concatenate</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">_P</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">numpy.ndarray</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Callable</span><span class="p"><span class="pre">[</span></span><span class="p"><span class="pre">[</span></span><span class="pre">_P</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">acryo.pipe._classes.ImageProvider</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/acryo/pipe/_curry.html#provider_function"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.provider_function" title="Permalink to this definition"></a></dt>
+<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">provider_function</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">fn</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Callable</span><span class="p"><span class="pre">[</span></span><span class="p"><span class="pre">[</span></span><span class="pre">Concatenate</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">_P</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">_R</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Callable</span><span class="p"><span class="pre">[</span></span><span class="p"><span class="pre">[</span></span><span class="pre">_P</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">ImageProvider</span><span class="p"><span class="pre">[</span></span><span class="pre">_R</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/acryo/pipe/_curry.html#provider_function"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.provider_function" title="Permalink to this definition"></a></dt>
 <dd><p>Convert a function into a curried function that returns a image provider.</p>
 <p class="rubric">Examples</p>
 <div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="nd">@provider_function</span>
@@ -259,7 +289,7 @@ smooth the image using a Gaussian kernel.</p>
 </pre></div>
 </div>
 <dl class="field-list simple">
-<dt class="field-odd">Parameters</dt>
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>sigma</strong> (<em>float</em><em>, </em><em>default is 1.0</em>) – Standard deviation of the Gaussian kernel.</p></li>
 <li><p><strong>radius</strong> (<em>float</em><em>, </em><em>default is 1.0</em>) – Radius of the structure element. If negative, erosion is applied.</p></li>
@@ -271,10 +301,10 @@ smooth the image using a Gaussian kernel.</p>
 
 <dl class="py function">
 <dt class="sig sig-object py" id="acryo.pipe.threshold_otsu">
-<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">threshold_otsu</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">*args:</span> <span class="pre">typing.~_P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">**kwargs:</span> <span class="pre">typing.~_P</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/pipe/_masking.html#threshold_otsu"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.threshold_otsu" title="Permalink to this definition"></a></dt>
+<span class="sig-prename descclassname"><span class="pre">acryo.pipe.</span></span><span class="sig-name descname"><span class="pre">threshold_otsu</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">*args:</span> <span class="pre">~typing.~_P</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">**kwargs:</span> <span class="pre">~typing.~_P</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/acryo/pipe/_masking.html#threshold_otsu"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#acryo.pipe.threshold_otsu" title="Permalink to this definition"></a></dt>
 <dd><p>Pipe operation that binarize an image using Otsu’s method.</p>
 <dl class="field-list simple">
-<dt class="field-odd">Parameters</dt>
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><p><strong>bins</strong> (<em>int</em><em>, </em><em>default is 256</em>) – Number of bins to build histogram.</p>
 </dd>
 </dl>

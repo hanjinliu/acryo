@@ -1,10 +1,26 @@
 from __future__ import annotations
 
+from typing import overload, Literal
 from acryo.tilt._single import SingleAxisY, SingleAxisX, SingleAxis
 from acryo.tilt._base import UnionAxes, NoWedge
 
 
-def single_axis(tilt_range: tuple[float, float], axis: str = "y") -> SingleAxis:
+@overload
+def single_axis(
+    tilt_range: tuple[float, float], axis: Literal["x", "y"] = "y"
+) -> SingleAxis:
+    ...
+
+
+@overload
+def single_axis(tilt_range: None, axis: Literal["x", "y"] = "y") -> NoWedge:
+    ...
+
+
+def single_axis(
+    tilt_range: tuple[float, float] | None = None,
+    axis: Literal["x", "y"] = "y",
+) -> SingleAxis | NoWedge:
     """
     Create a single-axis missing wedge model.
 
@@ -15,6 +31,8 @@ def single_axis(tilt_range: tuple[float, float], axis: str = "y") -> SingleAxis:
     axis : str, default is "y"
         The rotation axis of tomography.
     """
+    if tilt_range is None:
+        return NoWedge()
     if axis == "y":
         return SingleAxisY(tilt_range)
     elif axis == "x":

@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html class="writer-html5" lang="en" >
 <head>
-  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.18.1: http://docutils.sourceforge.net/" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo &mdash; acryo 0.4.0 documentation</title>
+  <title>acryo &mdash; acryo 0.4.4 documentation</title>
       <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -12,9 +12,8 @@
   <![endif]-->
 
         <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
-        <script src="../_static/jquery.js"></script>
-        <script src="../_static/underscore.js"></script>
         <script src="../_static/doctools.js"></script>
+        <script src="../_static/sphinx_highlight.js"></script>
         <script src="https://unpkg.com/mermaid@9.4.0/dist/mermaid.min.js"></script>
         <script>mermaid.initialize({startOnLoad:true});</script>
     <script src="../_static/js/theme.js"></script>
@@ -34,7 +33,7 @@
             acryo
           </a>
               <div class="version">
-                0.4.0
+                0.4.4
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
@@ -77,7 +76,7 @@
            <div itemprop="articleBody">
 
   <section id="acryo">
-<h1>acryo<a class="headerlink" href="#acryo" title="Permalink to this headline"></a></h1>
+<h1>acryo<a class="headerlink" href="#acryo" title="Permalink to this heading"></a></h1>
 <div class="toctree-wrapper compound">
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="acryo.html">acryo package</a><ul>
@@ -120,11 +119,142 @@
 <li class="toctree-l4"><a class="reference internal" href="acryo.testing.html#module-acryo.testing">Module contents</a></li>
 </ul>
 </li>
+<li class="toctree-l3"><a class="reference internal" href="acryo.tilt.html">acryo.tilt package</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="acryo.tilt.html#submodules">Submodules</a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.tilt.html#module-acryo.tilt.core">acryo.tilt.core module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.tilt.html#module-acryo.tilt">Module contents</a></li>
+</ul>
+</li>
 </ul>
 </li>
 <li class="toctree-l2"><a class="reference internal" href="acryo.html#submodules">Submodules</a></li>
-<li class="toctree-l2"><a class="reference internal" href="acryo.html#module-acryo.simulator">acryo.simulator module</a></li>
-<li class="toctree-l2"><a class="reference internal" href="acryo.html#module-acryo">Module contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="acryo.html#module-acryo.simulator">acryo.simulator module</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="acryo.html#acryo.simulator.Component"><code class="docutils literal notranslate"><span class="pre">Component</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.simulator.Component.image"><code class="docutils literal notranslate"><span class="pre">Component.image</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.simulator.Component.molecules"><code class="docutils literal notranslate"><span class="pre">Component.molecules</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="acryo.html#acryo.simulator.TomogramSimulator"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.simulator.TomogramSimulator.add_molecules"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator.add_molecules()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.simulator.TomogramSimulator.collect_molecules"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator.collect_molecules()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.simulator.TomogramSimulator.components"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator.components</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.simulator.TomogramSimulator.copy"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator.copy()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.simulator.TomogramSimulator.corner_safe"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator.corner_safe</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.simulator.TomogramSimulator.order"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator.order</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.simulator.TomogramSimulator.replace"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator.replace()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.simulator.TomogramSimulator.scale"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator.scale</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.simulator.TomogramSimulator.simulate"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator.simulate()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.simulator.TomogramSimulator.simulate_2d"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator.simulate_2d()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.simulator.TomogramSimulator.simulate_projection"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator.simulate_projection()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.simulator.TomogramSimulator.simulate_tilt_series"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator.simulate_tilt_series()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.simulator.TomogramSimulator.subset"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator.subset()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="acryo.html#acryo.simulator.cross"><code class="docutils literal notranslate"><span class="pre">cross()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="acryo.html#module-acryo">Module contents</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="acryo.html#acryo.BatchLoader"><code class="docutils literal notranslate"><span class="pre">BatchLoader</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.BatchLoader.add_loader"><code class="docutils literal notranslate"><span class="pre">BatchLoader.add_loader()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.BatchLoader.add_tomogram"><code class="docutils literal notranslate"><span class="pre">BatchLoader.add_tomogram()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.BatchLoader.binning"><code class="docutils literal notranslate"><span class="pre">BatchLoader.binning()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.BatchLoader.construct_loading_tasks"><code class="docutils literal notranslate"><span class="pre">BatchLoader.construct_loading_tasks()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.BatchLoader.from_loaders"><code class="docutils literal notranslate"><span class="pre">BatchLoader.from_loaders()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.BatchLoader.images"><code class="docutils literal notranslate"><span class="pre">BatchLoader.images</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.BatchLoader.loaders"><code class="docutils literal notranslate"><span class="pre">BatchLoader.loaders</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.BatchLoader.molecules"><code class="docutils literal notranslate"><span class="pre">BatchLoader.molecules</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.BatchLoader.replace"><code class="docutils literal notranslate"><span class="pre">BatchLoader.replace()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="acryo.html#acryo.MockLoader"><code class="docutils literal notranslate"><span class="pre">MockLoader</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.MockLoader.construct_loading_tasks"><code class="docutils literal notranslate"><span class="pre">MockLoader.construct_loading_tasks()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.MockLoader.molecules"><code class="docutils literal notranslate"><span class="pre">MockLoader.molecules</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.MockLoader.replace"><code class="docutils literal notranslate"><span class="pre">MockLoader.replace()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="acryo.html#acryo.Molecules"><code class="docutils literal notranslate"><span class="pre">Molecules</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.affine_matrix"><code class="docutils literal notranslate"><span class="pre">Molecules.affine_matrix()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.append"><code class="docutils literal notranslate"><span class="pre">Molecules.append()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.cartesian_at"><code class="docutils literal notranslate"><span class="pre">Molecules.cartesian_at()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.concat"><code class="docutils literal notranslate"><span class="pre">Molecules.concat()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.concat_with"><code class="docutils literal notranslate"><span class="pre">Molecules.concat_with()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.copy"><code class="docutils literal notranslate"><span class="pre">Molecules.copy()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.count"><code class="docutils literal notranslate"><span class="pre">Molecules.count()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.cutby"><code class="docutils literal notranslate"><span class="pre">Molecules.cutby()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.drop_features"><code class="docutils literal notranslate"><span class="pre">Molecules.drop_features()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.empty"><code class="docutils literal notranslate"><span class="pre">Molecules.empty()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.euler_angle"><code class="docutils literal notranslate"><span class="pre">Molecules.euler_angle()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.features"><code class="docutils literal notranslate"><span class="pre">Molecules.features</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.filter"><code class="docutils literal notranslate"><span class="pre">Molecules.filter()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.from_axes"><code class="docutils literal notranslate"><span class="pre">Molecules.from_axes()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.from_csv"><code class="docutils literal notranslate"><span class="pre">Molecules.from_csv()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.from_dataframe"><code class="docutils literal notranslate"><span class="pre">Molecules.from_dataframe()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.from_euler"><code class="docutils literal notranslate"><span class="pre">Molecules.from_euler()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.from_matrix"><code class="docutils literal notranslate"><span class="pre">Molecules.from_matrix()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.from_parquet"><code class="docutils literal notranslate"><span class="pre">Molecules.from_parquet()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.from_quat"><code class="docutils literal notranslate"><span class="pre">Molecules.from_quat()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.from_random"><code class="docutils literal notranslate"><span class="pre">Molecules.from_random()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.from_rotvec"><code class="docutils literal notranslate"><span class="pre">Molecules.from_rotvec()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.groupby"><code class="docutils literal notranslate"><span class="pre">Molecules.groupby()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.head"><code class="docutils literal notranslate"><span class="pre">Molecules.head()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.linear_transform"><code class="docutils literal notranslate"><span class="pre">Molecules.linear_transform()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.local_coordinates"><code class="docutils literal notranslate"><span class="pre">Molecules.local_coordinates()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.matrix"><code class="docutils literal notranslate"><span class="pre">Molecules.matrix()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.pos"><code class="docutils literal notranslate"><span class="pre">Molecules.pos</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.quaternion"><code class="docutils literal notranslate"><span class="pre">Molecules.quaternion()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.rotate_by"><code class="docutils literal notranslate"><span class="pre">Molecules.rotate_by()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.rotate_by_euler_angle"><code class="docutils literal notranslate"><span class="pre">Molecules.rotate_by_euler_angle()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.rotate_by_matrix"><code class="docutils literal notranslate"><span class="pre">Molecules.rotate_by_matrix()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.rotate_by_quaternion"><code class="docutils literal notranslate"><span class="pre">Molecules.rotate_by_quaternion()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.rotate_by_rotvec"><code class="docutils literal notranslate"><span class="pre">Molecules.rotate_by_rotvec()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.rotate_by_rotvec_internal"><code class="docutils literal notranslate"><span class="pre">Molecules.rotate_by_rotvec_internal()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.rotate_random"><code class="docutils literal notranslate"><span class="pre">Molecules.rotate_random()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.rotator"><code class="docutils literal notranslate"><span class="pre">Molecules.rotator</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.rotvec"><code class="docutils literal notranslate"><span class="pre">Molecules.rotvec()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.sample"><code class="docutils literal notranslate"><span class="pre">Molecules.sample()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.sort"><code class="docutils literal notranslate"><span class="pre">Molecules.sort()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.subset"><code class="docutils literal notranslate"><span class="pre">Molecules.subset()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.tail"><code class="docutils literal notranslate"><span class="pre">Molecules.tail()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.to_csv"><code class="docutils literal notranslate"><span class="pre">Molecules.to_csv()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.to_dataframe"><code class="docutils literal notranslate"><span class="pre">Molecules.to_dataframe()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.to_parquet"><code class="docutils literal notranslate"><span class="pre">Molecules.to_parquet()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.translate"><code class="docutils literal notranslate"><span class="pre">Molecules.translate()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.translate_internal"><code class="docutils literal notranslate"><span class="pre">Molecules.translate_internal()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.translate_random"><code class="docutils literal notranslate"><span class="pre">Molecules.translate_random()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.with_features"><code class="docutils literal notranslate"><span class="pre">Molecules.with_features()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.x"><code class="docutils literal notranslate"><span class="pre">Molecules.x</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.y"><code class="docutils literal notranslate"><span class="pre">Molecules.y</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.Molecules.z"><code class="docutils literal notranslate"><span class="pre">Molecules.z</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="acryo.html#acryo.SubtomogramLoader"><code class="docutils literal notranslate"><span class="pre">SubtomogramLoader</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.SubtomogramLoader.binning"><code class="docutils literal notranslate"><span class="pre">SubtomogramLoader.binning()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.SubtomogramLoader.construct_loading_tasks"><code class="docutils literal notranslate"><span class="pre">SubtomogramLoader.construct_loading_tasks()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.SubtomogramLoader.image"><code class="docutils literal notranslate"><span class="pre">SubtomogramLoader.image</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.SubtomogramLoader.imread"><code class="docutils literal notranslate"><span class="pre">SubtomogramLoader.imread()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.SubtomogramLoader.molecules"><code class="docutils literal notranslate"><span class="pre">SubtomogramLoader.molecules</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.SubtomogramLoader.replace"><code class="docutils literal notranslate"><span class="pre">SubtomogramLoader.replace()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="acryo.html#acryo.TomogramSimulator"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.TomogramSimulator.add_molecules"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator.add_molecules()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.TomogramSimulator.collect_molecules"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator.collect_molecules()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.TomogramSimulator.components"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator.components</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.TomogramSimulator.copy"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator.copy()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.TomogramSimulator.corner_safe"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator.corner_safe</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.TomogramSimulator.order"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator.order</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.TomogramSimulator.replace"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator.replace()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.TomogramSimulator.scale"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator.scale</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.TomogramSimulator.simulate"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator.simulate()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.TomogramSimulator.simulate_2d"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator.simulate_2d()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.TomogramSimulator.simulate_projection"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator.simulate_projection()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.TomogramSimulator.simulate_tilt_series"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator.simulate_tilt_series()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="acryo.html#acryo.TomogramSimulator.subset"><code class="docutils literal notranslate"><span class="pre">TomogramSimulator.subset()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="acryo.html#acryo.imread"><code class="docutils literal notranslate"><span class="pre">imread()</span></code></a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

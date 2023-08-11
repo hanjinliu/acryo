@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html class="writer-html5" lang="en" >
 <head>
-  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.18.1: http://docutils.sourceforge.net/" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Cache Subtomograms &mdash; acryo 0.4.0 documentation</title>
+  <title>Cache Subtomograms &mdash; acryo 0.4.4 documentation</title>
       <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -12,9 +12,8 @@
   <![endif]-->
 
         <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
-        <script src="../_static/jquery.js"></script>
-        <script src="../_static/underscore.js"></script>
         <script src="../_static/doctools.js"></script>
+        <script src="../_static/sphinx_highlight.js"></script>
         <script src="https://unpkg.com/mermaid@9.4.0/dist/mermaid.min.js"></script>
         <script>mermaid.initialize({startOnLoad:true});</script>
     <script src="../_static/js/theme.js"></script>
@@ -36,7 +35,7 @@
             acryo
           </a>
               <div class="version">
-                0.4.0
+                0.4.4
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
@@ -83,7 +82,7 @@
            <div itemprop="articleBody">
 
   <section id="cache-subtomograms">
-<h1>Cache Subtomograms<a class="headerlink" href="#cache-subtomograms" title="Permalink to this headline"></a></h1>
+<h1>Cache Subtomograms<a class="headerlink" href="#cache-subtomograms" title="Permalink to this heading"></a></h1>
 <p>Loading subtomograms from a tomogram is a computationally expensive operation; The proper
 regions of the tomogram must be read from disk, and will be shifted/rotated to the proper
 position/orientation.</p>
@@ -108,7 +107,7 @@ way.</p>
 </div>
 <p>In this example, same set of subtomograms is loaded twice.</p>
 <section id="create-cache-of-loading-tasks">
-<h2>Create Cache of Loading Tasks<a class="headerlink" href="#create-cache-of-loading-tasks" title="Permalink to this headline"></a></h2>
+<h2>Create Cache of Loading Tasks<a class="headerlink" href="#create-cache-of-loading-tasks" title="Permalink to this heading"></a></h2>
 <p>Subtomogram loaders have <code class="xref py py-meth docutils literal notranslate"><span class="pre">cached()</span></code> context manager. Within this context, subtomograms
 of the given shape will temporarily be saved in a file, and will be loaded from there if
 possible.</p>
@@ -119,7 +118,7 @@ possible.</p>
 </div>
 </section>
 <section id="cache-inheritance">
-<h2>Cache Inheritance<a class="headerlink" href="#cache-inheritance" title="Permalink to this headline"></a></h2>
+<h2>Cache Inheritance<a class="headerlink" href="#cache-inheritance" title="Permalink to this heading"></a></h2>
 <p><code class="xref py py-meth docutils literal notranslate"><span class="pre">filter()</span></code> and <code class="xref py py-meth docutils literal notranslate"><span class="pre">groupby()</span></code> inherits the cache of the parent loader. For instance,
 if you want to create a template from the well-aligned molecules, you can do the following:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">with</span> <span class="n">loader</span><span class="o">.</span><span class="n">cached</span><span class="p">():</span>  <span class="c1"># take a while to create cache</span>

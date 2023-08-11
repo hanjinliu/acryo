@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo.pick._concrete &mdash; acryo 0.2.1 documentation</title>
+  <title>acryo.pick._concrete &mdash; acryo 0.4.4 documentation</title>
       <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -11,10 +11,9 @@
   <![endif]-->
 
         <script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
-        <script src="../../../_static/jquery.js"></script>
-        <script src="../../../_static/underscore.js"></script>
         <script src="../../../_static/doctools.js"></script>
-        <script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+        <script src="../../../_static/sphinx_highlight.js"></script>
+        <script src="https://unpkg.com/mermaid@9.4.0/dist/mermaid.min.js"></script>
         <script>mermaid.initialize({startOnLoad:true});</script>
     <script src="../../../_static/js/theme.js"></script>
     <link rel="index" title="Index" href="../../../genindex.html" />
@@ -26,14 +25,18 @@
     <nav data-toggle="wy-nav-shift" class="wy-nav-side">
       <div class="wy-side-scroll">
         <div class="wy-side-nav-search" >
-            <a href="../../../index.html" class="icon icon-home"> acryo
+
+
+
+          <a href="../../../index.html" class="icon icon-home">
+            acryo
           </a>
               <div class="version">
-                0.2.1
+                0.4.4
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
-    <input type="text" name="q" placeholder="Search docs" />
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
     <input type="hidden" name="check_keywords" value="yes" />
     <input type="hidden" name="area" value="default" />
   </form>
@@ -60,9 +63,9 @@
         <div class="rst-content">
           <div role="navigation" aria-label="Page navigation">
   <ul class="wy-breadcrumbs">
-      <li><a href="../../../index.html" class="icon icon-home"></a> &raquo;</li>
-          <li><a href="../../index.html">Module code</a> &raquo;</li>
-      <li>acryo.pick._concrete</li>
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">acryo.pick._concrete</li>
       <li class="wy-breadcrumbs-aside">
       </li>
   </ul>
@@ -83,12 +86,13 @@
 
 <span class="kn">from</span> <span class="nn">acryo.pick._base</span> <span class="kn">import</span> <span class="n">BasePickerModel</span><span class="p">,</span> <span class="n">BaseTemplateMatcher</span>
 <span class="kn">from</span> <span class="nn">acryo.molecules</span> <span class="kn">import</span> <span class="n">Molecules</span>
-<span class="kn">from</span> <span class="nn">acryo._correlation</span> <span class="kn">import</span> <span class="n">ncc_landscape_no_pad</span>
+<span class="kn">from</span> <span class="nn">acryo.backend</span> <span class="kn">import</span> <span class="n">NUMPY_BACKEND</span>
+<span class="kn">from</span> <span class="nn">acryo.backend._zncc</span> <span class="kn">import</span> <span class="n">ncc_landscape_no_pad</span>
 <span class="kn">from</span> <span class="nn">acryo._types</span> <span class="kn">import</span> <span class="n">nm</span>
 
 
 <div class="viewcode-block" id="ZNCCTemplateMatcher"><a class="viewcode-back" href="../../../apidoc/acryo.pick.html#acryo.pick.ZNCCTemplateMatcher">[docs]</a><span class="k">class</span> <span class="nc">ZNCCTemplateMatcher</span><span class="p">(</span><span class="n">BaseTemplateMatcher</span><span class="p">):</span>
-    <span class="sd">&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Particle picking based on ZNCC template matching.</span>
 
 <span class="sd">    Parameters</span>
@@ -125,7 +129,9 @@
         <span class="n">all_landscapes</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span>
             <span class="p">[</span>
                 <span class="n">ncc_landscape_no_pad</span><span class="p">(</span>
-                    <span class="n">image</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">image</span><span class="p">),</span> <span class="n">template</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">template</span><span class="p">)</span>
+                    <span class="n">image</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">image</span><span class="p">),</span>
+                    <span class="n">template</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">template</span><span class="p">),</span>
+                    <span class="n">NUMPY_BACKEND</span><span class="p">,</span>
                 <span class="p">)</span>
                 <span class="k">for</span> <span class="n">template</span> <span class="ow">in</span> <span class="n">templates</span>
             <span class="p">],</span>
@@ -145,7 +151,7 @@
 
 
 <div class="viewcode-block" id="LoGPicker"><a class="viewcode-back" href="../../../apidoc/acryo.pick.html#acryo.pick.LoGPicker">[docs]</a><span class="k">class</span> <span class="nc">LoGPicker</span><span class="p">(</span><span class="n">BasePickerModel</span><span class="p">):</span>
-    <span class="sd">&quot;&quot;&quot;Particle picking based on Laplacian of Gaussian.&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Particle picking based on Laplacian of Gaussian.&quot;&quot;&quot;</span>
 
     <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sigma</span><span class="p">:</span> <span class="n">nm</span> <span class="o">=</span> <span class="mf">3.5</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_sigma</span> <span class="o">=</span> <span class="n">sigma</span>
@@ -170,7 +176,7 @@
 
 
 <div class="viewcode-block" id="DoGPicker"><a class="viewcode-back" href="../../../apidoc/acryo.pick.html#acryo.pick.DoGPicker">[docs]</a><span class="k">class</span> <span class="nc">DoGPicker</span><span class="p">(</span><span class="n">BasePickerModel</span><span class="p">):</span>
-    <span class="sd">&quot;&quot;&quot;Particle picking based on Difference of Gaussian.&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Particle picking based on Difference of Gaussian.&quot;&quot;&quot;</span>
 
     <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sigma_low</span><span class="p">:</span> <span class="n">nm</span> <span class="o">=</span> <span class="mf">3.5</span><span class="p">,</span> <span class="n">sigma_high</span><span class="p">:</span> <span class="n">nm</span> <span class="o">=</span> <span class="mf">5.0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
         <span class="k">if</span> <span class="n">sigma_low</span> <span class="o">&gt;=</span> <span class="n">sigma_high</span><span class="p">:</span>

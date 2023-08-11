@@ -6,7 +6,7 @@ if TYPE_CHECKING:
 
 RangeLike = tuple[float, float]
 Ranges = tuple[RangeLike, RangeLike, RangeLike]
-RotationType = Union[RangeLike, "Rotation"]
+RotationType = Union[Ranges, "Rotation"]
 
 # type alias
 nm: TypeAlias = float
