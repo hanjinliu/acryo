@@ -18,7 +18,7 @@ from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
 
 from acryo._rotation import normalize_rotations
-from acryo._types import Ranges, subpixel, degree
+from acryo._types import RotationType, subpixel, degree
 from acryo._utils import compose_matrices
 from acryo._dask import DaskTaskPool, compute
 from acryo.backend import Backend, AnyArray, NUMPY_BACKEND
@@ -557,7 +557,7 @@ class RotationImplemented(BaseAlignmentModel):
         self,
         template: TemplateType,
         mask: MaskType = None,
-        rotations: Ranges | None = None,
+        rotations: RotationType | None = None,
     ):
         self.quaternions = normalize_rotations(rotations)
         self._n_rotations = self.quaternions.shape[0]
@@ -567,7 +567,7 @@ class RotationImplemented(BaseAlignmentModel):
     def with_params(
         cls,
         *,
-        rotations: Ranges | None = None,
+        rotations: RotationType | None = None,
     ) -> ParametrizedModel[Self]:
         """Create an alignment model instance with parameters."""
         return ParametrizedModel(cls, rotations=rotations)
@@ -805,7 +805,7 @@ class TomographyInput(RotationImplemented):
         self,
         template: TemplateType,
         mask: MaskType = None,
-        rotations: Ranges | None = None,
+        rotations: RotationType | None = None,
         cutoff: float | None = None,
         tilt: TiltSeriesModel | tuple[degree, degree] | None = None,
         tilt_range: tuple[degree, degree] | None = None,
@@ -832,7 +832,7 @@ class TomographyInput(RotationImplemented):
     def with_params(
         cls,
         *,
-        rotations: Ranges | None = None,
+        rotations: RotationType | None = None,
         cutoff: float | None = None,
         tilt: TiltSeriesModel | None = None,
         tilt_range: tuple[degree, degree] | None = None,

@@ -386,7 +386,7 @@ class Molecules:
     def copy(self) -> Self:
         """Make a copy of the object."""
         pos = self.pos.copy()
-        quat = self._rotator.as_quat().copy()
+        quat = self._rotator.as_quat(canonical=False).copy()
         if self._features is None:
             return self.__class__(pos, Rotation(quat))
         return self.__class__(pos, Rotation(quat), self._features)
@@ -424,7 +424,7 @@ class Molecules:
         else:
             _spec = spec
         pos = self.pos[_spec]
-        quat = self._rotator.as_quat()[_spec]
+        quat = self._rotator.as_quat(canonical=False)[_spec]
         if self._features is None:
             return self.__class__(pos, Rotation(quat))
         if _is_boolean_array(_spec):
@@ -580,7 +580,7 @@ class Molecules:
         seq = translate_euler(seq)
         return self._rotator.as_euler(seq, degrees=degrees)[..., ::-1]
 
-    def quaternion(self) -> NDArray[np.float64]:
+    def quaternion(self, canonical: bool = False) -> NDArray[np.float64]:
         """
         Calculate quaternions that transforms a source vector to vectors that
         belong to the object.
@@ -590,7 +590,7 @@ class Molecules:
         (N, 4) ndarray
             Quaternions.
         """
-        return self._rotator.as_quat()
+        return self._rotator.as_quat(canonical=canonical)
 
     def rotvec(self) -> NDArray[np.float64]:
         """
@@ -916,7 +916,13 @@ class Molecules:
             ``null``. Raise error otherwise.
         """
         pos = np.concatenate([self.pos, other.pos], axis=0)
-        rot = np.concatenate([self.rotator.as_quat(), other.rotator.as_quat()], axis=0)
+        rot = np.concatenate(
+            [
+                self.rotator.as_quat(canonical=False),
+                other.rotator.as_quat(canonical=False),
+            ],
+            axis=0,
+        )
         if len(self.features) == 0:
             feat = other.features
         elif len(other.features) == 0:
@@ -1044,7 +1050,13 @@ class Molecules:
         if not isinstance(other, Molecules):
             raise TypeError(f"Expected Molecules, got {type(other)}")
         pos = np.concatenate([self.pos, other.pos], axis=0)
-        rot = np.concatenate([self.rotator.as_quat(), other.rotator.as_quat()], axis=0)
+        rot = np.concatenate(
+            [
+                self.rotator.as_quat(canonical=False),
+                other.rotator.as_quat(canonical=False),
+            ],
+            axis=0,
+        )
 
         if self.count() == 0:
             feat = other.features

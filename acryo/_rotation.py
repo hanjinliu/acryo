@@ -1,10 +1,10 @@
 from __future__ import annotations
 import itertools
-from typing import Callable, Sequence
+from typing import Callable, Literal, Sequence
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from acryo._types import Ranges, RangeLike
+from acryo._types import Ranges, RangeLike, RotationType
 from acryo.molecules import from_euler_xyz_coords
 from acryo._typed_scipy import affine_transform
 
@@ -24,7 +24,7 @@ def _normalize_ranges(rng: RangeLike | Ranges) -> Ranges:
         return (rng_,) * 3
 
 
-def normalize_rotations(rotations: Ranges | Rotation | None) -> np.ndarray:
+def normalize_rotations(rotations: RotationType | None) -> np.ndarray:
     """
     Normalize various rotation expressions to quaternions.
 
@@ -39,7 +39,7 @@ def normalize_rotations(rotations: Ranges | Rotation | None) -> np.ndarray:
         Corresponding quaternions in shape (N, 4).
     """
     if isinstance(rotations, Rotation):
-        quats = rotations.as_quat()
+        quats = rotations.as_quat(canonical=False)
     elif rotations is not None:
         _rotations = _normalize_ranges(rotations)
         angles = []
@@ -53,7 +53,9 @@ def normalize_rotations(rotations: Ranges | Rotation | None) -> np.ndarray:
         _quat: list[np.ndarray] = []
         for angs in itertools.product(*angles):
             _quat.append(
-                from_euler_xyz_coords(np.array(angs), "zyx", degrees=True).as_quat()
+                from_euler_xyz_coords(np.array(angs), "zyx", degrees=True).as_quat(
+                    canonical=False
+                )
             )
         quats = np.stack(_quat, axis=0)
     else:
@@ -66,7 +68,7 @@ def rotate(
     image: np.ndarray,
     degrees: tuple[float, float, float] | Sequence[float],
     order: int = 3,
-    mode="constant",
+    mode: Literal["constant", "nearest", "mirror", "wrap", "reflect"] = "constant",
     cval: Callable | float = np.mean,
 ):
     from acryo._utils import compose_matrices
@@ -92,4 +94,6 @@ def rotate(
 
 
 def euler_to_quat(degrees):
-    return from_euler_xyz_coords(np.array(degrees), "zyx", degrees=True).as_quat()
+    return from_euler_xyz_coords(np.array(degrees), "zyx", degrees=True).as_quat(
+        canonical=False
+    )
