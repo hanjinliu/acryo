@@ -18,16 +18,17 @@ class SingleAxis(_base.TiltSeriesModel):
 
     @property
     def tilt_range(self) -> tuple[float, float]:
+        """Range of tilt angles in degrees."""
         return self._tilt_range
 
     @abstractmethod
     def _get_norms(self) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
-        pass
+        """Return the two normal vectors that define the missing wedge."""
 
     def create_mask(
         self,
-        rotator: Rotation,
-        shape: tuple[int, int, int],
+        rotator: Rotation = Rotation.identity(),
+        shape: tuple[int, int, int] = (49, 49, 49),
     ) -> NDArray[np.float32]:
         """
         Create a binary mask that covers tomographical missing wedge.
