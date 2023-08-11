@@ -158,7 +158,7 @@ Model construction
         mask,      # mask image
         rotations=[(10, 5), (4, 2), (8, 4)],
         cutoff=0.5,
-        tilt_range=(-60, 60),
+        tilt=(-60, 60),
     )
 
 - Shape of ``mask`` must be the same as ``template``. ``template * mask`` and
@@ -176,7 +176,7 @@ Model construction
 - ``cutoff`` is the relative cutoff frequency for low-pass filtering. The Nyquist frequency is
   :math:`0.5 \times \sqrt{3} = 0.866` for 3D images.
 
-- ``tilt_range`` is the range of tilt series angles in degree.
+- ``tilt`` is the tilt series model.
 
 Align images
 ------------

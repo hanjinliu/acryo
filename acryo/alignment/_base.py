@@ -11,6 +11,7 @@ from typing import (
     Union,
 )
 from typing_extensions import Self
+import warnings
 
 import numpy as np
 from numpy.typing import NDArray
@@ -22,6 +23,7 @@ from acryo._utils import compose_matrices
 from acryo._dask import DaskTaskPool, compute
 from acryo.backend import Backend, AnyArray, NUMPY_BACKEND
 from acryo.alignment._bound import ParametrizedModel
+from acryo.tilt import single_axis, TiltSeriesModel, no_wedge
 
 
 TemplateType = Union[NDArray[np.float32], Sequence[NDArray[np.float32]]]
@@ -805,14 +807,25 @@ class TomographyInput(RotationImplemented):
         mask: MaskType = None,
         rotations: Ranges | None = None,
         cutoff: float | None = None,
+        tilt: TiltSeriesModel | tuple[degree, degree] | None = None,
         tilt_range: tuple[degree, degree] | None = None,
     ):
         self._cutoff = cutoff or 1.0
         if tilt_range is not None:
-            deg0, deg1 = tilt_range
-            if deg0 >= deg1:
-                raise ValueError("Tilt range must be in form of (min, max).")
-        self._tilt_range = tilt_range
+            warnings.warn(
+                "`tilt_range` is deprecated. Use `tilt` for more precise setting "
+                "of the tilt series model.",
+                DeprecationWarning,
+            )
+            tilt_model = single_axis(tilt_range)
+        if tilt is None:
+            tilt_model = no_wedge()
+        elif isinstance(tilt, TiltSeriesModel):
+            tilt_model = tilt
+        else:
+            tilt_model = single_axis(tilt)
+
+        self._tilt_model: TiltSeriesModel = tilt_model
         super().__init__(template, mask, rotations)
 
     @classmethod
@@ -821,6 +834,7 @@ class TomographyInput(RotationImplemented):
         *,
         rotations: Ranges | None = None,
         cutoff: float | None = None,
+        tilt: TiltSeriesModel | None = None,
         tilt_range: tuple[degree, degree] | None = None,
     ) -> ParametrizedModel[Self]:
         """Create an alignment model instance with parameters."""
@@ -828,6 +842,7 @@ class TomographyInput(RotationImplemented):
             cls,
             rotations=rotations,
             cutoff=cutoff,
+            tilt=tilt,
             tilt_range=tilt_range,
         )
 
@@ -907,13 +922,11 @@ class TomographyInput(RotationImplemented):
         backend: Backend,
     ) -> AnyArray[np.float32] | int:
         """Create a mask that covers tomographical missing wedge."""
-        if self._tilt_range is None:
-            return 1
-        return backend.missing_wedge_mask(
-            rotator=Rotation.from_quat(quat),
-            tilt_range=self._tilt_range,
-            shape=self.input_shape,
+        mask = self._tilt_model.create_mask(
+            Rotation.from_quat(quat),
+            self.input_shape,
         )
+        return backend.asarray(mask)
 
 
 def _normalize_cval(

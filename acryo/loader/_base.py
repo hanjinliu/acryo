@@ -17,6 +17,7 @@ from typing import (
     overload,
 )
 from typing_extensions import TypeGuard
+import warnings
 import numpy as np
 from numpy.typing import NDArray
 from dask import array as da
@@ -838,7 +839,8 @@ class LoaderBase(ABC):
         cutoff: float = 0.5,
         n_components: int = 2,
         n_clusters: int = 2,
-        tilt_range: tuple[float, float] | None = None,
+        tilt: tuple[float, float] | None = None,
+        tilt_range=None,
         seed: int = 0,
         label_name: str = "cluster",
     ) -> ClassificationResult:
@@ -891,7 +893,13 @@ class LoaderBase(ABC):
         with self.cached(shape):
             if template is None:
                 template = self.average(shape)
-            model = ZNCCAlignment(template, _mask, cutoff=cutoff, tilt_range=tilt_range)
+            if tilt_range is not None:
+                warnings.warn(
+                    "tilt_range is deprecated. Use tilt instead",
+                    DeprecationWarning,
+                )
+                tilt = tilt_range
+            model = ZNCCAlignment(template, _mask, cutoff=cutoff, tilt=tilt)
 
             # PCA requires aggregation along the first axis.
             # Rechunk to improve performance.

@@ -939,14 +939,15 @@ class Molecules:
 
     def cutby(self, by: str, bins: list[float]) -> MoleculeCutGroup:
         """Cut molecules into sub-groups by binning."""
-        label = "__category"
-        if label in self.features.columns:
-            raise ValueError(f"Feature name {label!r} should not be used.")
+        cat_name = f".category"
+        while cat_name in self.features.columns:
+            cat_name = f".{cat_name}"
         feature = self.features[by]
-        result = feature.cut(bins=bins, category_label=label, maintain_order=True)
-        cat = result[label]
+        cat: pl.Series = feature.cut(bins, series=True).alias(cat_name)  # type: ignore
         df = self.to_dataframe().with_columns(cat)
-        return MoleculeCutGroup(df.groupby(label, maintain_order=True), label=label)
+        return MoleculeCutGroup(
+            df.groupby(cat_name, maintain_order=True), label=cat_name
+        )
 
     def filter(
         self,

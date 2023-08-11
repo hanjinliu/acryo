@@ -39,6 +39,7 @@ pip install -e .
 ```Python
 import polars as pl
 from acryo import SubtomogramLoader, Molecules  # acryo objects
+from acryo.tilt import single_axis
 from acryo.pipe import soft_otsu  # data input pipelines
 
 # construct a loader
@@ -55,11 +56,11 @@ avg = loader_filt.average(output_shape=(48, 48, 48))
 
 # alignment
 aligned_loader = loader.align(
-    template=avg,                       # use the average as template
-    mask=soft_otsu(sigma=2, radius=2),  # apply soft-Otsu to template to make the mask
-    tilt_range=(-50, 50),               # range of tilt series degrees.
-    cutoff=0.5,                         # lowpass filtering cutoff
-    max_shifts=(4, 4, 4),               # search space limits
+    template=avg,                           # use the average as template
+    mask=soft_otsu(sigma=2, radius=2),      # apply soft-Otsu to template to make the mask
+    tilt=single_axis((-45, 45), axis="y"),  # range of tilt series degrees.
+    cutoff=0.5,                             # lowpass filtering cutoff
+    max_shifts=(4, 4, 4),                   # search space limits
 )
 
 ```

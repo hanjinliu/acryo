@@ -158,7 +158,7 @@ Model construction
         mask,      # mask image
         rotations=[(10, 5), (4, 2), (8, 4)],
         cutoff=0.5,
-        tilt_range=(-60, 60),
+        tilt=(-60, 60),
     )
 
 - Shape of ``mask`` must be the same as ``template``. ``template * mask`` and
@@ -176,7 +176,14 @@ Model construction
 - ``cutoff`` is the relative cutoff frequency for low-pass filtering. The Nyquist frequency is
   :math:`0.5 \times \sqrt{3} = 0.866` for 3D images.
 
-- ``tilt_range`` is the range of tilt series angles in degree.
+- ``tilt`` is the tilt series model.
+
+  - If a (float, float) tuple is given, it will be interpreted as the minimum and maximum tilt
+    angle in degree. The rotation axis is assumed to be the y axis.
+
+  - You can use classes provided in :mod:`acryo.tilt` to define more complex tilt series
+    models. For instance, :meth:`single_axis` for single-axis tilt series and
+    :meth:`dual_axis` for dual-axis tilt series.
 
 Align images
 ------------

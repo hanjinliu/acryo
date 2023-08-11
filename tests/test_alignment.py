@@ -43,7 +43,7 @@ def test_run(alignment_model: type[BaseAlignmentModel], rotations):
             max_shifts=1.2,
             alignment_model=alignment_model,
             rotations=rotations,
-            tilt_range=(-60, 60),
+            tilt=(-60, 60),
         )
     ave = out.average()
     coef = np.corrcoef(ave.ravel(), temp.ravel())
@@ -146,7 +146,7 @@ def test_pca_classify():
         tomo, mole, order=0, scale=scale, output_shape=temp.shape
     )
     mask = temp > np.mean(temp)
-    loader.classify(mask.astype(np.float32), tilt_range=(-60, 60))
+    loader.classify(mask.astype(np.float32), tilt=(-60, 60))
 
 
 def test_multi_align():
