@@ -109,10 +109,18 @@ class BatchLoader(LoaderBase):
         self._molecules = _molecules_new
         return self
 
-    def add_loader(self, loader: SubtomogramLoader):
-        image = loader.image
-        molecules = loader.molecules
-        return self.add_tomogram(image, molecules)
+    def add_loader(self, loader: SubtomogramLoader | BatchLoader) -> Self:
+        """Add a subtomogram loader or a batch loader to the collection."""
+        if isinstance(loader, SubtomogramLoader):
+            image = loader.image
+            molecules = loader.molecules
+            self.add_tomogram(image, molecules)
+        elif isinstance(loader, BatchLoader):
+            for sub in loader.loaders:
+                self.add_loader(sub)
+        else:
+            raise TypeError(f"Cannot add {type(loader)}.")
+        return self
 
     @classmethod
     def from_loaders(
@@ -123,6 +131,7 @@ class BatchLoader(LoaderBase):
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
         corner_safe: bool = False,
     ) -> Self:
+        """Construct a loader from a list of loaders."""
         self = cls(
             order=order,
             scale=scale,
@@ -202,6 +211,7 @@ class BatchLoader(LoaderBase):
         output_shape: _ShapeType = None,
         backend: Backend | None = None,
     ) -> DaskArrayList:
+        """Construct batch loading tasks."""
         _backend = backend or Backend()
         return DaskArrayList.concat(
             loader.construct_loading_tasks(output_shape=output_shape, backend=_backend)

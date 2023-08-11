@@ -15,7 +15,7 @@ class _Subtomogram(NamedTuple):
 
 
 class SubtomogramCache(Mapping[int, _Subtomogram]):
-    def __init__(self, dir=None) -> None:
+    def __init__(self, dir: str | None = None) -> None:
         self._dict: dict[int, _Subtomogram] = {}
         self._cache_dir = dir
 

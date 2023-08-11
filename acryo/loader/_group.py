@@ -525,9 +525,9 @@ class LoaderGroupByIterator(Iterable[tuple[_K, _L]]):
     def __iter__(self) -> Iterator[tuple[_K, _L]]:
         loader = self._loader
         cached = loader._get_cached_array(None, None)
-        index_col_name = "__index"
+        index_col_name = ".index"
         if index_col_name in loader.molecules.features:
-            index_col_name += "_"
+            index_col_name += "."
         index = pl.Series(index_col_name, np.arange(loader.count()))
         for key, mole in loader.molecules.with_features(index).groupby(self._by):
             _loader = loader.replace(

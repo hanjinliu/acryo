@@ -149,7 +149,6 @@ class LoaderBase(ABC):
         xp = backend or Backend()
         if (cached := self._get_cached_array(output_shape, xp)) is not None:
             return cached
-
         tasks = self.construct_loading_tasks(output_shape, xp)
         out = da.stack(tasks, axis=0)
         return out
@@ -404,7 +403,7 @@ class LoaderBase(ABC):
         out = da.compute(tasks)[0]
         stack = np.stack([backend.asnumpy(a) for a in out], axis=0)
         if squeeze and n_set == 1:
-            stack = stack[0]
+            stack: NDArray[np.float32] = stack[0]
         return stack
 
     def align(
@@ -1001,6 +1000,7 @@ class LoaderBase(ABC):
         return LoaderGroup._from_loader(self, _by)
 
     def _get_output_shape(self, output_shape: _ShapeType) -> tuple[pixel, ...]:
+        """Normalize the `output_shape` parameter."""
         if output_shape is None:
             if isinstance(self.output_shape, Unset):
                 raise ValueError("Output shape is unknown.")

@@ -4,6 +4,7 @@ from typing import (
     Any,
     Iterable,
     TYPE_CHECKING,
+    Literal,
     Sequence,
     Union,
     overload,
@@ -205,6 +206,7 @@ class Molecules:
         pos_cols: list[str] = ["z", "y", "x"],
         rot_cols: list[str] = ["zvec", "yvec", "xvec"],
     ) -> Self:
+        """Construct Molecules object from a DataFrame."""
         pos_cols = pos_cols.copy()
         rot_cols = rot_cols.copy()
         pos = df.select(pos_cols)
@@ -269,8 +271,16 @@ class Molecules:
                 f"Features should not contain {dup!r}. Please rename them."
             )
         rotvec = self.rotvec().astype(np.float32)
-        data = np.concatenate([self.pos, rotvec], axis=1)
-        df = pl.DataFrame(data, schema=_CSV_COLUMNS)
+        df = pl.DataFrame(
+            {
+                "z": self.pos[:, 0],
+                "y": self.pos[:, 1],
+                "x": self.pos[:, 2],
+                "zvec": rotvec[:, 0],
+                "yvec": rotvec[:, 1],
+                "xvec": rotvec[:, 2],
+            },
+        )
         if self._features is not None:
             df = df.with_columns(list(self._features))
         return df
@@ -284,7 +294,7 @@ class Molecules:
         save_path : PathLike
             Save path.
         float_precision : int, default is 4
-            Float precision, by default 4.
+            Float precision.
         """
         return self.to_dataframe().write_csv(
             str(save_path),
@@ -772,7 +782,7 @@ class Molecules:
         angles: ArrayLike,
         seq: str = "ZXZ",
         degrees: bool = False,
-        order: str = "xyz",
+        order: Literal["xyz", "zyx"] = "xyz",
         copy: bool = True,
     ) -> Self:
         """
