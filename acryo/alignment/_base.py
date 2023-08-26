@@ -581,8 +581,8 @@ class RotationImplemented(BaseAlignmentModel):
         self,
         img: NDArray[np.float32],
         max_shifts: tuple[subpixel, subpixel, subpixel],
-        quaternion: NDArray[np.float32] | None,
-        pos: NDArray[np.float32] | None,
+        quaternion: NDArray[np.float32] | None = None,
+        pos: NDArray[np.float32] | None = None,
         backend: Backend | None = None,
     ) -> AlignmentResult:
         """
@@ -636,6 +636,10 @@ class RotationImplemented(BaseAlignmentModel):
         pos = np.zeros(3, dtype=np.float32)
         img_input = xp.asarray(img)
         _template, _mask = self._get_template_and_mask_input(backend=xp)
+        if _template.ndim == 3:
+            _template = [_template]
+        if _mask.ndim == 3:
+            _mask = [_mask]
         for quat, tmp, mask in zip(self.quaternions, _template, _mask):
             pool.add_task(
                 self.pre_transform(img_input * mask, xp),

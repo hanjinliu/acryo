@@ -83,6 +83,20 @@ def test_fit(shift, rot, alignment_model: "type[TomographyInput]"):
 
 @pytest.mark.parametrize("shift", [[1, 2, 2], [-4, 3, 2]])
 @pytest.mark.parametrize("alignment_model", [ZNCCAlignment, PCCAlignment])
+def test_fit_without_rotation(shift, alignment_model: "type[TomographyInput]"):
+    model = alignment_model(temp, rotations=((0, 0), (0, 0), (0, 0)))
+    temp_transformed = temp * 4 + np.mean(temp)  # linear transformation to input image
+    img = ndi_shift(temp_transformed, shift=shift)
+    with measure_time(alignment_model.__name__):
+        imgout, result = model.fit(img, (5, 5, 5))
+    assert_allclose(result.quat, [0, 0, 0, 1])
+    assert_allclose(result.shift, shift)
+    coef = np.corrcoef(imgout.ravel(), temp.ravel())
+    assert coef[0, 1] > 0.95  # check results are well aligned
+
+
+@pytest.mark.parametrize("shift", [[1, 2, 2], [-4, 3, 2]])
+@pytest.mark.parametrize("alignment_model", [ZNCCAlignment, PCCAlignment])
 @pytest.mark.parametrize("upsample", [1, 2])
 def test_landscape(shift, alignment_model: "type[TomographyInput]", upsample):
     model = alignment_model(temp)
