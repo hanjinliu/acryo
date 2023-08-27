@@ -79,6 +79,7 @@ def _update_wrapper(f, wrapped, npop: int):
         for i in range(npop):
             name = args.args[i]
             annot.pop(name, None)
+        f.__annotations__ = annot
     return f
 
 

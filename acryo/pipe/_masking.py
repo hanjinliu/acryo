@@ -52,6 +52,10 @@ def dilation(img: NDArray[np.bool_], scale: nm, radius: nm) -> NDArray[np.bool_]
     radius : float
         Radius of the structure element in nanometer. If negative, erosion is applied.
     """
+    try:
+        radius = float(radius)
+    except ValueError:
+        raise ValueError(f"radius must be a number, got {radius!r}")
     radius_px = abs(radius / scale)
     if radius_px < 1:
         return img
@@ -78,7 +82,16 @@ def gaussian_smooth(
     sigma : float
         Standard deviation of the Gaussian kernel.
     """
+    try:
+        sigma = float(sigma)
+    except ValueError:
+        raise ValueError(f"sigma must be a number, got {sigma!r}")
     if sigma == 0:
+        return img.astype(np.float32)
+    if sigma < 0:
+        raise ValueError(f"sigma must be positive, got {sigma!r}")
+    if img.all() or not img.any():
+        # all True or all False
         return img.astype(np.float32)
     img = ~img
     dist: NDArray[np.float32] = ndi.distance_transform_edt(img)  # type: ignore
