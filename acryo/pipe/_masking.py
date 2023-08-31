@@ -52,22 +52,53 @@ def dilation(img: NDArray[np.bool_], scale: nm, radius: nm) -> NDArray[np.bool_]
     radius : float
         Radius of the structure element in nanometer. If negative, erosion is applied.
     """
+    r = _get_radius_px(radius, scale)
+    if r == 0:
+        return img
+    structure = _get_structure(r)
+    if radius < 0:
+        out = ndi.binary_erosion(img, structure=structure, border_value=False)
+    elif radius > 0:
+        out = ndi.binary_dilation(img, structure=structure, border_value=False)
+    return out  # type: ignore
+
+
+@converter_function
+def closing(img: NDArray[np.bool_], scale: nm, radius: nm) -> NDArray[np.bool_]:
+    """
+    Pipe operation that close (or open) a binary image using a circular structure.
+
+    Parameters
+    ----------
+    radius : float
+        Radius of the structure element in nanometer. If negative, opening is applied.
+    """
+    r = _get_radius_px(radius, scale)
+    if r == 0:
+        return img
+    structure = _get_structure(r)
+    if radius < 0:
+        out = ndi.binary_opening(img, structure=structure, border_value=False)
+    elif radius > 0:
+        out = ndi.binary_closing(img, structure=structure, border_value=False)
+    return out  # type: ignore
+
+
+def _get_radius_px(radius: nm, scale: nm) -> int:
     try:
         radius = float(radius)
     except ValueError:
         raise ValueError(f"radius must be a number, got {radius!r}")
     radius_px = abs(radius / scale)
     if radius_px < 1:
-        return img
-    r = int(np.ceil(radius_px))
+        return 0
+    return int(np.ceil(radius_px))
+
+
+def _get_structure(r: int) -> NDArray[np.int32]:
     size = 2 * r + 1
     zz, yy, xx = np.indices((size,) * 3)
-    structure = (xx - r) ** 2 + (yy - r) ** 2 + (zz - r) ** 2 <= r**2
-    if radius < 0:
-        out = ndi.binary_erosion(img, structure=structure, border_value=False)
-    elif radius > 0:
-        out = ndi.binary_dilation(img, structure=structure, border_value=False)
-    return out  # type: ignore
+    return (xx - r) ** 2 + (yy - r) ** 2 + (zz - r) ** 2 <= r**2
 
 
 @converter_function

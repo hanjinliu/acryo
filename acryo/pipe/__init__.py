@@ -1,4 +1,4 @@
-from ._masking import gaussian_smooth, soft_otsu, threshold_otsu, dilation
+from ._masking import gaussian_smooth, soft_otsu, threshold_otsu, dilation, closing
 from ._transform import (
     center_by_mass,
     gaussian_filter,
@@ -20,6 +20,7 @@ __all__ = [
     "soft_otsu",
     "threshold_otsu",
     "dilation",
+    "closing",
     "center_by_mass",
     "gaussian_filter",
     "lowpass_filter",
