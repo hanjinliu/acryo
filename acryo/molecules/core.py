@@ -951,7 +951,9 @@ class Molecules:
     def groupby(self, by, *more_by):
         """Group molecules into sub-groups."""
         df = self.to_dataframe()
-        return MoleculeGroup(df.groupby(by, *more_by, maintain_order=True))
+        return MoleculeGroup(df.group_by(by, *more_by, maintain_order=True))
+
+    group_by = groupby  # alias
 
     def cutby(self, by: str, bins: list[float]) -> MoleculeCutGroup:
         """Cut molecules into sub-groups by binning."""
@@ -959,10 +961,10 @@ class Molecules:
         while cat_name in self.features.columns:
             cat_name = f".{cat_name}"
         feature = self.features[by]
-        cat: pl.Series = feature.cut(bins, series=True).alias(cat_name)  # type: ignore
+        cat = feature.cut(bins, as_series=True).alias(cat_name)  # type: ignore
         df = self.to_dataframe().with_columns(cat)
         return MoleculeCutGroup(
-            df.groupby(cat_name, maintain_order=True), label=cat_name
+            df.group_by(cat_name, maintain_order=True), label=cat_name
         )
 
     def filter(

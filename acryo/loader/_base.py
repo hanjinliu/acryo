@@ -999,6 +999,8 @@ class LoaderBase(ABC):
             _by = tuple(by)
         return LoaderGroup._from_loader(self, _by)
 
+    group_by = groupby  # alias
+
     def _get_output_shape(self, output_shape: _ShapeType) -> tuple[pixel, ...]:
         """Normalize the `output_shape` parameter."""
         if output_shape is None:
