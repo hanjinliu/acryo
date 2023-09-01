@@ -177,6 +177,19 @@ class Molecules:
         return cls(pos, Rotation.from_matrix(matrix), features)
 
     @classmethod
+    def from_file(
+        cls,
+        path: PathLike,
+        pos_cols: list[str] = ["z", "y", "x"],
+        rot_cols: list[str] = ["zvec", "yvec", "xvec"],
+    ) -> Self:
+        """Load a file as a Molecules object using proper reader."""
+        path = Path(path)
+        if path.suffix in (".pq", ".parquet"):
+            return cls.from_parquet(path, pos_cols, rot_cols)
+        return cls.from_csv(path, pos_cols, rot_cols)
+
+    @classmethod
     def from_csv(
         cls,
         path: PathLike,
@@ -306,6 +319,7 @@ class Molecules:
         save_path: PathLike,
         *,
         compression: ParquetCompression = "zstd",
+        compression_level: int | None = 10,
     ) -> None:
         """
         Save molecules as a parquet file.
@@ -318,8 +332,17 @@ class Molecules:
             Compression method, by default "zstd".
         """
         return self.to_dataframe().write_parquet(
-            str(save_path), compression=compression
+            str(save_path),
+            compression=compression,
+            compression_level=compression_level,
         )
+
+    def to_file(self, save_path: PathLike) -> None:
+        """Save molecules as a file."""
+        save_path = Path(save_path)
+        if save_path.suffix in (".pq", ".parquet"):
+            return self.to_parquet(save_path)
+        return self.to_csv(save_path)
 
     def count(self) -> int:
         """Return the number of molecules."""
