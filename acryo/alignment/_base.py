@@ -766,8 +766,8 @@ class RotationImplemented(BaseAlignmentModel):
                     pool_mask.asarrays(self.input_shape, dtype=np.float32),
                 )
             )
-            template_input = xp.stack(_templates, axis=0)
-            mask_input = xp.stack(_masks, axis=0)
+            template_input = xp.stack(_templates, axis=0)  # type: ignore
+            mask_input = xp.stack(_masks, axis=0)  # type: ignore
         else:
             pool = DaskTaskPool.from_func(self.pre_transform)
             if self._n_templates > 1:

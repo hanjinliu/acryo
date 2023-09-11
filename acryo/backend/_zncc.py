@@ -171,8 +171,8 @@ def _create_mesh(
     """
     Create a 3 pixel x 3 pixel (if not upsampled) mesh for image upsampling.
     """
-    shifts = np.array(maxima, dtype=np.float32) - midpoints
-    _max_shifts = np.array(max_shifts, dtype=np.float32)
+    shifts = np.asarray(maxima, dtype=np.float32) - midpoints
+    _max_shifts = np.asarray(max_shifts, dtype=np.float32)
     left = -shifts - _max_shifts
     right = -shifts + _max_shifts
     local_shifts = [
@@ -209,8 +209,8 @@ def fftconvolve(
 
     # convolve in the frequency domain
     fshape: tuple[int, ...] = tuple(
-        next_fast_len(shape[a], False) for a in range(in1.ndim)
-    )  # type: ignore
+        next_fast_len(shape[a], False) for a in range(in1.ndim)  # type: ignore
+    )
 
     sp1 = backend.rfftn(in1, fshape)
     sp2 = backend.rfftn(in2, fshape)
