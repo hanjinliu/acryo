@@ -5,6 +5,7 @@ from ._transform import (
     lowpass_filter,
     highpass_filter,
 )
+from ._classes import ImageProvider, ImageConverter
 from ._curry import provider_function, converter_function
 from ._imread import (
     from_file,
@@ -33,4 +34,6 @@ __all__ = [
     "from_atoms",
     "provider_function",
     "converter_function",
+    "ImageProvider",
+    "ImageConverter",
 ]

@@ -635,6 +635,7 @@ class RotationImplemented(BaseAlignmentModel):
         pool = DaskTaskPool.from_func(self._optimize)
         pos = np.zeros(3, dtype=np.float32)
         img_input = xp.asarray(img)
+        img_shape = img_input.shape
         _template, _mask = self._get_template_and_mask_input(backend=xp)
         if _template.ndim == 3:
             _template = [_template]
@@ -660,7 +661,7 @@ class RotationImplemented(BaseAlignmentModel):
             score=opt_result[2],
         )
 
-        mtx = result.affine_matrix(img_input.shape)
+        mtx = result.affine_matrix(img_shape)
         _img_cval = _normalize_cval(cval, img_input, xp)
         img_trans = xp.affine_transform(img_input, mtx, cval=_img_cval)
         return xp.asnumpy(img_trans), result
