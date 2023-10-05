@@ -8,7 +8,7 @@ from typing import (
 )
 
 if TYPE_CHECKING:
-    from polars.dataframe.groupby import GroupBy
+    from polars.dataframe.group_by import GroupBy
     from .core import Molecules
 
 _K = TypeVar("_K", bound=Hashable)

@@ -4,6 +4,7 @@ from ._transform import (
     gaussian_filter,
     lowpass_filter,
     highpass_filter,
+    shift,
 )
 from ._classes import ImageProvider, ImageConverter
 from ._curry import provider_function, converter_function
@@ -26,6 +27,7 @@ __all__ = [
     "gaussian_filter",
     "lowpass_filter",
     "highpass_filter",
+    "shift",
     "from_file",
     "from_files",
     "from_gaussian",

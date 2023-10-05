@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>acryo.pipe._classes &mdash; acryo 0.4.5 documentation</title>
+      <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="../../../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+
+        <script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
+        <script src="../../../_static/jquery.js"></script>
+        <script src="../../../_static/underscore.js"></script>
+        <script src="../../../_static/doctools.js"></script>
+        <script src="https://unpkg.com/mermaid@9.4.0/dist/mermaid.min.js"></script>
+        <script>mermaid.initialize({startOnLoad:true});</script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+</head>
+
+<body class="wy-body-for-nav">
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+
+
+          <a href="../../../index.html" class="icon icon-home">
+            acryo
+          </a>
+              <div class="version">
+                0.4.5
+              </div>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../main/molecules.html">Molecules</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../main/loader.html">Subtomogram Loader</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../main/caching.html">Cache Subtomograms</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../main/pipe.html">Piping Images to the Loader</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../main/alignment.html">Alignment Model</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">acryo</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">acryo.pipe._classes</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+
+  <h1>Source code for acryo.pipe._classes</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">__future__</span> <span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">overload</span><span class="p">,</span> <span class="n">TypeVar</span><span class="p">,</span> <span class="n">Generic</span>
+<span class="kn">from</span> <span class="nn">typing_extensions</span> <span class="kn">import</span> <span class="n">Self</span>
+
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">from</span> <span class="nn">numpy.typing</span> <span class="kn">import</span> <span class="n">NDArray</span>
+<span class="kn">from</span> <span class="nn">acryo._types</span> <span class="kn">import</span> <span class="n">nm</span>
+
+<span class="n">_R</span> <span class="o">=</span> <span class="n">TypeVar</span><span class="p">(</span><span class="s2">&quot;_R&quot;</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="s2">&quot;list[np.ndarray]&quot;</span><span class="p">)</span>
+
+
+<span class="k">class</span> <span class="nc">_Pipeline</span><span class="p">:</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fn</span><span class="p">:</span> <span class="n">Callable</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_func</span> <span class="o">=</span> <span class="n">fn</span>
+        <span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">fn</span><span class="p">,</span> <span class="s2">&quot;__name__&quot;</span><span class="p">,</span> <span class="nb">repr</span><span class="p">(</span><span class="n">fn</span><span class="p">))</span>
+
+    <span class="k">def</span> <span class="nf">with_name</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span> <span class="o">=</span> <span class="n">name</span>
+        <span class="k">return</span> <span class="bp">self</span>
+
+    <span class="k">def</span> <span class="fm">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">&lt;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">&gt;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__radd__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span> <span class="o">+</span> <span class="n">other</span>
+
+    <span class="k">def</span> <span class="fm">__rsub__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span> <span class="o">-</span> <span class="n">other</span>
+
+    <span class="k">def</span> <span class="fm">__rmul__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span> <span class="o">*</span> <span class="n">other</span>
+
+    <span class="k">def</span> <span class="fm">__rtruediv__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span> <span class="o">/</span> <span class="n">other</span>
+
+
+<div class="viewcode-block" id="ImageProvider"><a class="viewcode-back" href="../../../apidoc/acryo.pipe.html#acryo.pipe.ImageProvider">[docs]</a><span class="k">class</span> <span class="nc">ImageProvider</span><span class="p">(</span><span class="n">_Pipeline</span><span class="p">,</span> <span class="n">Generic</span><span class="p">[</span><span class="n">_R</span><span class="p">]):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Function that provides an image at a given scale.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">provider</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">nm</span><span class="p">],</span> <span class="n">_R</span><span class="p">]):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">provider</span><span class="p">)</span>
+
+<div class="viewcode-block" id="ImageProvider.provide"><a class="viewcode-back" href="../../../apidoc/acryo.pipe.html#acryo.pipe.ImageProvider.provide">[docs]</a>    <span class="k">def</span> <span class="nf">provide</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="n">nm</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">_R</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Provide an image at a given scale.&quot;&quot;&quot;</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_func</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span>
+        <span class="n">assert_n_3d_arrays</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_func</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">out</span></div>
+
+    <span class="k">def</span> <span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="n">nm</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">_R</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">provide</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__add__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ImageProvider</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span> <span class="o">+</span> <span class="n">other</span><span class="p">(</span><span class="n">scale</span><span class="p">))</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> + </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span> <span class="o">+</span> <span class="n">other</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__sub__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ImageProvider</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span> <span class="o">-</span> <span class="n">other</span><span class="p">(</span><span class="n">scale</span><span class="p">))</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> - </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span> <span class="o">-</span> <span class="n">other</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__mul__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ImageProvider</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span> <span class="o">*</span> <span class="n">other</span><span class="p">(</span><span class="n">scale</span><span class="p">))</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> * </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span> <span class="o">*</span> <span class="n">other</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__truediv__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ImageProvider</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">isscalar</span><span class="p">(</span><span class="n">other</span><span class="p">)</span> <span class="ow">and</span> <span class="n">other</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ZeroDivisionError</span><span class="p">(</span><span class="s2">&quot;Cannot divide by zero.&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span> <span class="o">/</span> <span class="n">other</span><span class="p">(</span><span class="n">scale</span><span class="p">))</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> / </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span> <span class="o">/</span> <span class="n">other</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__eq__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ImageProvider</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span> <span class="o">==</span> <span class="n">other</span><span class="p">(</span><span class="n">scale</span><span class="p">))</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> == </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span> <span class="o">==</span> <span class="n">other</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__ne__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ImageProvider</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span> <span class="o">!=</span> <span class="n">other</span><span class="p">(</span><span class="n">scale</span><span class="p">))</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> != </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span> <span class="o">!=</span> <span class="n">other</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__lt__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ImageProvider</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
+                <span class="k">lambda</span> <span class="n">scale</span><span class="p">:</span> <span class="n">_lt</span><span class="p">(</span><span class="bp">self</span><span class="p">(</span><span class="n">scale</span><span class="p">),</span> <span class="n">other</span><span class="p">(</span><span class="n">scale</span><span class="p">))</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> &lt; </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span> <span class="o">&lt;</span> <span class="n">other</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__le__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ImageProvider</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
+                <span class="k">lambda</span> <span class="n">scale</span><span class="p">:</span> <span class="n">_le</span><span class="p">(</span><span class="bp">self</span><span class="p">(</span><span class="n">scale</span><span class="p">),</span> <span class="n">other</span><span class="p">(</span><span class="n">scale</span><span class="p">))</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> &lt;= </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="n">other</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__gt__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ImageProvider</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
+                <span class="k">lambda</span> <span class="n">scale</span><span class="p">:</span> <span class="n">_gt</span><span class="p">(</span><span class="bp">self</span><span class="p">(</span><span class="n">scale</span><span class="p">),</span> <span class="n">other</span><span class="p">(</span><span class="n">scale</span><span class="p">))</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> &gt; </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span> <span class="o">&gt;</span> <span class="n">other</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__ge__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ImageProvider</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
+                <span class="k">lambda</span> <span class="n">scale</span><span class="p">:</span> <span class="n">_ge</span><span class="p">(</span><span class="bp">self</span><span class="p">(</span><span class="n">scale</span><span class="p">),</span> <span class="n">other</span><span class="p">(</span><span class="n">scale</span><span class="p">))</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> &gt;= </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="n">other</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__neg__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ImageProvider</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">scale</span><span class="p">:</span> <span class="o">-</span><span class="bp">self</span><span class="p">(</span><span class="n">scale</span><span class="p">))</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;(-</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span>
+        <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="ImageConverter"><a class="viewcode-back" href="../../../apidoc/acryo.pipe.html#acryo.pipe.ImageConverter">[docs]</a><span class="k">class</span> <span class="nc">ImageConverter</span><span class="p">(</span><span class="n">_Pipeline</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Functionthat convert an image.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">converter</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span> <span class="n">nm</span><span class="p">],</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]]</span>
+    <span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">converter</span><span class="p">)</span>
+
+<div class="viewcode-block" id="ImageConverter.convert"><a class="viewcode-back" href="../../../apidoc/acryo.pipe.html#acryo.pipe.ImageConverter.convert">[docs]</a>    <span class="k">def</span> <span class="nf">convert</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span> <span class="n">scale</span><span class="p">:</span> <span class="n">nm</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_func</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span>
+        <span class="n">_assert_3d_array</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_func</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">out</span></div>
+
+    <span class="k">def</span> <span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span> <span class="n">scale</span><span class="p">:</span> <span class="n">nm</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">convert</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span>
+
+    <span class="nd">@overload</span>
+    <span class="k">def</span> <span class="nf">compose</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">:</span> <span class="n">ImageProvider</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ImageProvider</span><span class="p">:</span>
+        <span class="o">...</span>
+
+    <span class="nd">@overload</span>
+    <span class="k">def</span> <span class="nf">compose</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">:</span> <span class="n">ImageConverter</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ImageConverter</span><span class="p">:</span>
+        <span class="o">...</span>
+
+<div class="viewcode-block" id="ImageConverter.compose"><a class="viewcode-back" href="../../../apidoc/acryo.pipe.html#acryo.pipe.ImageConverter.compose">[docs]</a>    <span class="k">def</span> <span class="nf">compose</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Function composition&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
+            <span class="n">fn</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">other</span><span class="p">(</span><span class="n">scale</span><span class="p">),</span> <span class="n">scale</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageConverter</span><span class="p">):</span>
+            <span class="n">fn</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">other</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">),</span> <span class="n">scale</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="s2">&quot;Cannot compose with a non-pipeline object.&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">other</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="n">fn</span><span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">○</span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span></div>
+
+    <span class="fm">__matmul__</span> <span class="o">=</span> <span class="n">compose</span>
+
+<div class="viewcode-block" id="ImageConverter.with_scale"><a class="viewcode-back" href="../../../apidoc/acryo.pipe.html#acryo.pipe.ImageConverter.with_scale">[docs]</a>    <span class="k">def</span> <span class="nf">with_scale</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="n">nm</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]],</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Partialize converter with a given scale.&quot;&quot;&quot;</span>
+
+        <span class="k">def</span> <span class="nf">fn</span><span class="p">(</span><span class="n">img</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span>
+
+        <span class="n">fn</span><span class="o">.</span><span class="vm">__name__</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_func</span><span class="o">.</span><span class="vm">__name__</span>
+        <span class="k">return</span> <span class="n">fn</span></div>
+
+    <span class="k">def</span> <span class="fm">__add__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ImageConverter</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageConverter</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
+                <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span> <span class="o">+</span> <span class="n">other</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> + </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
+                <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span> <span class="o">+</span> <span class="n">other</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> + </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span> <span class="o">+</span> <span class="n">other</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__sub__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ImageConverter</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageConverter</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
+                <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span> <span class="o">-</span> <span class="n">other</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> - </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
+                <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span> <span class="o">-</span> <span class="n">other</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> - </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span> <span class="o">-</span> <span class="n">other</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__mul__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ImageConverter</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageConverter</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
+                <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span> <span class="o">*</span> <span class="n">other</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> * </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
+                <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span> <span class="o">*</span> <span class="n">other</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> * </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span> <span class="o">*</span> <span class="n">other</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__truediv__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ImageConverter</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">isscalar</span><span class="p">(</span><span class="n">other</span><span class="p">)</span> <span class="ow">and</span> <span class="n">other</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ZeroDivisionError</span><span class="p">(</span><span class="s2">&quot;Cannot divide by zero.&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageConverter</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
+                <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span> <span class="o">/</span> <span class="n">other</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> / </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
+                <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span> <span class="o">/</span> <span class="n">other</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> / </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span> <span class="o">/</span> <span class="n">other</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__eq__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ImageConverter</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageConverter</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
+                <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span> <span class="o">==</span> <span class="n">other</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> == </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
+                <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span> <span class="o">==</span> <span class="n">other</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> == </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span> <span class="o">==</span> <span class="n">other</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__ne__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ImageConverter</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageConverter</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
+                <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span> <span class="o">!=</span> <span class="n">other</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> != </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
+                <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span> <span class="o">!=</span> <span class="n">other</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> != </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span> <span class="o">!=</span> <span class="n">other</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__gt__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ImageConverter</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageConverter</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
+                <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="n">_gt</span><span class="p">(</span><span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">),</span> <span class="n">other</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">))</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> &gt; </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
+                <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="n">_gt</span><span class="p">(</span><span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">),</span> <span class="n">other</span><span class="p">(</span><span class="n">scale</span><span class="p">))</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> &gt; </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span> <span class="o">&gt;</span> <span class="n">other</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__ge__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ImageConverter</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageConverter</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
+                <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="n">_ge</span><span class="p">(</span><span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">),</span> <span class="n">other</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">))</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> &gt;= </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
+                <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="n">_ge</span><span class="p">(</span><span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">),</span> <span class="n">other</span><span class="p">(</span><span class="n">scale</span><span class="p">))</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> &gt;= </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="n">other</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__lt__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ImageConverter</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageConverter</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
+                <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="n">_lt</span><span class="p">(</span><span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">),</span> <span class="n">other</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">))</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> &lt; </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
+                <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="n">_lt</span><span class="p">(</span><span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">),</span> <span class="n">other</span><span class="p">(</span><span class="n">scale</span><span class="p">))</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> &lt; </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span> <span class="o">&lt;</span> <span class="n">other</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__le__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ImageConverter</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageConverter</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
+                <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="n">_le</span><span class="p">(</span><span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">),</span> <span class="n">other</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">))</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> &lt;= </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">ImageProvider</span><span class="p">):</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
+                <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="n">_le</span><span class="p">(</span><span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">),</span> <span class="n">other</span><span class="p">(</span><span class="n">scale</span><span class="p">))</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> &lt;= </span><span class="si">{</span><span class="n">other</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="n">other</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__neg__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ImageConverter</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="o">-</span><span class="bp">self</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">scale</span><span class="p">))</span></div>
+
+
+<span class="k">def</span> <span class="nf">assert_n_3d_arrays</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="n">func</span><span class="p">):</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">_assert_3d_array</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="n">func</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">o</span> <span class="ow">in</span> <span class="n">out</span><span class="p">:</span>
+        <span class="n">_assert_3d_array</span><span class="p">(</span><span class="n">o</span><span class="p">,</span> <span class="n">func</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_assert_3d_array</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="n">func</span><span class="p">):</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Function </span><span class="si">{</span><span class="n">func</span><span class="si">!r}</span><span class="s2"> did not return a numpy.ndarray (got </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">out</span><span class="p">)</span><span class="si">}</span><span class="s2">)&quot;</span>
+        <span class="p">)</span>
+    <span class="k">if</span> <span class="n">out</span><span class="o">.</span><span class="n">ndim</span> <span class="o">!=</span> <span class="mi">3</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Wrong image dimensionality: </span><span class="si">{</span><span class="n">out</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_ge</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">greater_equal</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_le</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">less_equal</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_gt</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">greater</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_lt</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">less</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2023, Hanjin Liu.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+
+</body>
+</html>

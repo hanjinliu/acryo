@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Index &mdash; acryo 0.4.4 documentation</title>
+  <title>Index &mdash; acryo 0.4.5 documentation</title>
       <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -11,8 +11,9 @@
   <![endif]-->
 
         <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+        <script src="_static/jquery.js"></script>
+        <script src="_static/underscore.js"></script>
         <script src="_static/doctools.js"></script>
-        <script src="_static/sphinx_highlight.js"></script>
         <script src="https://unpkg.com/mermaid@9.4.0/dist/mermaid.min.js"></script>
         <script>mermaid.initialize({startOnLoad:true});</script>
     <script src="_static/js/theme.js"></script>
@@ -32,7 +33,7 @@
             acryo
           </a>
               <div class="version">
-                0.4.4
+                0.4.5
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
@@ -315,15 +316,9 @@
 <h2 id="C">C</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="apidoc/acryo.html#acryo.Molecules.cartesian_at">cartesian_at() (acryo.Molecules method)</a>
-
-      <ul>
-        <li><a href="apidoc/acryo.molecules.html#acryo.molecules.core.Molecules.cartesian_at">(acryo.molecules.core.Molecules method)</a>
-</li>
-        <li><a href="apidoc/acryo.molecules.html#acryo.molecules.Molecules.cartesian_at">(acryo.molecules.Molecules method)</a>
-</li>
-      </ul></li>
       <li><a href="apidoc/acryo.pipe.html#acryo.pipe.center_by_mass">center_by_mass() (in module acryo.pipe)</a>
+</li>
+      <li><a href="apidoc/acryo.pipe.html#acryo.pipe.closing">closing() (in module acryo.pipe)</a>
 </li>
       <li><a href="apidoc/acryo.html#acryo.simulator.TomogramSimulator.collect_molecules">collect_molecules() (acryo.simulator.TomogramSimulator method)</a>
 
@@ -339,6 +334,8 @@
         <li><a href="apidoc/acryo.html#acryo.TomogramSimulator.components">(acryo.TomogramSimulator property)</a>
 </li>
       </ul></li>
+      <li><a href="apidoc/acryo.pipe.html#acryo.pipe.ImageConverter.compose">compose() (acryo.pipe.ImageConverter method)</a>
+</li>
       <li><a href="apidoc/acryo.html#acryo.Molecules.concat">concat() (acryo.Molecules class method)</a>
 
       <ul>
@@ -373,6 +370,8 @@
       </ul></li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="apidoc/acryo.pipe.html#acryo.pipe.ImageConverter.convert">convert() (acryo.pipe.ImageConverter method)</a>
+</li>
       <li><a href="apidoc/acryo.pipe.html#acryo.pipe.converter_function">converter_function() (in module acryo.pipe)</a>
 </li>
       <li><a href="apidoc/acryo.html#acryo.Molecules.copy">copy() (acryo.Molecules method)</a>
@@ -401,8 +400,16 @@
         <li><a href="apidoc/acryo.molecules.html#acryo.molecules.Molecules.count">(acryo.molecules.Molecules method)</a>
 </li>
       </ul></li>
-      <li><a href="apidoc/acryo.tilt.html#acryo.tilt.TiltSeriesModel.create_mask">create_mask() (acryo.tilt.TiltSeriesModel method)</a>
+      <li><a href="apidoc/acryo.tilt.html#acryo.tilt.NoWedge.create_mask">create_mask() (acryo.tilt.NoWedge method)</a>
+
+      <ul>
+        <li><a href="apidoc/acryo.tilt.html#acryo.tilt.SingleAxis.create_mask">(acryo.tilt.SingleAxis method)</a>
 </li>
+        <li><a href="apidoc/acryo.tilt.html#acryo.tilt.TiltSeriesModel.create_mask">(acryo.tilt.TiltSeriesModel method)</a>
+</li>
+        <li><a href="apidoc/acryo.tilt.html#acryo.tilt.UnionAxes.create_mask">(acryo.tilt.UnionAxes method)</a>
+</li>
+      </ul></li>
       <li><a href="apidoc/acryo.molecules.html#acryo.molecules.core.cross">cross() (in module acryo.molecules.core)</a>
 
       <ul>
@@ -541,8 +548,6 @@
         <li><a href="apidoc/acryo.molecules.html#acryo.molecules.Molecules.from_dataframe">(acryo.molecules.Molecules class method)</a>
 </li>
       </ul></li>
-  </ul></td>
-  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="apidoc/acryo.html#acryo.Molecules.from_euler">from_euler() (acryo.Molecules class method)</a>
 
       <ul>
@@ -551,10 +556,20 @@
         <li><a href="apidoc/acryo.molecules.html#acryo.molecules.Molecules.from_euler">(acryo.molecules.Molecules class method)</a>
 </li>
       </ul></li>
+  </ul></td>
+  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="apidoc/acryo.molecules.html#acryo.molecules.from_euler_xyz_coords">from_euler_xyz_coords() (in module acryo.molecules)</a>
 </li>
-      <li><a href="apidoc/acryo.pipe.html#acryo.pipe.from_file">from_file() (in module acryo.pipe)</a>
+      <li><a href="apidoc/acryo.html#acryo.Molecules.from_file">from_file() (acryo.Molecules class method)</a>
+
+      <ul>
+        <li><a href="apidoc/acryo.molecules.html#acryo.molecules.core.Molecules.from_file">(acryo.molecules.core.Molecules class method)</a>
 </li>
+        <li><a href="apidoc/acryo.molecules.html#acryo.molecules.Molecules.from_file">(acryo.molecules.Molecules class method)</a>
+</li>
+        <li><a href="apidoc/acryo.pipe.html#acryo.pipe.from_file">(in module acryo.pipe)</a>
+</li>
+      </ul></li>
       <li><a href="apidoc/acryo.pipe.html#acryo.pipe.from_files">from_files() (in module acryo.pipe)</a>
 </li>
       <li><a href="apidoc/acryo.pipe.html#acryo.pipe.from_gaussian">from_gaussian() (in module acryo.pipe)</a>
@@ -651,6 +666,14 @@
         <li><a href="apidoc/acryo.testing.html#acryo.testing.TomogramGenerator.grid_shape">(acryo.testing.TomogramGenerator property)</a>
 </li>
       </ul></li>
+      <li><a href="apidoc/acryo.html#acryo.Molecules.group_by">group_by() (acryo.Molecules method)</a>
+
+      <ul>
+        <li><a href="apidoc/acryo.molecules.html#acryo.molecules.core.Molecules.group_by">(acryo.molecules.core.Molecules method)</a>
+</li>
+        <li><a href="apidoc/acryo.molecules.html#acryo.molecules.Molecules.group_by">(acryo.molecules.Molecules method)</a>
+</li>
+      </ul></li>
       <li><a href="apidoc/acryo.html#acryo.Molecules.groupby">groupby() (acryo.Molecules method)</a>
 
       <ul>
@@ -705,14 +728,18 @@
         <li><a href="apidoc/acryo.html#acryo.SubtomogramLoader.image">(acryo.SubtomogramLoader property)</a>
 </li>
       </ul></li>
+      <li><a href="apidoc/acryo.pipe.html#acryo.pipe.ImageConverter">ImageConverter (class in acryo.pipe)</a>
+</li>
+      <li><a href="apidoc/acryo.pipe.html#acryo.pipe.ImageProvider">ImageProvider (class in acryo.pipe)</a>
+</li>
+  </ul></td>
+  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="apidoc/acryo.html#acryo.BatchLoader.images">images (acryo.BatchLoader property)</a>
 
       <ul>
         <li><a href="apidoc/acryo.loader.html#acryo.loader.BatchLoader.images">(acryo.loader.BatchLoader property)</a>
 </li>
       </ul></li>
-  </ul></td>
-  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="apidoc/acryo.loader.html#acryo.loader.SubtomogramLoader.imread">imread() (acryo.loader.SubtomogramLoader class method)</a>
 
       <ul>
@@ -926,6 +953,8 @@
         <li><a href="apidoc/acryo.testing.html#acryo.testing.TomogramGenerator.noise_sigma">(acryo.testing.TomogramGenerator property)</a>
 </li>
       </ul></li>
+      <li><a href="apidoc/acryo.tilt.html#acryo.tilt.NoWedge">NoWedge (class in acryo.tilt)</a>
+</li>
   </ul></td>
 </tr></table>
 
@@ -970,10 +999,10 @@
         <li><a href="apidoc/acryo.pick.html#acryo.pick.ZNCCTemplateMatcher.pick_in_chunk">(acryo.pick.ZNCCTemplateMatcher method)</a>
 </li>
       </ul></li>
-  </ul></td>
-  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="apidoc/acryo.pick.html#acryo.pick.ZNCCTemplateMatcher.pick_molecules">pick_molecules() (acryo.pick.ZNCCTemplateMatcher method)</a>
 </li>
+  </ul></td>
+  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="apidoc/acryo.classification.html#acryo.classification.pca.PcaClassifier.plot_transform">plot_transform() (acryo.classification.pca.PcaClassifier method)</a>
 
       <ul>
@@ -1000,6 +1029,8 @@
         <li><a href="apidoc/acryo.classification.html#acryo.classification.PcaClassifier.predict">(acryo.classification.PcaClassifier method)</a>
 </li>
       </ul></li>
+      <li><a href="apidoc/acryo.pipe.html#acryo.pipe.ImageProvider.provide">provide() (acryo.pipe.ImageProvider method)</a>
+</li>
       <li><a href="apidoc/acryo.pipe.html#acryo.pipe.provider_function">provider_function() (in module acryo.pipe)</a>
 </li>
   </ul></td>
@@ -1172,6 +1203,8 @@
 </li>
       <li><a href="apidoc/acryo.alignment.html#acryo.alignment.AlignmentResult.shift">shift (acryo.alignment.AlignmentResult attribute)</a>
 </li>
+      <li><a href="apidoc/acryo.pipe.html#acryo.pipe.shift">shift() (in module acryo.pipe)</a>
+</li>
       <li><a href="apidoc/acryo.html#acryo.simulator.TomogramSimulator.simulate">simulate() (acryo.simulator.TomogramSimulator method)</a>
 
       <ul>
@@ -1204,6 +1237,8 @@
         <li><a href="apidoc/acryo.tilt.html#acryo.tilt.core.single_axis">(in module acryo.tilt.core)</a>
 </li>
       </ul></li>
+      <li><a href="apidoc/acryo.tilt.html#acryo.tilt.SingleAxis">SingleAxis (class in acryo.tilt)</a>
+</li>
       <li><a href="apidoc/acryo.pipe.html#acryo.pipe.soft_otsu">soft_otsu() (in module acryo.pipe)</a>
 </li>
       <li><a href="apidoc/acryo.html#acryo.Molecules.sort">sort() (acryo.Molecules method)</a>
@@ -1274,6 +1309,8 @@
 </li>
       <li><a href="apidoc/acryo.pipe.html#acryo.pipe.threshold_otsu">threshold_otsu() (in module acryo.pipe)</a>
 </li>
+      <li><a href="apidoc/acryo.tilt.html#acryo.tilt.SingleAxis.tilt_range">tilt_range (acryo.tilt.SingleAxis property)</a>
+</li>
       <li><a href="apidoc/acryo.tilt.html#acryo.tilt.TiltSeriesModel">TiltSeriesModel (class in acryo.tilt)</a>
 </li>
       <li><a href="apidoc/acryo.html#acryo.Molecules.to_csv">to_csv() (acryo.Molecules method)</a>
@@ -1292,6 +1329,16 @@
         <li><a href="apidoc/acryo.molecules.html#acryo.molecules.Molecules.to_dataframe">(acryo.molecules.Molecules method)</a>
 </li>
       </ul></li>
+      <li><a href="apidoc/acryo.html#acryo.Molecules.to_file">to_file() (acryo.Molecules method)</a>
+
+      <ul>
+        <li><a href="apidoc/acryo.molecules.html#acryo.molecules.core.Molecules.to_file">(acryo.molecules.core.Molecules method)</a>
+</li>
+        <li><a href="apidoc/acryo.molecules.html#acryo.molecules.Molecules.to_file">(acryo.molecules.Molecules method)</a>
+</li>
+      </ul></li>
+  </ul></td>
+  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="apidoc/acryo.html#acryo.Molecules.to_parquet">to_parquet() (acryo.Molecules method)</a>
 
       <ul>
@@ -1300,8 +1347,6 @@
         <li><a href="apidoc/acryo.molecules.html#acryo.molecules.Molecules.to_parquet">(acryo.molecules.Molecules method)</a>
 </li>
       </ul></li>
-  </ul></td>
-  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="apidoc/acryo.testing.html#acryo.testing.TomogramGenerator">TomogramGenerator (class in acryo.testing)</a>
 
       <ul>
@@ -1352,10 +1397,12 @@
 <h2 id="U">U</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="apidoc/acryo.backend.html#acryo.backend.Backend.unravel_index">unravel_index() (acryo.backend.Backend method)</a>
+      <li><a href="apidoc/acryo.tilt.html#acryo.tilt.UnionAxes">UnionAxes (class in acryo.tilt)</a>
 </li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="apidoc/acryo.backend.html#acryo.backend.Backend.unravel_index">unravel_index() (acryo.backend.Backend method)</a>
+</li>
       <li><a href="apidoc/acryo.backend.html#acryo.backend.using_backend">using_backend() (in module acryo.backend)</a>
 </li>
   </ul></td>
@@ -1372,8 +1419,6 @@
         <li><a href="apidoc/acryo.molecules.html#acryo.molecules.Molecules.with_features">(acryo.molecules.Molecules method)</a>
 </li>
       </ul></li>
-  </ul></td>
-  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="apidoc/acryo.alignment.html#acryo.alignment.BaseAlignmentModel.with_params">with_params() (acryo.alignment.BaseAlignmentModel class method)</a>
 
       <ul>
@@ -1382,6 +1427,10 @@
         <li><a href="apidoc/acryo.alignment.html#acryo.alignment.TomographyInput.with_params">(acryo.alignment.TomographyInput class method)</a>
 </li>
       </ul></li>
+  </ul></td>
+  <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="apidoc/acryo.pipe.html#acryo.pipe.ImageConverter.with_scale">with_scale() (acryo.pipe.ImageConverter method)</a>
+</li>
       <li><a href="apidoc/acryo.testing.html#acryo.testing.core.wrange">wrange() (in module acryo.testing.core)</a>
 </li>
   </ul></td>

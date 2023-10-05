@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo.pipe._transform &mdash; acryo 0.4.0 documentation</title>
+  <title>acryo.pipe._transform &mdash; acryo 0.4.5 documentation</title>
       <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -33,7 +33,7 @@
             acryo
           </a>
               <div class="version">
-                0.4.0
+                0.4.5
               </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
@@ -77,6 +77,8 @@
 
   <h1>Source code for acryo.pipe._transform</h1><div class="highlight"><pre>
 <span></span><span class="kn">from</span> <span class="nn">__future__</span> <span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">TYPE_CHECKING</span>
 <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
 <span class="kn">from</span> <span class="nn">numpy.typing</span> <span class="kn">import</span> <span class="n">NDArray</span>
 <span class="kn">from</span> <span class="nn">scipy</span> <span class="kn">import</span> <span class="n">ndimage</span> <span class="k">as</span> <span class="n">ndi</span>
@@ -85,6 +87,8 @@
 <span class="kn">from</span> <span class="nn">acryo._typed_scipy</span> <span class="kn">import</span> <span class="n">shift</span> <span class="k">as</span> <span class="n">ndi_shift</span>
 <span class="kn">from</span> <span class="nn">acryo.pipe._curry</span> <span class="kn">import</span> <span class="n">converter_function</span>
 
+<span class="k">if</span> <span class="n">TYPE_CHECKING</span><span class="p">:</span>
+    <span class="kn">from</span> <span class="nn">acryo._typed_scipy</span> <span class="kn">import</span> <span class="n">Mode</span>
 
 <div class="viewcode-block" id="center_by_mass"><a class="viewcode-back" href="../../../apidoc/acryo.pipe.html#acryo.pipe.center_by_mass">[docs]</a><span class="nd">@converter_function</span>
 <span class="k">def</span> <span class="nf">center_by_mass</span><span class="p">(</span>
@@ -111,6 +115,22 @@
 <div class="viewcode-block" id="highpass_filter"><a class="viewcode-back" href="../../../apidoc/acryo.pipe.html#acryo.pipe.highpass_filter">[docs]</a><span class="nd">@converter_function</span>
 <span class="k">def</span> <span class="nf">highpass_filter</span><span class="p">(</span><span class="n">img</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span> <span class="n">scale</span><span class="p">:</span> <span class="n">nm</span><span class="p">,</span> <span class="n">cutoff</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">order</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">2</span><span class="p">):</span>
     <span class="k">return</span> <span class="n">_utils</span><span class="o">.</span><span class="n">highpass_filter</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">cutoff</span><span class="o">=</span><span class="n">cutoff</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="n">order</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="shift"><a class="viewcode-back" href="../../../apidoc/acryo.pipe.html#acryo.pipe.shift">[docs]</a><span class="nd">@converter_function</span>
+<span class="k">def</span> <span class="nf">shift</span><span class="p">(</span>
+    <span class="n">img</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
+    <span class="n">scale</span><span class="p">:</span> <span class="n">nm</span><span class="p">,</span>
+    <span class="n">shift</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">nm</span><span class="p">,</span> <span class="n">nm</span><span class="p">,</span> <span class="n">nm</span><span class="p">],</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">order</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">3</span><span class="p">,</span>
+    <span class="n">mode</span><span class="p">:</span> <span class="n">Mode</span> <span class="o">=</span> <span class="s2">&quot;nearest&quot;</span><span class="p">,</span>
+    <span class="n">cval</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.0</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Shift the image by nm.&quot;&quot;&quot;</span>
+    <span class="n">shift_px</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">shift</span><span class="p">)</span> <span class="o">/</span> <span class="n">scale</span>
+    <span class="k">return</span> <span class="n">ndi_shift</span><span class="p">(</span>
+        <span class="n">img</span><span class="p">,</span> <span class="n">shift_px</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">prefilter</span><span class="o">=</span><span class="n">order</span><span class="o">&gt;</span><span class="mi">1</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="n">mode</span><span class="p">,</span> <span class="n">cval</span><span class="o">=</span><span class="n">cval</span>
+    <span class="p">)</span></div>
 </pre></div>
 
            </div>

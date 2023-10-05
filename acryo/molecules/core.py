@@ -9,13 +9,11 @@ from typing import (
     Union,
     overload,
 )
-import warnings
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 import polars as pl
 from scipy.spatial.transform import Rotation
 from acryo._types import nm
-from acryo._utils import deprecated_kwarg
 from acryo.molecules._group import MoleculeGroup
 from acryo.molecules._cut import MoleculeCutGroup
 from acryo.molecules._rotation import (
@@ -29,7 +27,7 @@ if TYPE_CHECKING:
     from polars.type_aliases import ParquetCompression
 
 _CSV_COLUMNS = ["z", "y", "x", "zvec", "yvec", "xvec"]
-PathLike = Union[str, Path, bytes]
+PathLike = Union[str, Path]
 IntoExpr = Union[str, pl.Expr]
 
 
@@ -494,19 +492,6 @@ class Molecules:
         translation_1[:, :3, 3] = -src
 
         return np.einsum("nij,njk,nkl->nil", translation_0, rot_mat, translation_1)
-
-    def cartesian_at(
-        self,
-        index,
-        shape: tuple[int, int, int],
-        scale: nm,
-    ):
-        warnings.warn(
-            "`cartesian_at` is deprecated and will be removed in the future. "
-            "Please use `local_coordinates` instead.",
-            DeprecationWarning,
-        )
-        return self.subset(index).local_coordinates(shape, scale, squeeze=True)
 
     def local_coordinates(
         self,
@@ -1014,7 +999,6 @@ class Molecules:
         df = self.to_dataframe()
         return self.__class__.from_dataframe(df.sample(n, seed=seed))
 
-    @deprecated_kwarg(old="reverse", new="descending")
     def sort(
         self,
         by: IntoExpr | Iterable[IntoExpr],

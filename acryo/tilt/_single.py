@@ -8,7 +8,7 @@ from acryo.tilt import _base, _utils
 
 
 class SingleAxis(_base.TiltSeriesModel):
-    def __init__(self, tilt_range=(-60.0, 60.0)):
+    def __init__(self, tilt_range: tuple[float, float] = (-60.0, 60.0)):
         _min, _max = tilt_range
         if _min >= _max:
             raise ValueError(f"Tilt range {tilt_range!r} does not satisfy min < max.")
