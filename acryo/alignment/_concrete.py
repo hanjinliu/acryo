@@ -69,7 +69,6 @@ class ZNCCAlignment(TomographyInput):
         shift, zncc = subpixel_zncc(
             backend.ifftn(subvolume * mw).real,
             backend.ifftn(template * mw).real,
-            upsample_factor=20,
             max_shifts=max_shifts,
             backend=backend,
         )

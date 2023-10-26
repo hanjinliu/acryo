@@ -232,6 +232,7 @@ class SubtomogramLoader(LoaderBase):
                     center=self.molecules.pos[i] / scale,
                     output_shape=output_shape,
                     rot=self.molecules.rotator[i],
+                    order=self.order,
                 )
             except _utils.SubvolumeOutOfBoundError as err:
                 raise err.with_msg(

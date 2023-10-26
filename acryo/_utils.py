@@ -181,7 +181,7 @@ def prepare_affine(
     center: Sequence[float],
     output_shape: Sequence[int],
     rot: Rotation,
-    order: int = 1,
+    order: int = 3,
 ) -> tuple[da.Array, NDArray[np.float32]]:
     output_center = np.array(output_shape) / 2 - 0.5
     slices: list[slice] = []
@@ -211,7 +211,7 @@ def prepare_affine_cornersafe(
     center: Sequence[float],
     output_shape: Sequence[int],
     rot: Rotation,
-    order: int = 1,
+    order: int = 3,
 ) -> tuple[da.Array, NDArray[np.float32]]:
     max_len = np.sqrt(np.sum(np.asarray(output_shape, dtype=np.float32) ** 2))
     output_center = np.array(output_shape) / 2 - 0.5

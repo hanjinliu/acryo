@@ -461,7 +461,7 @@ class LoaderBase(ABC):
                 **align_kwargs,
             )
 
-        _max_shifts_px = np.asarray(max_shifts) / self.scale
+        _max_shifts_px = tuple(np.asarray(max_shifts) / self.scale)
         tasks = self.construct_mapping_tasks(
             model.align,
             max_shifts=_max_shifts_px,

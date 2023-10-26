@@ -20,7 +20,7 @@ def ncc_landscape(
     if max_shifts is not None:
         max_shifts = tuple(max_shifts)
     pad_width = _get_padding_width(max_shifts)
-    padimg = backend.pad(img0, pad_width=pad_width, mode="constant", constant_values=0)
+    padimg = backend.pad(img0, pad_width=pad_width, mode="symmetric")
     return ncc_landscape_no_pad(padimg, img1, backend=backend)
 
 
@@ -68,7 +68,6 @@ def zncc_landscape_with_crop(
 def subpixel_zncc(
     img0: AnyArray[np.float32],
     img1: AnyArray[np.float32],
-    upsample_factor: int,
     max_shifts: pixel | tuple[pixel, ...],
     backend: Backend,
 ) -> tuple[NDArray[np.float32], float]:
@@ -86,35 +85,31 @@ def subpixel_zncc(
         backend.unravel_index(backend.argmax(response_center), response_center.shape)
     )
     midpoints = np.asarray(response_center.shape, dtype=np.int32) // 2
-
-    if upsample_factor > 1:
-        coords, local_offset = _create_mesh(
-            upsample_factor,
-            maxima,
-            max_shifts,
-            midpoints.astype(np.float32),
-            pad_width_eff,
-            backend,
-        )
-        local_response = backend.map_coordinates(
-            response, coords, order=3, mode="constant", cval=-1.0, prefilter=True
-        )
-        local_maxima = backend.asnumpy(
-            backend.unravel_index(backend.argmax(local_response), local_response.shape)
-        )
-        zncc = backend.asnumpy(local_response[tuple(local_maxima)])
-        loc_shift = local_maxima / upsample_factor + local_offset
-        shifts = (maxima - midpoints) + loc_shift
-    else:
-        zncc = backend.asnumpy(response[tuple(maxima)])
-        shifts = maxima - midpoints
+    upsample_factor = 20
+    coords, local_offset = _create_mesh(
+        upsample_factor,
+        maxima,
+        max_shifts,
+        midpoints.astype(np.float32),
+        pad_width_eff,
+        backend,
+    )
+    local_response = backend.map_coordinates(
+        response, coords, order=3, mode="constant", cval=-1.0, prefilter=True
+    )
+    local_maxima = backend.asnumpy(
+        backend.unravel_index(backend.argmax(local_response), local_response.shape)
+    )
+    zncc = backend.asnumpy(local_response[tuple(local_maxima)])
+    loc_shift = local_maxima / upsample_factor + local_offset
+    shifts = (maxima - midpoints) + loc_shift
 
     return shifts, zncc  # type: ignore
 
 
 def _window_sum_2d(
     image: AnyArray[np.float32],
-    window_shape: tuple[int, int, int],
+    window_shape: tuple[int, ...],
     backend: Backend,
 ) -> AnyArray[np.float32]:
     window_sum = backend.cumsum(image, axis=0)
@@ -129,7 +124,7 @@ def _window_sum_2d(
 
 def _window_sum_3d(
     image: AnyArray[np.float32],
-    window_shape: tuple[int, int, int],
+    window_shape: tuple[int, ...],
     backend: Backend,
 ) -> AnyArray[np.float32]:
     window_sum = _window_sum_2d(image, window_shape, backend=backend)
@@ -151,11 +146,11 @@ def _safe_sqrt(a: AnyArray[np.float32], fill: float, backend: Backend):
 
 
 @lru_cache(maxsize=12)
-def _get_padding_width(max_shifts: tuple[int, ...]) -> list[tuple[int, ...]]:
-    pad_width: list[tuple[int, ...]] = []
+def _get_padding_width(max_shifts: tuple[int, ...]) -> list[tuple[int, int]]:
+    pad_width: list[tuple[int, int]] = []
     for w in max_shifts:
         w_int = int(np.ceil(w + 3))
-        pad_width.append((w_int,) * 2)
+        pad_width.append((w_int, w_int))
 
     return pad_width
 
@@ -208,7 +203,7 @@ def fftconvolve(
     shape = [s1[i] + s2[i] - 1 for i in range(in1.ndim)]
 
     # convolve in the frequency domain
-    fshape: tuple[int, ...] = tuple(
+    fshape: tuple[int, int, int] = tuple(
         next_fast_len(shape[a], False) for a in range(in1.ndim)  # type: ignore
     )
 

@@ -151,6 +151,22 @@ class Backend:
         """Return evenly spaced values within a given interval."""
         return self._xp_.arange(*args, dtype=dtype, **kwargs)  # type: ignore
 
+    @overload
+    def linspace(
+        self, start, stop, num: int, endpoint: bool, dtype: None = None
+    ) -> AnyArray:
+        ...
+
+    @overload
+    def linspace(
+        self, start, stop, num: int, endpoint: bool, dtype: type[_T]
+    ) -> AnyArray[_T]:
+        ...
+
+    def linspace(self, start, stop, num=50, endpoint=True, dtype=None):
+        """Return evenly spaced numbers over a specified interval."""
+        return self._xp_.linspace(start, stop, num, endpoint=endpoint, dtype=dtype)
+
     def zeros(
         self, shape: int | tuple[int, ...], dtype: type[_T] | np.dtype[_T] | None = None
     ) -> AnyArray[_T]:
@@ -206,10 +222,10 @@ class Backend:
         x: AnyArray[_T],
         pad_width: int | Sequence[int] | Sequence[tuple[int, int]],
         mode: str = "constant",
-        constant_values: float = 0.0,
+        **kwargs,
     ) -> AnyArray[_T]:
         """Pad an array."""
-        return self._xp_.pad(x, pad_width, mode=mode, constant_values=constant_values)  # type: ignore
+        return self._xp_.pad(x, pad_width, mode=mode, **kwargs)  # type: ignore
 
     def tensordot(
         self, a: AnyArray[_T], b: AnyArray[_T], axes: int | tuple[int, ...] = 2

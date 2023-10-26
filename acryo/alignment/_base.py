@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from functools import lru_cache
 from typing import (
     Callable,
     Iterable,
@@ -21,7 +20,7 @@ from acryo._rotation import normalize_rotations
 from acryo._types import RotationType, subpixel, degree
 from acryo._utils import compose_matrices
 from acryo._dask import DaskTaskPool, compute
-from acryo.backend import Backend, AnyArray, NUMPY_BACKEND
+from acryo.backend import Backend, AnyArray, NUMPY_BACKEND, build_mesh
 from acryo.alignment._bound import ParametrizedModel
 from acryo.tilt import single_axis, TiltSeriesModel, no_wedge
 
@@ -407,29 +406,30 @@ class BaseAlignmentModel(ABC):
             fn = self._landscape_single
 
         _template, _mask = self._get_template_and_mask_input(backend=xp)
+        _need_upsample = upsample > 1
+
         # calculate the landscape
+        pad = 2 if _need_upsample else 0  # to avoid edge effect
         lds = fn(
             xp.asarray(img),
             _template,
             _mask,
-            max_shifts,
-            _quat,
-            _pos,
-            xp,
+            max_shifts=tuple(m + pad for m in max_shifts),  # type: ignore
+            quaternion=_quat,
+            pos=_pos,
+            backend=xp,
         )
 
-        if upsample > 1:
+        if _need_upsample:
             if not self._is_multiple():
-                coords = _build_mesh(lds.shape, max_shifts, upsample, xp)
+                mesh = build_mesh(lds.shape, max_shifts, upsample, xp)
                 lds_upsampled = xp.map_coordinates(
-                    lds, coords, order=3, mode="constant", cval=0.0, prefilter=True
+                    lds, mesh, order=3, mode="reflect", prefilter=True
                 )
             else:
-                coords = _build_mesh(lds.shape[1:], max_shifts, upsample, xp)
+                mesh = build_mesh(lds.shape[1:], max_shifts, upsample, xp)
                 all_lds = [
-                    xp.map_coordinates(
-                        l, coords, order=3, mode="constant", cval=0.0, prefilter=True
-                    )
+                    xp.map_coordinates(l, mesh, order=3, mode="reflect", prefilter=True)
                     for l in lds
                 ]
                 lds_upsampled = xp.stack(all_lds, axis=0)
@@ -942,22 +942,3 @@ def _normalize_cval(
     else:
         _cval = cval
     return _cval
-
-
-@lru_cache(maxsize=2)
-def _build_mesh(
-    shape: tuple[int, int, int],
-    max_shifts: tuple[float, float, float],
-    upsample: int,
-    backend: Backend,
-) -> AnyArray[np.float32]:
-    upsampled_max_shifts = (np.asarray(max_shifts) * upsample).astype(np.int32)
-    center = np.array(shape) / 2 - 0.5
-    mesh = backend.meshgrid(
-        *[
-            backend.arange(-width, width + 1) / upsample + c
-            for c, width in zip(center, upsampled_max_shifts)
-        ],
-        indexing="ij",
-    )
-    return backend.stack(mesh, axis=0)
