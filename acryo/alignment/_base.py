@@ -44,7 +44,7 @@ class AlignmentResult(NamedTuple):
     quat: NDArray[np.float32]
     score: float
 
-    def affine_matrix(self, shape: tuple[int, int, int]) -> NDArray[np.float32]:
+    def affine_matrix(self, shape: tuple[int, ...]) -> NDArray[np.float32]:
         """Return the affine matrix."""
         rotator = Rotation.from_quat(self.quat)
         shift_matrix = np.eye(4, dtype=np.float32)
@@ -108,13 +108,17 @@ class BaseAlignmentModel(ABC):
         template: TemplateType,
         mask: MaskType = None,
     ):
+        if not isinstance(template, np.ndarray) and len(template) == 1:
+            template = template[0]
         if isinstance(template, np.ndarray):
             self._template = template.astype(np.float32, copy=False)
             self._n_templates = 1
+            # self._is_multi_templates = False
             self._ndim = template.ndim
         else:
             self._template = np.stack(template, axis=0).astype(np.float32, copy=False)
             self._n_templates = self._template.shape[0]
+            # self._is_multi_templates = True
             self._ndim = self._template.ndim - 1
 
         if callable(mask):
@@ -635,7 +639,6 @@ class RotationImplemented(BaseAlignmentModel):
         pool = DaskTaskPool.from_func(self._optimize)
         pos = np.zeros(3, dtype=np.float32)
         img_input = xp.asarray(img)
-        img_shape = img_input.shape
         _template, _mask = self._get_template_and_mask_input(backend=xp)
         if _template.ndim == 3:
             _template = [_template]
@@ -661,7 +664,7 @@ class RotationImplemented(BaseAlignmentModel):
             score=opt_result[2],
         )
 
-        mtx = result.affine_matrix(img_shape)
+        mtx = result.affine_matrix(img_input.shape)
         _img_cval = _normalize_cval(cval, img_input, xp)
         img_trans = xp.affine_transform(img_input, mtx, cval=_img_cval)
         return xp.asnumpy(img_trans), result

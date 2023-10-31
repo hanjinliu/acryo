@@ -9,6 +9,7 @@ from acryo._types import pixel
 from acryo.backend import Backend, AnyArray
 
 # Normalized cross correlation
+UPSAMPLE = 20
 
 
 def ncc_landscape(
@@ -20,7 +21,7 @@ def ncc_landscape(
     if max_shifts is not None:
         max_shifts = tuple(max_shifts)
     pad_width = _get_padding_width(max_shifts)
-    padimg = backend.pad(img0, pad_width=pad_width, mode="symmetric")
+    padimg = backend.pad(img0, pad_width=pad_width, mode="constant", constant_values=0)
     return ncc_landscape_no_pad(padimg, img1, backend=backend)
 
 
@@ -71,8 +72,8 @@ def subpixel_zncc(
     max_shifts: pixel | tuple[pixel, ...],
     backend: Backend,
 ) -> tuple[NDArray[np.float32], float]:
-    img0 -= img0.mean()
-    img1 -= img1.mean()
+    img0 = img0 - img0.mean()
+    img1 = img1 - img1.mean()
     if isinstance(max_shifts, (int, float)):
         max_shifts = (max_shifts,) * img0.ndim
     response = ncc_landscape(img0, img1, max_shifts, backend=backend)
@@ -85,9 +86,7 @@ def subpixel_zncc(
         backend.unravel_index(backend.argmax(response_center), response_center.shape)
     )
     midpoints = np.asarray(response_center.shape, dtype=np.int32) // 2
-    upsample_factor = 20
     coords, local_offset = _create_mesh(
-        upsample_factor,
         maxima,
         max_shifts,
         midpoints.astype(np.float32),
@@ -101,8 +100,8 @@ def subpixel_zncc(
         backend.unravel_index(backend.argmax(local_response), local_response.shape)
     )
     zncc = backend.asnumpy(local_response[tuple(local_maxima)])
-    loc_shift = local_maxima / upsample_factor + local_offset
-    shifts = (maxima - midpoints) + loc_shift
+    loc_shift = local_maxima / UPSAMPLE + local_offset
+    shifts = maxima - midpoints + loc_shift
 
     return shifts, zncc  # type: ignore
 
@@ -156,7 +155,6 @@ def _get_padding_width(max_shifts: tuple[int, ...]) -> list[tuple[int, int]]:
 
 
 def _create_mesh(
-    upsample_factor: int,
     maxima: NDArray[np.intp],
     max_shifts: Sequence[pixel],
     midpoints: NDArray[np.float32],
@@ -172,23 +170,23 @@ def _create_mesh(
     right = -shifts + _max_shifts
     local_shifts = [
         [
-            int(round(max(float(shiftl), -1.0) * upsample_factor)),
-            int(round(min(float(shiftr), 1.0) * upsample_factor)),
+            int(round(max(float(shiftl), -1.0) * UPSAMPLE)),
+            int(round(min(float(shiftr), 1.0) * UPSAMPLE)),
         ]
         for shiftl, shiftr in zip(left, right)
     ]
-    mesh = backend.meshgrid(
-        *[
-            backend.arange(s0, s1 + 1) / upsample_factor + m + w
-            for (s0, s1), m, w in zip(local_shifts, maxima, pad_width_eff)
-        ],  # type: ignore
-        indexing="ij",
+    mesh = backend.stack(
+        backend.meshgrid(
+            *[
+                backend.arange(s0, s1 + 1) / UPSAMPLE + m + w
+                for (s0, s1), m, w in zip(local_shifts, maxima, pad_width_eff)
+            ],  # type: ignore
+            indexing="ij",
+        ),
+        axis=0,
     )
-    offset = (
-        backend.array([s0 for s0, s1 in local_shifts], dtype=np.float32)
-        / upsample_factor
-    )
-    return backend.stack(mesh, axis=0), offset
+    offset = backend.array([s0 for s0, s1 in local_shifts], dtype=np.float32) / UPSAMPLE
+    return mesh, offset
 
 
 def fftconvolve(

@@ -52,6 +52,7 @@ def test_run(alignment_model: type[BaseAlignmentModel], rotations):
 
 scale = 0.32
 temp = spiral()
+temp_shape: tuple[int, int, int] = temp.shape  # type: ignore
 gen = TomogramGenerator(temp, grid_shape=(3, 3), noise_sigma=0.5)
 tomo = gen.get_tomogram()
 mole = gen.sample_molecules(max_distance=0.1, scale=scale)
@@ -59,7 +60,7 @@ mole = gen.sample_molecules(max_distance=0.1, scale=scale)
 
 def test_fsc():
     loader = SubtomogramLoader(
-        tomo, mole, order=0, scale=scale, output_shape=temp.shape
+        tomo, mole, order=0, scale=scale, output_shape=temp_shape
     )
     loader.fsc()
     loader.fsc(mask=(temp > np.mean(temp)).astype(np.float32))
@@ -76,12 +77,12 @@ def test_fit(shift, rot, alignment_model: "type[TomographyInput]"):
     with measure_time(alignment_model.__name__):
         imgout, result = model.fit(img, (5, 5, 5))
     assert_allclose(result.quat, euler_to_quat(rot))
-    assert_allclose(result.shift, shift)
     coef = np.corrcoef(imgout.ravel(), temp.ravel())
     assert coef[0, 1] > 0.95  # check results are well aligned
+    assert_allclose(result.shift, shift)
 
 
-@pytest.mark.parametrize("shift", [[1, 2, 2], [-4, 3, 2]])
+@pytest.mark.parametrize("shift", [[1, 1, 2], [-4, 3, 2]])
 @pytest.mark.parametrize("alignment_model", [ZNCCAlignment, PCCAlignment])
 def test_fit_without_rotation(shift, alignment_model: "type[TomographyInput]"):
     model = alignment_model(temp, rotations=((0, 0), (0, 0), (0, 0)))
@@ -90,9 +91,9 @@ def test_fit_without_rotation(shift, alignment_model: "type[TomographyInput]"):
     with measure_time(alignment_model.__name__):
         imgout, result = model.fit(img, (5, 5, 5))
     assert_allclose(result.quat, [0, 0, 0, 1])
-    assert_allclose(result.shift, shift)
     coef = np.corrcoef(imgout.ravel(), temp.ravel())
     assert coef[0, 1] > 0.95  # check results are well aligned
+    assert_allclose(result.shift, shift)
 
 
 @pytest.mark.parametrize("shift", [[1, 2, 2], [-4, 3, 2]])
@@ -119,7 +120,7 @@ def test_with_params():
 @pytest.mark.parametrize("upsample", [1, 2])
 def test_landscape_in_loader(upsample):
     loader = SubtomogramLoader(
-        tomo, mole, order=0, scale=scale, output_shape=temp.shape
+        tomo, mole, order=0, scale=scale, output_shape=temp_shape
     )
     mask = temp > np.mean(temp)
     arr: np.ndarray = loader.construct_landscape(
@@ -136,7 +137,7 @@ def test_landscape_in_loader(upsample):
 @pytest.mark.parametrize("upsample", [1, 2])
 def test_landscape_in_loader_with_rotation(upsample):
     loader = SubtomogramLoader(
-        tomo, mole, order=0, scale=scale, output_shape=temp.shape
+        tomo, mole, order=0, scale=scale, output_shape=temp_shape
     )
     mask = temp > np.mean(temp)
     arr: np.ndarray = loader.construct_landscape(
@@ -157,7 +158,7 @@ def test_landscape_in_loader_with_rotation(upsample):
 
 def test_pca_classify():
     loader = SubtomogramLoader(
-        tomo, mole, order=0, scale=scale, output_shape=temp.shape
+        tomo, mole, order=0, scale=scale, output_shape=temp_shape
     )
     mask = temp > np.mean(temp)
     loader.classify(mask.astype(np.float32), tilt=(-60, 60))
@@ -194,6 +195,25 @@ def test_multi_align():
         [img0, img1], max_shifts=2, label_name=label_name
     )
     assert list(out.features[label_name]) == [0, 1, 0]
+
+
+def test_multi_align_with_single_template():
+    from acryo import TomogramSimulator, Molecules
+
+    sim = TomogramSimulator(scale=1)
+    img0 = np.zeros((9, 9, 9), dtype=np.float32)
+    img0[3:5, 3:5, 3:5] = 1
+
+    sim.add_molecules(Molecules([[10, 15, 15], [10, 35, 15]]), img0)
+
+    tomo = sim.simulate((20, 50, 50))
+    mole = Molecules([[10, 15, 15], [10, 15, 35], [10, 35, 15]]).translate(
+        [[0, 1, 0], [1, 1, 0], [0, 1, -1]]
+    )
+    loader = SubtomogramLoader(tomo, mole, order=3, scale=1)
+    label_name = "labels"
+    out = loader.align_multi_templates([img0], max_shifts=2, label_name=label_name)
+    assert list(out.features[label_name]) == [0, 0, 0]
 
 
 @pytest.mark.parametrize("alignment_model", [ZNCCAlignment, PCCAlignment])
