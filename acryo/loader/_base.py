@@ -697,7 +697,8 @@ class LoaderBase(ABC):
     def apply(
         self,
         func: AggFunction[_R] | Iterable[AggFunction[_R]],
-        schema: list[str] | None = None,
+        *more_funcs: AggFunction[_R],
+        schema: list[str] | dict[str, type[pl.DataType]] | None = None,
     ) -> pl.DataFrame:
         """
         Apply functions to subtomograms.
@@ -715,21 +716,30 @@ class LoaderBase(ABC):
             Result table.
         """
         all_tasks: list[DaskTaskList[_R]] = []
+        if more_funcs:
+            func = [func] + list(more_funcs)  # type: ignore
         if _is_iterable_of_funcs(func):
-            funcs = func
+            funcs = list(func)
         else:
-            funcs: Iterable[AggFunction] = [func]  # type: ignore
+            funcs: list[AggFunction] = [func]  # type: ignore
         if schema is None:
             schema = [fn.__name__ for fn in funcs]
-        if len(set(schema)) != len(schema):
-            raise ValueError("Schema names must be unique.")
+        if isinstance(schema, list):
+            if len(set(schema)) != len(schema):
+                raise ValueError("Schema names must be unique.")
+        elif isinstance(schema, dict):
+            if len(schema) != len(funcs):
+                raise ValueError("Schema must have the same length as the functions.")
+        else:
+            raise TypeError("Schema must be a list or a dict.")
         if isinstance(self.output_shape, Unset):
             raise ValueError("Output shape is unknown.")
         for fn in funcs:
             tasks = self.construct_mapping_tasks(fn, output_shape=self.output_shape)
             all_tasks.append(tasks)
-        all_results = np.array(compute(all_tasks))
-        return pl.DataFrame(all_results, schema=schema)
+        all_results = compute(all_tasks)
+        df_input = [np.array(r) for r in all_results]
+        return pl.DataFrame(df_input, schema=schema)
 
     def fsc(
         self,

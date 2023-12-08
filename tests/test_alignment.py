@@ -4,6 +4,7 @@ from contextlib import contextmanager
 
 import numpy as np
 from numpy.testing import assert_allclose
+import polars as pl
 from acryo import SubtomogramLoader, Molecules
 from acryo.alignment import (
     PCCAlignment,
@@ -230,3 +231,34 @@ def test_max_shifts(alignment_model: "type[TomographyInput]", lim: float):
     aligned = loader.align(template, max_shifts=lim, alignment_model=alignment_model)
     distances = np.abs(aligned.molecules.pos - mole.pos)
     assert np.all(distances <= lim + 1e-6)
+
+
+def test_apply():
+    loader = SubtomogramLoader(
+        tomo, mole, order=0, scale=scale, output_shape=temp_shape
+    )
+    df = loader.apply(np.mean, np.std)
+    assert df.dtypes[0] in pl.FLOAT_DTYPES
+    assert df.dtypes[1] in pl.FLOAT_DTYPES
+
+    assert df.shape == (len(mole), 2)
+
+    df = loader.apply(np.mean, np.std, schema=["mu", "sigma"])
+    assert df.dtypes[0] in pl.FLOAT_DTYPES
+    assert df.dtypes[1] in pl.FLOAT_DTYPES
+
+    assert df.shape == (len(mole), 2)
+    assert df.columns == ["mu", "sigma"]
+
+    df = loader.apply([np.mean, np.std], schema=["mu", "sigma"])
+    assert df.dtypes[0] in pl.FLOAT_DTYPES
+    assert df.dtypes[1] in pl.FLOAT_DTYPES
+
+    assert df.shape == (len(mole), 2)
+    assert df.columns == ["mu", "sigma"]
+
+    df = loader.apply([np.mean], schema=["mu"])
+    assert df.dtypes[0] in pl.FLOAT_DTYPES
+
+    assert df.shape == (len(mole), 1)
+    assert df.columns == ["mu"]
