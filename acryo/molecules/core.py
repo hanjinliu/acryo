@@ -24,11 +24,12 @@ from acryo.molecules._rotation import (
 
 if TYPE_CHECKING:
     from typing_extensions import Self, TypeGuard
-    from polars.type_aliases import ParquetCompression
+    from polars.type_aliases import ParquetCompression, FrameInitTypes
 
 _CSV_COLUMNS = ["z", "y", "x", "zvec", "yvec", "xvec"]
 PathLike = Union[str, Path]
 IntoExpr = Union[str, pl.Expr]
+_Array2D = Union[NDArray[np.number], Sequence[Sequence[Any]]]
 
 
 class Molecules:
@@ -52,9 +53,9 @@ class Molecules:
 
     def __init__(
         self,
-        pos: ArrayLike,
+        pos: _Array2D,
         rot: Rotation | None = None,
-        features: pl.DataFrame | ArrayLike | dict[str, ArrayLike] | None = None,
+        features: FrameInitTypes | None = None,
     ):
         _pos = np.atleast_2d(pos).astype(np.float32)
 
@@ -95,10 +96,10 @@ class Molecules:
     @classmethod
     def from_axes(
         cls,
-        pos: np.ndarray,
-        z: np.ndarray | None = None,
-        y: np.ndarray | None = None,
-        x: np.ndarray | None = None,
+        pos: _Array2D,
+        z: _Array2D | None = None,
+        y: _Array2D | None = None,
+        x: _Array2D | None = None,
     ) -> Self:
         """Construct molecule cloud with orientation from two of their local axes."""
         pos = np.atleast_2d(pos)
@@ -128,8 +129,8 @@ class Molecules:
     @classmethod
     def from_euler(
         cls,
-        pos: np.ndarray,
-        angles: ArrayLike,
+        pos: _Array2D,
+        angles: _Array2D,
         seq: str = "ZXZ",
         degrees: bool = False,
         order: str = "xyz",
@@ -147,8 +148,8 @@ class Molecules:
     @classmethod
     def from_quat(
         cls,
-        pos: np.ndarray,
-        quat: ArrayLike,
+        pos: _Array2D,
+        quat: _Array2D,
         features: pl.DataFrame | None = None,
     ) -> Self:
         """Create molecules from quaternions."""
@@ -157,8 +158,8 @@ class Molecules:
     @classmethod
     def from_rotvec(
         cls,
-        pos: np.ndarray,
-        vec: ArrayLike,
+        pos: _Array2D,
+        vec: _Array2D,
         features: pl.DataFrame | None = None,
     ) -> Self:
         """Create molecules from rotation vectors."""
@@ -167,7 +168,7 @@ class Molecules:
     @classmethod
     def from_matrix(
         cls,
-        pos: np.ndarray,
+        pos: _Array2D,
         matrix: np.ndarray,
         features: pl.DataFrame | None = None,
     ) -> Self:
@@ -237,7 +238,7 @@ class Molecules:
     @classmethod
     def from_random(
         cls,
-        pos: np.ndarray,
+        pos: _Array2D,
         seed: int | None = None,
         features: pl.DataFrame | None = None,
     ) -> Self:
@@ -361,17 +362,17 @@ class Molecules:
     @property
     def x(self) -> NDArray[np.float64]:
         """Vectors of x-axis."""
-        return self._rotator.apply([0.0, 0.0, 1.0])
+        return self._rotator.apply(np.array([0.0, 0.0, 1.0]))
 
     @property
     def y(self) -> NDArray[np.float64]:
         """Vectors of y-axis."""
-        return self._rotator.apply([0.0, 1.0, 0.0])
+        return self._rotator.apply(np.array([0.0, 1.0, 0.0]))
 
     @property
     def z(self) -> NDArray[np.float64]:
         """Vectors of z-axis."""
-        return self._rotator.apply([1.0, 0.0, 0.0])
+        return self._rotator.apply(np.array([1.0, 0.0, 0.0]))
 
     @property
     def rotator(self) -> Rotation:
@@ -612,7 +613,7 @@ class Molecules:
         """
         return self._rotator.as_rotvec()
 
-    def translate(self, shifts: ArrayLike, copy: bool = True) -> Self:
+    def translate(self, shifts: _Array2D, copy: bool = True) -> Self:
         """
         Translate molecule positions by ``shifts``.
 
@@ -646,7 +647,7 @@ class Molecules:
             out = self
         return out
 
-    def translate_internal(self, shifts: ArrayLike, *, copy: bool = True) -> Self:
+    def translate_internal(self, shifts: _Array2D, *, copy: bool = True) -> Self:
         """
         Translate molecule positions internally by ``shifts``.
 
@@ -699,11 +700,10 @@ class Molecules:
             Translated molecules.
         """
         nmole = len(self)
-        np.random.seed(seed)
-        r = np.random.random(nmole) * max_distance
-        theta = np.random.random(nmole) * 2 * np.pi
-        phi = np.random.random(nmole) * np.pi
-        np.random.seed(None)
+        rng = np.random.default_rng(seed)
+        r = rng.random(nmole) * max_distance
+        theta = rng.random(nmole) * 2 * np.pi
+        phi = rng.random(nmole) * np.pi
         cos_phi = np.cos(phi)
         shifts = np.stack(
             [
@@ -715,7 +715,7 @@ class Molecules:
         )
         return self.translate(shifts, copy=copy)
 
-    def rotate_by_rotvec_internal(self, vector: ArrayLike, copy: bool = True) -> Self:
+    def rotate_by_rotvec_internal(self, vector: _Array2D, copy: bool = True) -> Self:
         """
         Rotate molecules using internal rotation vector.
 
@@ -765,7 +765,7 @@ class Molecules:
         rotator = Rotation.from_matrix(matrix)
         return self.rotate_by(rotator, copy)
 
-    def rotate_by_quaternion(self, quat: ArrayLike, copy: bool = True) -> Self:
+    def rotate_by_quaternion(self, quat: _Array2D, copy: bool = True) -> Self:
         """
         Rotate molecules using quaternions, **with their position unchanged**.
 
@@ -787,7 +787,7 @@ class Molecules:
 
     def rotate_by_euler_angle(
         self,
-        angles: ArrayLike,
+        angles: _Array2D,
         seq: str = "ZXZ",
         degrees: bool = False,
         order: Literal["xyz", "zyx"] = "xyz",
@@ -817,7 +817,7 @@ class Molecules:
             raise ValueError("'order' must be 'xyz' or 'zyx'.")
         return self.rotate_by(rotator, copy)
 
-    def rotate_by_rotvec(self, vector: ArrayLike, copy: bool = True) -> Self:
+    def rotate_by_rotvec(self, vector: _Array2D, copy: bool = True) -> Self:
         """
         Rotate molecules using rotation vectors, **with their position unchanged**.
 
@@ -889,7 +889,7 @@ class Molecules:
 
     def linear_transform(
         self,
-        shift: ArrayLike,
+        shift: _Array2D,
         rotator: Rotation,
         inv: bool = False,
     ) -> Self:

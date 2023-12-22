@@ -36,7 +36,7 @@ def ncc_landscape_no_pad(
     win_sum2 = _window_sum_3d(img0**2, img1.shape, backend=backend)
 
     template_mean = img1.mean()
-    template_volume = np.prod(img1.shape, dtype=np.float32)
+    template_volume = np.prod(img1.shape, dtype=np.float32)  # type: ignore
     template_ssd = backend.sum((img1 - template_mean) ** 2)
 
     var = (win_sum2 - win_sum1**2 / template_volume) * template_ssd
@@ -72,6 +72,7 @@ def subpixel_zncc(
     max_shifts: pixel | tuple[pixel, ...],
     backend: Backend,
 ) -> tuple[NDArray[np.float32], float]:
+    """Get the optimal subpixel shift and the score."""
     img0 = img0 - img0.mean()
     img1 = img1 - img1.mean()
     if isinstance(max_shifts, (int, float)):

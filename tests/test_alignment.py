@@ -91,7 +91,7 @@ def test_fit_without_rotation(shift, alignment_model: "type[TomographyInput]"):
     img = ndi_shift(temp_transformed, shift=shift)
     with measure_time(alignment_model.__name__):
         imgout, result = model.fit(img, (5, 5, 5))
-    assert_allclose(result.quat, [0, 0, 0, 1])
+    assert_allclose(result.quat, np.array([0, 0, 0, 1]))
     coef = np.corrcoef(imgout.ravel(), temp.ravel())
     assert coef[0, 1] > 0.95  # check results are well aligned
     assert_allclose(result.shift, shift)
@@ -106,8 +106,23 @@ def test_landscape(shift, alignment_model: "type[TomographyInput]", upsample):
     img = ndi_shift(temp_transformed, shift=shift)
     with measure_time(alignment_model.__name__):
         lnd = model.landscape(img, (5, 5, 5), upsample=upsample)
+    assert lnd.shape == (10 * upsample + 1,) * 3
     maxima = np.unravel_index(np.argmax(lnd), lnd.shape)
     assert_allclose((np.array(maxima) - 5 * upsample) / upsample, shift)
+
+
+@pytest.mark.parametrize("shift", [[1.2, 2.4, 4.8], [-4.4, 3.4, 2.2], [0.2, -0.4, 0.6]])
+@pytest.mark.parametrize("max_shift", [5.0, 5.3, 5.8])
+def test_landscape_float_max_shift(shift, max_shift: float):
+    model = ZNCCAlignment(temp)
+    upsample = 5
+    temp_transformed = temp * 4 + np.mean(temp)  # linear transformation to input image
+    img = ndi_shift(temp_transformed, shift=shift)
+    with measure_time(ZNCCAlignment.__name__):
+        lnd = model.landscape(img, (max_shift, max_shift, max_shift), upsample=upsample)
+    maxima = np.unravel_index(np.argmax(lnd), lnd.shape)
+    center = (np.array(lnd.shape) - 1) / 2
+    assert_allclose((np.array(maxima) - center) / upsample, shift)
 
 
 def test_with_params():

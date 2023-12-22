@@ -412,7 +412,7 @@ class BaseAlignmentModel(ABC):
         _template, _mask = self._get_template_and_mask_input(backend=xp)
         _need_upsample = upsample > 1
 
-        # calculate the landscape
+        # Calculate the landscape
         pad = 2 if _need_upsample else 0  # to avoid edge effect
         lds = fn(
             xp.asarray(img),
@@ -425,6 +425,7 @@ class BaseAlignmentModel(ABC):
         )
 
         if _need_upsample:
+            # Create a mesh coordinates for upsampling
             if not self._is_multiple():
                 mesh = build_mesh(lds.shape, max_shifts, upsample, xp)
                 lds_upsampled = xp.map_coordinates(
@@ -932,7 +933,7 @@ class TomographyInput(RotationImplemented):
         """Create a mask that covers tomographical missing wedge."""
         mask = self._tilt_model.create_mask(
             Rotation.from_quat(quat),
-            self.input_shape,
+            self.input_shape,  # type: ignore
         )
         return backend.asarray(mask)
 
