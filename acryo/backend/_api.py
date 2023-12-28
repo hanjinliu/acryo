@@ -65,7 +65,10 @@ class AnyArray(Generic[_T]):
     def mean(self, axis: None = None) -> _T: ...  # type: ignore
     @overload
     def mean(self, axis: int | tuple[int, ...]) -> AnyArray[_T]: ...  # type: ignore
-
+    @overload
+    def max(self, axis: None = None) -> _T: ...  # type: ignore
+    @overload
+    def max(self, axis: int | tuple[int, ...]) -> AnyArray[_T]: ...  # type: ignore
 # fmt: on
 
 
@@ -345,40 +348,13 @@ class Backend:
         """Return the Discrete Fourier Transform sample frequencies."""
         return self._xp_.fft.fftfreq(n, d)  # type: ignore
 
-    @overload
     def meshgrid(
         self,
-        x0: AnyArray[_T],
+        *xi: AnyArray[_T],
         copy: bool = True,
         sparse: bool = False,
         indexing: Literal["xy", "ij"] = "xy",
-    ) -> tuple[AnyArray[_T]]:
-        ...
-
-    @overload
-    def meshgrid(
-        self,
-        x0: AnyArray[_T],
-        x1: AnyArray[_T],
-        copy: bool = True,
-        sparse: bool = False,
-        indexing: Literal["xy", "ij"] = "xy",
-    ) -> tuple[AnyArray[_T], AnyArray[_T]]:
-        ...
-
-    @overload
-    def meshgrid(
-        self,
-        x0: AnyArray[_T],
-        x1: AnyArray[_T],
-        x2: AnyArray[_T],
-        copy: bool = True,
-        sparse: bool = False,
-        indexing: Literal["xy", "ij"] = "xy",
-    ) -> tuple[AnyArray[_T], AnyArray[_T], AnyArray[_T]]:
-        ...
-
-    def meshgrid(self, *xi, copy=True, sparse=False, indexing="xy"):  # type: ignore
+    ) -> tuple[AnyArray[_T], ...]:
         """Return coordinate matrices from coordinate vectors."""
         return self._xp_.meshgrid(*xi, copy=copy, sparse=sparse, indexing=indexing)  # type: ignore
 
@@ -464,6 +440,14 @@ class Backend:
         return self._ndi_.map_coordinates(
             x, coords, order=order, mode=mode, cval=cval, prefilter=prefilter
         )  # type: ignore
+
+    def sum_labels(
+        self,
+        arr: AnyArray[_T],
+        labels: AnyArray[np.uint16],
+        index: AnyArray[np.uint16],
+    ) -> AnyArray[np.uint16]:
+        return self._ndi_.sum_labels(arr, labels=labels, index=index)  # type: ignore
 
     def rotated_crop(
         self,

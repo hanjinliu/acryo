@@ -5,13 +5,14 @@ from ._base import (
     TomographyInput,
     AlignmentFactory,
 )
-from ._concrete import PCCAlignment, ZNCCAlignment
+from ._concrete import PCCAlignment, ZNCCAlignment, FSCAlignment
 
 __all__ = [
     "AlignmentResult",
     "AlignmentFactory",
     "PCCAlignment",
     "ZNCCAlignment",
+    "FSCAlignment",
     "BaseAlignmentModel",
     "RotationImplemented",
     "TomographyInput",
