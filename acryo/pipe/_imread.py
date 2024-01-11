@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable, Union
+from typing import Iterable, Union, TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import NDArray
@@ -10,7 +10,9 @@ from acryo._reader import REG
 from acryo._typed_scipy import zoom
 from acryo._types import nm
 
-PathLike = Union[str, Path, bytes]
+if TYPE_CHECKING:
+    PathLike = Union[str, Path, bytes]
+    from scipy.spatial.transform import Rotation
 
 
 @provider_function
@@ -202,7 +204,9 @@ def from_atoms(
         will be used.
     """
     if atoms.ndim != 2 or atoms.shape[1] != 3:
-        raise ValueError("atoms must be a 2D array with shape (n, 3)")
+        raise ValueError(
+            f"atoms must be a 2D array with shape (N, 3), got {atoms.shape}"
+        )
     if center is None:
         center = np.mean(atoms, axis=0)
     _center = np.asarray(center)[np.newaxis]
@@ -212,9 +216,49 @@ def from_atoms(
     lims = (-size / 2, size / 2)
 
     counts, _ = np.histogramdd(
-        coords, bins=(size,) * 3, range=(lims,) * 3, weights=weights
+        coords, bins=(size, size, size), range=(lims, lims, lims), weights=weights
     )
     return counts
+
+
+@provider_function
+def from_pdb(
+    scale: nm,
+    file: str | Path,
+    rotation: Rotation | None = None,
+) -> NDArray[np.float32]:
+    """
+    An image provider function using a PDB file.
+
+    Given a PDB file, this function can generate a 3D image from the atoms in the file.
+
+    Parameters
+    ----------
+    file : path-like
+        Path to the PDB file.
+    rotation : Rotation object, optional
+        If given, the atoms will be rotated by this rotation before generating the
+        image.
+    """
+    file = Path(file)
+    if file.suffix != ".pdb":
+        raise ValueError("file must be a PDB file")
+    with open(file) as f:
+        lines = f.readlines()
+    pos = []
+    for line in lines:
+        if not line.startswith("ATOM"):
+            continue
+        x = float(line[31:39])
+        y = float(line[39:47])
+        z = float(line[47:55])
+        pos.append([z, y, x])
+    if len(pos) == 0:
+        raise ValueError("No atoms found in the PDB file")
+    pos = np.array(pos, dtype=np.float32) / 10
+    if rotation is not None:
+        pos = rotation.apply(pos)
+    return from_atoms(pos)(scale)
 
 
 def _as_3_array(x) -> NDArray[np.floating]:
