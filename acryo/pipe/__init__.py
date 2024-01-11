@@ -15,6 +15,7 @@ from ._imread import (
     from_array,
     from_arrays,
     from_atoms,
+    from_pdb,
 )
 
 __all__ = [
@@ -34,6 +35,7 @@ __all__ = [
     "from_array",
     "from_arrays",
     "from_atoms",
+    "from_pdb",
     "provider_function",
     "converter_function",
     "ImageProvider",
