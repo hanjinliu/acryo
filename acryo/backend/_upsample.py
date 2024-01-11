@@ -1,9 +1,7 @@
 from __future__ import annotations
-from typing import Sequence
 import numpy as np
 from numpy.typing import NDArray
 
-from acryo._types import pixel
 from acryo.backend import Backend, AnyArray
 
 UPSAMPLE = 20
@@ -12,10 +10,10 @@ UPSAMPLE = 20
 def upsample(
     res: AnyArray,
     res_ori: AnyArray,
-    max_shifts: Sequence[pixel],
-    pad_width_eff: Sequence[pixel],
+    max_shifts: tuple[float, float, float],
+    pad_width_eff: tuple[float, float, float],
     backend: Backend,
-) -> tuple[AnyArray, float]:
+) -> tuple[NDArray[np.float32], float]:
     maxima = backend.asnumpy(backend.unravel_index(backend.argmax(res), res.shape))
     midpoints = np.asarray(res.shape, dtype=np.int32) // 2
     coords, local_offset = _create_mesh(
@@ -39,9 +37,9 @@ def upsample(
 
 def _create_mesh(
     maxima: NDArray[np.intp],
-    max_shifts: Sequence[pixel],
+    max_shifts: tuple[float, float, float],
     midpoints: NDArray[np.float32],
-    pad_width_eff: Sequence[pixel],
+    pad_width_eff: tuple[float, float, float],
     backend: Backend,
 ):
     """
