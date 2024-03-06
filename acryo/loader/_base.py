@@ -104,7 +104,7 @@ class LoaderBase(ABC):
     @property
     def output_shape(self) -> tuple[pixel, pixel, pixel] | Unset:
         """Return the output subtomogram shape."""
-        return self._output_shape
+        return self._output_shape  # type: ignore
 
     @property
     def order(self) -> int:
@@ -389,12 +389,13 @@ class LoaderBase(ABC):
         tasks: list[da.Array] = []
         dsk = self.construct_dask(output_shape=output_shape)
         nmole = dsk.shape[0]
+        chunksize = ("auto",) + output_shape
         for _ in range(n_set):
             ind0, ind1 = _misc.random_splitter(rng, nmole)
             _stack = da.stack(
                 [
-                    dsk[ind0].rechunk(("auto",) + output_shape).mean(axis=0),  # type: ignore
-                    dsk[ind1].rechunk(("auto",) + output_shape).mean(axis=0),  # type: ignore
+                    dsk[ind0].rechunk(chunksize).mean(axis=0),  # type: ignore
+                    dsk[ind1].rechunk(chunksize).mean(axis=0),  # type: ignore
                 ],
                 axis=0,
             )
@@ -420,8 +421,8 @@ class LoaderBase(ABC):
         Align subtomograms to the template image.
 
         This method conduct so called "subtomogram alignment". Only shifts and rotations
-        are calculated in this method. To get averaged image, you'll have to run "average"
-        method using the resulting SubtomogramLoader instance.
+        are calculated in this method. To get averaged image, you'll have to run
+        "average" method using the resulting SubtomogramLoader instance.
 
         Parameters
         ----------
@@ -543,6 +544,24 @@ class LoaderBase(ABC):
             )
         return out
 
+    def align_and_average_pairwise(
+        self,
+        *,
+        mask: MaskInputType = None,
+        max_shifts: nm | tuple[nm, nm, nm] = 1.0,
+        output_shape: _ShapeType = None,
+        alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
+        **align_kwargs,
+    ) -> NDArray[np.float32]:
+        _backend = Backend()
+        max_shifts = _normalize_max_shifts(max_shifts)
+
+        dsk = self.construct_dask(output_shape=output_shape, backend=_backend)
+        task = _align_pairwise_recursive(
+            dsk, mask, max_shifts, alignment_model=alignment_model, **align_kwargs
+        )
+        return _backend.asnumpy(task.compute())
+
     def align_multi_templates(
         self,
         templates: list[TemplateInputType] | ImageProvider[list[NDArray[np.float32]]],
@@ -658,10 +677,10 @@ class LoaderBase(ABC):
         Returns
         -------
         dask array
-            If input alignment model has rotation or multiple templates, the output shape will
-            be (P, M, Nz, Ny, Nx), otherwise (P, Nz, Ny, Nx), where P is for each molecules, M
-            is the number of created template images, and Nz, Ny and Nx is the up-sampled shape
-            of search range.
+            If input alignment model has rotation or multiple templates, the output
+            shape will be (P, M, Nz, Ny, Nx), otherwise (P, Nz, Ny, Nx), where P is for
+            each molecules, M is the number of created template images, and Nz, Ny and
+            Nx is the up-sampled shape of search range.
         """
         max_shifts = _normalize_max_shifts(max_shifts)
         _max_shifts_px = tuple(np.asarray(max_shifts) / self.scale)
@@ -881,9 +900,9 @@ class LoaderBase(ABC):
 
         References
         ----------
-        - Heumann, J. M., Hoenger, A., & Mastronarde, D. N. (2011). Clustering and variance
-          maps for cryo-electron tomography using wedge-masked differences. Journal of
-          structural biology, 175(3), 288-299.
+        - Heumann, J. M., Hoenger, A., & Mastronarde, D. N. (2011). Clustering and
+          variance maps for cryo-electron tomography using wedge-masked differences.
+          Journal of structural biology, 175(3), 288-299.
         """
         from acryo.classification import PcaClassifier
 
@@ -944,7 +963,7 @@ class LoaderBase(ABC):
         shape: tuple[int, int, int] | None = None,
     ) -> Self:
         """Return a new loader with appropriate output shape."""
-        shapes: set[tuple[int, int, int]] = set()
+        shapes: set[tuple[int, ...]] = set()
         if template is not None:
             shapes.add(self.normalize_template(template).shape)
         if mask is not None:
@@ -958,7 +977,7 @@ class LoaderBase(ABC):
             raise ValueError("Cannot infer shape from the input.")
         elif len(shapes) > 1:
             raise ValueError("Inconsistent shapes.")
-        return self.replace(output_shape=shapes.pop())
+        return self.replace(output_shape=shapes.pop())  # type: ignore
 
     def head(self, n: int = 10) -> Self:
         """Return a new loader with the first n molecules."""
@@ -1011,7 +1030,7 @@ class LoaderBase(ABC):
 
     group_by = groupby  # alias
 
-    def _get_output_shape(self, output_shape: _ShapeType) -> tuple[pixel, ...]:
+    def _get_output_shape(self, output_shape: _ShapeType) -> tuple[pixel, pixel, pixel]:
         """Normalize the `output_shape` parameter."""
         if output_shape is None:
             if isinstance(self.output_shape, Unset):
@@ -1019,7 +1038,7 @@ class LoaderBase(ABC):
             _output_shape = self.output_shape
         else:
             _output_shape = _misc.normalize_shape(output_shape, ndim=3)
-        return _output_shape
+        return _output_shape  # type: ignore
 
     def normalize_template(self, template: TemplateInputType) -> NDArray[np.float32]:
         """Resolve any template input type to a 3D array."""
@@ -1123,3 +1142,102 @@ def _normalize_max_shifts(x: nm | tuple[nm, nm, nm]) -> tuple[nm, nm, nm]:
             )
         return tup
     return (float(x),) * 3  # type: ignore
+
+
+@delayed
+def _delayed_align_pairwise(
+    img,
+    ref,
+    mask,
+    max_shifts: tuple[nm, nm, nm],
+    alignment_model: type[BaseAlignmentModel],
+    backend: Backend,
+    **align_kwargs,
+):
+    model = alignment_model(ref, mask, **align_kwargs)
+    img_fit, _ = model.fit(img, max_shifts, backend=backend)
+    return (img_fit + ref) / 2
+
+
+@delayed
+def _delayed_align_3(
+    img0,
+    img1,
+    img2,
+    mask,
+    max_shifts: tuple[nm, nm, nm],
+    alignment_model: type[BaseAlignmentModel],
+    backend: Backend,
+    **align_kwargs,
+):
+    model = alignment_model(img0, mask, **align_kwargs)
+    fit_1, _ = model.fit(img1, max_shifts, backend=backend)
+    fit_2, _ = model.fit(img2, max_shifts, backend=backend)
+    return (img0 + fit_1 + fit_2) / 3
+
+
+def _align_pairwise(
+    img,
+    ref,
+    mask,
+    max_shifts: tuple[nm, nm, nm],
+    alignment_model: type[BaseAlignmentModel],
+    backend: Backend,
+    **align_kwargs,
+) -> da.Array:
+    task = _delayed_align_pairwise(
+        img, ref, mask, max_shifts, alignment_model, backend, **align_kwargs
+    )
+    return da.from_delayed(task, shape=img.shape, dtype=img.dtype)
+
+
+def _align_3(
+    img0,
+    img1,
+    img2,
+    mask,
+    max_shifts: tuple[nm, nm, nm],
+    alignment_model: type[BaseAlignmentModel],
+    backend: Backend,
+    **align_kwargs,
+) -> da.Array:
+    task = _delayed_align_3(
+        img0, img1, img2, mask, max_shifts, alignment_model, backend, **align_kwargs
+    )
+    return da.from_delayed(task, shape=img0.shape, dtype=img0.dtype)
+
+
+def _align_pairwise_recursive(
+    dsk: da.Array,
+    mask,
+    max_shifts: tuple[nm, nm, nm],
+    alignment_model: type[BaseAlignmentModel],
+    backend: Backend,
+    **align_kwargs,
+):
+    nimg = dsk.shape[0]
+    if nimg < 2:
+        raise ValueError("Number of molecules must be greater than 1.")
+    elif nimg == 2:
+        return _align_pairwise(
+            dsk[0], dsk[1], mask, max_shifts, alignment_model, backend, **align_kwargs
+        )
+    elif nimg == 3:
+        return _align_3(
+            dsk[0],
+            dsk[1],
+            dsk[2],
+            mask,
+            max_shifts,
+            alignment_model,
+            backend,
+            **align_kwargs,
+        )
+    else:
+        dsk0 = _align_pairwise_recursive(
+            dsk[: nimg // 2], mask, max_shifts, alignment_model, backend, **align_kwargs
+        )
+        dsk1 = _align_pairwise_recursive(
+            dsk[nimg // 2 :], mask, max_shifts, alignment_model, backend, **align_kwargs
+        )
+        return (dsk0 + dsk1) / 2

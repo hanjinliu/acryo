@@ -1,14 +1,9 @@
 from __future__ import annotations
-from typing import (
-    TYPE_CHECKING,
-    Iterator,
-    NamedTuple,
-    cast,
-)
+from typing import TYPE_CHECKING, Iterator, NamedTuple
 
 if TYPE_CHECKING:
     from polars.dataframe.group_by import GroupBy
-    from .core import Molecules
+    from acryo.molecules.core import Molecules
 
 
 class MoleculeCutGroup:
@@ -21,8 +16,8 @@ class MoleculeCutGroup:
     def __iter__(self) -> Iterator[tuple[CutEdges, Molecules]]:
         from .core import Molecules
 
-        for key, df in self._group:
-            key = cast(str, key)
+        for keys, df in self._group:
+            key: str = keys[0]  # type: ignore
             gt, le = map(float, key[1:-1].split(", "))
             mole = Molecules.from_dataframe(df.drop(self._label))
             yield CutEdges(gt, le), mole

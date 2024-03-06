@@ -124,8 +124,8 @@ class BaseAlignmentModel(ABC):
         if callable(mask):
             if self._n_templates != 1:
                 # To calculate scores in a consistent way, we need to use the same mask.
-                # Here, we use the maximum value of the mask, with which all the template density.
-                # will be equally considered.
+                # Here, we use the maximum value of the mask, with which all the
+                # template density will be equally considered.
                 self._mask: NDArray[np.float32] = np.stack(
                     [mask(tmp) for tmp in self._template], axis=0
                 ).max(axis=0)
@@ -144,7 +144,8 @@ class BaseAlignmentModel(ABC):
             if self._template.shape[-self._ndim :] != mask.shape:
                 raise ValueError(
                     "Shape mismatch in between template image "
-                    f"{self._template.shape[-self._ndim :]} and mask image {mask.shape})."
+                    f"{self._template.shape[-self._ndim :]} and mask image "
+                    f"{mask.shape})."
                 )
             if mask.dtype not in (np.float32, np.bool_):
                 mask = mask.astype(np.float32)
@@ -434,8 +435,10 @@ class BaseAlignmentModel(ABC):
             else:
                 mesh = build_mesh(lds.shape[1:], max_shifts, upsample, xp)
                 all_lds = [
-                    xp.map_coordinates(l, mesh, order=3, mode="reflect", prefilter=True)
-                    for l in lds
+                    xp.map_coordinates(
+                        ld, mesh, order=3, mode="reflect", prefilter=True
+                    )
+                    for ld in lds
                 ]
                 lds_upsampled = xp.stack(all_lds, axis=0)
             return xp.asnumpy(lds_upsampled)
