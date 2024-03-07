@@ -145,7 +145,7 @@ class BaseAlignmentModel(ABC):
                 raise ValueError(
                     "Shape mismatch in between template image "
                     f"{self._template.shape[-self._ndim :]} and mask image "
-                    f"{mask.shape})."
+                    f"{mask.shape}."
                 )
             if mask.dtype not in (np.float32, np.bool_):
                 mask = mask.astype(np.float32)
