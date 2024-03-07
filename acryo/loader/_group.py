@@ -574,6 +574,6 @@ class DataFrameDict(dict[_K, pl.DataFrame]):
         df_melt = []
         for key, df in self.items():
             df_melt.append(
-                df.with_columns(pl.repeat(str(key), pl.count()).alias(key_label))
+                df.with_columns(pl.repeat(str(key), pl.len()).alias(key_label))
             )
         return pl.concat(df_melt)

@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 _CSV_COLUMNS = ["z", "y", "x", "zvec", "yvec", "xvec"]
 PathLike = Union[str, Path]
 IntoExpr = Union[str, pl.Expr]
+_Array1D = Union[NDArray[np.number], Sequence[Any]]
 _Array2D = Union[NDArray[np.number], Sequence[Sequence[Any]]]
 
 
@@ -53,7 +54,7 @@ class Molecules:
 
     def __init__(
         self,
-        pos: _Array2D,
+        pos: _Array1D | _Array2D,
         rot: Rotation | None = None,
         features: FrameInitTypes | None = None,
     ):
@@ -465,7 +466,8 @@ class Molecules:
         src : np.ndarray
             Source coordinates.
         dst : np.ndarray, optional
-            Destination coordinates. By default the coordinates of molecules will be used.
+            Destination coordinates. By default the coordinates of molecules will be
+            used.
         inverse : bool, default is False
             Return inverse mapping if true.
 
@@ -613,7 +615,7 @@ class Molecules:
         """
         return self._rotator.as_rotvec()
 
-    def translate(self, shifts: _Array2D, copy: bool = True) -> Self:
+    def translate(self, shifts: _Array1D | _Array2D, copy: bool = True) -> Self:
         """
         Translate molecule positions by ``shifts``.
 
@@ -647,7 +649,12 @@ class Molecules:
             out = self
         return out
 
-    def translate_internal(self, shifts: _Array2D, *, copy: bool = True) -> Self:
+    def translate_internal(
+        self,
+        shifts: _Array1D | _Array2D,
+        *,
+        copy: bool = True,
+    ) -> Self:
         """
         Translate molecule positions internally by ``shifts``.
 
@@ -715,7 +722,12 @@ class Molecules:
         )
         return self.translate(shifts, copy=copy)
 
-    def rotate_by_rotvec_internal(self, vector: _Array2D, copy: bool = True) -> Self:
+    def rotate_by_rotvec_internal(
+        self,
+        vector: _Array1D | _Array2D,
+        *,
+        copy: bool = True,
+    ) -> Self:
         """
         Rotate molecules using internal rotation vector.
 
@@ -744,7 +756,12 @@ class Molecules:
         )
         return self.rotate_by_rotvec(world_rotvec, copy=copy)
 
-    def rotate_by_matrix(self, matrix: ArrayLike, copy: bool = True) -> Self:
+    def rotate_by_matrix(
+        self,
+        matrix: ArrayLike,
+        *,
+        copy: bool = True,
+    ) -> Self:
         """
         Rotate molecules using rotation matrices, **with their position unchanged**.
 
@@ -763,9 +780,14 @@ class Molecules:
             Instance with updated orientation.
         """
         rotator = Rotation.from_matrix(matrix)
-        return self.rotate_by(rotator, copy)
+        return self.rotate_by(rotator, copy=copy)
 
-    def rotate_by_quaternion(self, quat: _Array2D, copy: bool = True) -> Self:
+    def rotate_by_quaternion(
+        self,
+        quat: _Array1D | _Array2D,
+        *,
+        copy: bool = True,
+    ) -> Self:
         """
         Rotate molecules using quaternions, **with their position unchanged**.
 
@@ -783,7 +805,7 @@ class Molecules:
             Instance with updated orientation.
         """
         rotator = Rotation.from_quat(quat)
-        return self.rotate_by(rotator, copy)
+        return self.rotate_by(rotator, copy=copy)
 
     def rotate_by_euler_angle(
         self,
@@ -815,9 +837,9 @@ class Molecules:
             rotator = Rotation.from_euler(seq, angles, degrees)
         else:
             raise ValueError("'order' must be 'xyz' or 'zyx'.")
-        return self.rotate_by(rotator, copy)
+        return self.rotate_by(rotator, copy=copy)
 
-    def rotate_by_rotvec(self, vector: _Array2D, copy: bool = True) -> Self:
+    def rotate_by_rotvec(self, vector: _Array2D, *, copy: bool = True) -> Self:
         """
         Rotate molecules using rotation vectors, **with their position unchanged**.
 
@@ -835,9 +857,9 @@ class Molecules:
             Instance with updated orientation.
         """
         rotator = Rotation.from_rotvec(vector)
-        return self.rotate_by(rotator, copy)
+        return self.rotate_by(rotator, copy=copy)
 
-    def rotate_by(self, rotator: Rotation, copy: bool = True) -> Self:
+    def rotate_by(self, rotator: Rotation, *, copy: bool = True) -> Self:
         """
         Rotate molecule with a ``Rotation`` object.
 
@@ -959,20 +981,30 @@ class Molecules:
     def groupby(self, by, *more_by):
         """Group molecules into sub-groups."""
         df = self.to_dataframe()
-        return MoleculeGroup(df.group_by(by, *more_by, maintain_order=True))
+        is_single = len(more_by) == 0 and isinstance(by, str)
+        if not isinstance(by, str):
+            return MoleculeGroup(
+                df.group_by(by, *more_by, maintain_order=True),
+                single=is_single,
+            )
+        else:
+            return MoleculeGroup(
+                df.group_by([by, *more_by], maintain_order=True),
+                single=is_single,
+            )
 
     group_by = groupby  # alias
 
     def cutby(self, by: str, bins: list[float]) -> MoleculeCutGroup:
         """Cut molecules into sub-groups by binning."""
-        cat_name = f".category"
+        cat_name = ".category"
         while cat_name in self.features.columns:
             cat_name = f".{cat_name}"
         feature = self.features[by]
         cat = feature.cut(bins, as_series=True).alias(cat_name)  # type: ignore
         df = self.to_dataframe().with_columns(cat)
         return MoleculeCutGroup(
-            df.group_by(cat_name, maintain_order=True), label=cat_name
+            df.group_by([cat_name], maintain_order=True), label=cat_name
         )
 
     def filter(

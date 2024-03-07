@@ -206,6 +206,11 @@ def test_groupby():
     assert grouped[0][0] == 0
     assert grouped[1][0] == 1
 
+    grouped = list(mol.groupby(["A"]))
+    assert len(grouped) == 2
+    assert grouped[0][0] == (0,)
+    assert grouped[1][0] == (1,)
+
 
 def test_cutby():
     mol = Molecules(np.zeros((4, 3)), features={"A": [0.1, 0.2, 0.3, 0.4]})
