@@ -30,7 +30,11 @@ def blobs() -> NDArray[np.float32]:
 
 
 @lru_cache(maxsize=2)
-def _cached_spiral(radius: float = 4.0, freq: float = 1.0):
+def _cached_spiral(
+    radius: float = 4.0,
+    freq: float = 1.0,
+    shape: tuple[int, int, int] = (40, 40, 40),
+):
     shape = (40, 40, 40)
     img = np.zeros(shape, dtype=np.float32)
     inds = np.indices(shape, dtype=np.float32)
@@ -44,5 +48,9 @@ def _cached_spiral(radius: float = 4.0, freq: float = 1.0):
     return img
 
 
-def spiral(radius: float = 4.0, freq: float = 1.0) -> NDArray[np.float32]:
-    return _cached_spiral(round(radius, 3), round(freq, 5))
+def spiral(
+    radius: float = 4.0,
+    freq: float = 1.0,
+    shape: tuple[int, int, int] = (40, 40, 40),
+) -> NDArray[np.float32]:
+    return _cached_spiral(round(radius, 3), round(freq, 5), shape)

@@ -10,9 +10,10 @@ from scipy.spatial.transform import Rotation
 from dask import array as da
 
 from acryo.pipe._classes import ImageProvider
+from acryo.tilt import TiltSeriesModel, no_wedge
 from acryo.molecules import Molecules
 from acryo._rotation import normalize_rotations
-from acryo._utils import compose_matrices, missing_wedge_mask
+from acryo._utils import compose_matrices
 from acryo._types import nm, RotationType
 from acryo._typed_scipy import spline_filter, affine_transform
 from acryo._dask import DaskTaskPool
@@ -21,27 +22,37 @@ from acryo._dask import DaskTaskPool
 class BasePickerModel(ABC):
     def pick_molecules(
         self,
-        image: da.Array,
+        image: NDArray[np.number] | da.Array,
         scale: nm = 1.0,
+        *,
+        boundary="nearest",
         **kwargs,
     ) -> Molecules:
-        params, depth = self.get_params_and_depth(scale)
+        """Pick molecules from image."""
+        if isinstance(image, np.ndarray):
+            image = da.asarray(image)
+        if image.dtype.kind not in "fiub":
+            raise ValueError("Image must be a numeric array.")
         if image.dtype != np.float32:
             image = image.astype(np.float32)
+        params, depth = self.get_params_and_depth(scale)
+        # if depth is too large
+        if isinstance(depth, (int, np.integer)):
+            depth = (depth, depth, depth)
         task: da.Array = image.map_overlap(
             self._pick_in_chunk_wrapped,
             **params,
             **kwargs,
             # dask parameters
-            depth=depth,
+            depth=[min(s, d) for s, d in zip(image.shape, depth)],
             trim=False,
-            boundary="nearest",
+            boundary=boundary,
             dtype=object,
             meta=np.array([]),
         )
         boxes: Sequence[MoleculesBox] = task.compute().ravel()
         mole = Molecules.concat([box.to_molecules() for box in boxes])
-        mole._pos *= scale
+        mole._pos = (mole._pos - depth) * scale
         return mole
 
     def _pick_in_chunk_wrapped(
@@ -51,7 +62,6 @@ class BasePickerModel(ABC):
         **kwargs,
     ) -> NDArray[np.object_]:
         pos, quats, features = self.pick_in_chunk(image, **kwargs)
-
         locs: list[tuple[int, int]] = block_info[None]["array-location"]
         for i, (start, _) in enumerate(locs):
             pos[:, i] += start
@@ -62,7 +72,7 @@ class BasePickerModel(ABC):
     def pick_in_chunk(
         self, image: NDArray[np.float32], **kwargs
     ) -> tuple[NDArray[np.float32], NDArray[np.uint16], Any]:
-        ...
+        """Pick molecules inside a chunk of image."""
 
     @abstractmethod
     def get_params_and_depth(
@@ -77,13 +87,15 @@ class BaseTemplateMatcher(BasePickerModel):
     def __init__(
         self,
         template: NDArray[np.float32] | ImageProvider,
-        rotation: RotationType,
-        tilt_range: tuple[float, float] = (-60, 60),
+        rotation: RotationType | None = None,
+        tilt: TiltSeriesModel | None = None,
         order: int = 1,
     ) -> None:
         self._order = order
         self._quaternions = normalize_rotations(rotation)
-        self._tilt_range = tilt_range
+        if tilt is None:
+            tilt = no_wedge()
+        self._tilt_model = tilt
         self._template = template
 
     @property
@@ -112,9 +124,7 @@ class BaseTemplateMatcher(BasePickerModel):
         pool = DaskTaskPool.from_func(affine_transform)
         for mtx in matrices:
             pool.add_task(template, mtx, order=self.order, prefilter=False)
-        mask = missing_wedge_mask(
-            Rotation.from_quat([0, 0, 0, 1]), self._tilt_range, template.shape
-        )
+        mask = self._tilt_model.create_mask(shape=template.shape)
         out = pool.compute()  # rotated templates
         templates = [o * mask for o in out]
         depth = tuple(np.ceil(np.array(templates[0].shape) / 2).astype(np.uint16))
