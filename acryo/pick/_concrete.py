@@ -8,9 +8,9 @@ from dask import array as da
 from scipy import ndimage as ndi
 
 from acryo.pick._base import BasePickerModel, BaseTemplateMatcher
-from acryo.molecules import Molecules
 from acryo.backend import NUMPY_BACKEND
 from acryo.backend._zncc import ncc_landscape_no_pad
+from acryo.molecules import Molecules
 from acryo._types import nm
 
 
@@ -37,16 +37,21 @@ class ZNCCTemplateMatcher(BaseTemplateMatcher):
         *,
         min_distance: nm = 1.0,
         min_score: float = 0.02,
+        boundary="nearest",
     ) -> Molecules:
         return super().pick_molecules(
-            image, scale, min_distance=min_distance, min_score=min_score
+            image,
+            scale,
+            boundary=boundary,
+            min_distance=min_distance / scale,
+            min_score=min_score,
         )
 
     def pick_in_chunk(
         self,
         image: NDArray[np.float32],
         templates: list[NDArray[np.float32]],
-        min_distance: float,
+        min_distance: float,  # pixel
         min_score: float,
     ):
         all_landscapes = np.stack(
@@ -64,13 +69,14 @@ class ZNCCTemplateMatcher(BaseTemplateMatcher):
         img_argmax = np.argmax(all_landscapes, axis=0)
         landscale_max = np.max(all_landscapes, axis=0)
 
-        max_indices = find_maxima(landscale_max, min_distance, min_score)
-        argmax_indices = img_argmax[max_indices]
-        score = landscale_max[max_indices]
-
-        pos = np.stack(max_indices, axis=1).astype(np.float32)
+        pos = find_maxima(landscale_max, min_distance, min_score)
+        argmax_indices = np.array(
+            [img_argmax[tuple(np.round(p).astype(np.int32))] for p in pos]
+        )
+        score = _sample_score(landscale_max, pos)
         quats = self._index_to_quaternions(argmax_indices)
-        return pos, quats, {"score": score}
+        offset = (np.array(templates[0].shape) + 1) / 2
+        return pos + offset, quats, {"score": score}
 
 
 class LoGPicker(BasePickerModel):
@@ -85,12 +91,8 @@ class LoGPicker(BasePickerModel):
         sigma: float,
     ) -> tuple[NDArray[np.float32], NDArray[np.uint16], Any]:
         img_filt = -ndi.gaussian_laplace(image, sigma)
-        max_indices = find_maxima(img_filt, sigma, 0.0)
-        score = img_filt[max_indices]
-        pos = np.stack(max_indices, axis=1).astype(np.float32)
-        quats = np.zeros((pos.shape[0], 4), dtype=np.float32)
-        quats[:, 3] = 1.0
-        return pos, quats, {"score": score}
+        pos = find_maxima(img_filt, sigma, 0.0)
+        return simple_pick(img_filt, pos)
 
     def get_params_and_depth(self, scale: nm):
         sigma_px = self._sigma / scale
@@ -113,15 +115,9 @@ class DoGPicker(BasePickerModel):
         sigma_low: float,
         sigma_high: float,
     ) -> tuple[NDArray[np.float32], NDArray[np.uint16], Any]:
-        img_filt = ndi.gaussian_filter(image, sigma_low) - ndi.gaussian_filter(
-            image, sigma_high
-        )
-        max_indices = find_maxima(img_filt, sigma_low, 0.0)
-        score = img_filt[max_indices]
-        pos = np.stack(max_indices, axis=1).astype(np.float32)
-        quats = np.zeros((pos.shape[0], 4), dtype=np.float32)
-        quats[:, 3] = 1.0
-        return pos, quats, {"score": score}
+        img_filt = _differece_of_gaussian(image, sigma_low, sigma_high)
+        pos = find_maxima(img_filt, sigma_low, 0.0)
+        return simple_pick(img_filt, pos)
 
     def get_params_and_depth(self, scale: nm):
         sigma1_px = self._sigma_low / scale
@@ -140,6 +136,33 @@ def maximum_filter(image: da.Array, radius: float) -> NDArray[np.float32]:
     return ndi.maximum_filter(image, footprint=foot, mode="nearest")  # type: ignore
 
 
-def find_maxima(img, min_distance, min_intensity):
+def find_maxima(img, min_distance: float, min_intensity: float):
     img_max_maxfilt = maximum_filter(img, min_distance)
-    return np.where((img_max_maxfilt == img) & (img > min_intensity))
+    is_maxima = (img_max_maxfilt == img) & (img > min_intensity)
+    s0 = [[0, 0, 0], [0, 1, 0], [0, 0, 0]]
+    s1 = [[0, 1, 0], [1, 1, 1], [0, 1, 0]]
+    structure = np.stack([s0, s1, s0])
+    label_img, nfeat = ndi.label(is_maxima, structure=structure)
+    centers = ndi.center_of_mass(img, label_img, range(1, nfeat + 1))
+    return np.array(centers, dtype=np.float32)
+
+
+def simple_pick(img: NDArray[np.float32], pos: NDArray[np.float32]):
+    score = _sample_score(img, pos)
+    quats = np.zeros((pos.shape[0], 4), dtype=np.float32)
+    quats[:, 3] = 1.0
+    return pos, quats, {"score": score}
+
+
+def _sample_score(img, pos: NDArray[np.float32]) -> NDArray[np.float32]:
+    return ndi.map_coordinates(img, pos.T, order=3, mode="reflect")
+
+
+def _differece_of_gaussian(
+    image: NDArray[np.float32],
+    sigma_low: float,
+    sigma_high: float,
+) -> NDArray[np.float32]:
+    img_l = ndi.gaussian_filter(image, sigma_low)
+    img_h = ndi.gaussian_filter(image, sigma_high)
+    return img_l - img_h
