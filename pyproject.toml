@@ -22,7 +22,7 @@ authors = [
 dependencies = [
     "dask>=2021.6.0",
     "numpy>=1.21",
-    "polars>=0.19.19",
+    "polars>=0.19.19,!=0.20.23",
     "scipy>=1.11.1",
     "typing_extensions>=4.1.1",
 ]
