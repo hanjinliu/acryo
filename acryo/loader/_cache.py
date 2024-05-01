@@ -12,6 +12,7 @@ from acryo.backend import Backend
 class _Subtomogram(NamedTuple):
     array: da.Array
     backend: str
+    mmap: np.memmap
 
 
 class SubtomogramCache(Mapping[int, _Subtomogram]):
@@ -45,7 +46,7 @@ class SubtomogramCache(Mapping[int, _Subtomogram]):
                 chunks=("auto",) + shape[1:],  # type: ignore
                 meta=np.array([], dtype=np.float32),
             )
-        self._dict[id_] = _Subtomogram(darr, "cupy" if _is_cupy else "numpy")
+            self._dict[id_] = _Subtomogram(darr, "cupy" if _is_cupy else "numpy", mmap)
         return darr
 
     def get_cache(

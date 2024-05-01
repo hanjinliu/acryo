@@ -38,4 +38,5 @@ include = [
 [project.optional-dependencies]
 testing = [
     "pytest",
+    "scikit-learn",
 ]
