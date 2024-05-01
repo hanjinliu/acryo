@@ -1,8 +1,7 @@
 # pyright: reportPrivateImportUsage=false
 from __future__ import annotations
 
-from contextlib import contextmanager
-from abc import ABC, abstractmethod, abstractproperty
+from abc import ABC, abstractmethod
 from typing import (
     Callable,
     TYPE_CHECKING,
@@ -39,7 +38,6 @@ from acryo._dask import DaskArrayList, DaskTaskList, DaskTaskIterator, compute
 from acryo.molecules import Molecules
 from acryo.loader import _misc
 from acryo.loader._group import LoaderGroup
-from acryo.loader._cache import SubtomogramCache
 from acryo.pipe._classes import ImageProvider, ImageConverter
 
 if TYPE_CHECKING:
@@ -66,9 +64,6 @@ class Unset:
         return "Unset"
 
 
-CACHE = SubtomogramCache()
-
-
 class LoaderBase(ABC):
     """The base class for subtomogram loaders."""
 
@@ -84,9 +79,8 @@ class LoaderBase(ABC):
             order, output_shape, scale, corner_safe, ndim
         )
 
-    _CACHE = CACHE
-
-    @abstractproperty
+    @property
+    @abstractmethod
     def molecules(self) -> Molecules:
         """All the molecules"""
         raise NotImplementedError
@@ -124,11 +118,6 @@ class LoaderBase(ABC):
     ) -> DaskArrayList:
         ...
 
-    def _get_cached_array(
-        self, shape: tuple[int, int, int] | None, backend: Backend | None
-    ) -> da.Array | None:
-        return CACHE.get_cache(id(self), shape, backend)
-
     def construct_dask(
         self,
         output_shape: pixel | tuple[pixel, ...] | None = None,
@@ -137,8 +126,7 @@ class LoaderBase(ABC):
         """
         Construct a dask array of subtomograms.
 
-        This function is always needed before parallel processing. If subtomograms
-        are cached in a memory-map it will be used instead.
+        This function is always needed before parallel processing.
 
         Returns
         -------
@@ -147,8 +135,6 @@ class LoaderBase(ABC):
         """
         output_shape = self._get_output_shape(output_shape)
         xp = backend or Backend()
-        if (cached := self._get_cached_array(output_shape, xp)) is not None:
-            return cached
         tasks = self.construct_loading_tasks(output_shape, xp)
         out = da.stack(tasks, axis=0)
         return out
@@ -243,39 +229,6 @@ class LoaderBase(ABC):
             var_kwarg=var_kwarg,
             **const_kwargs,
         ).tolist()
-
-    def _create_cache(self, output_shape: _ShapeType = None) -> da.Array:
-        """
-        Create cached stack of subtomograms.
-
-        Parameters
-        ----------
-        path : str, optional
-            File path of the temporary file. If not given file will be created by
-            ``tempfile.NamedTemporaryFile`` function.
-
-        Returns
-        -------
-        da.Array
-            A lazy-loading array that uses the memory-mapped array.
-        """
-        output_shape = self._get_output_shape(output_shape)
-        backend = Backend()
-        if (cached := self._get_cached_array(output_shape, backend)) is not None:
-            return cached
-        dsk = self.construct_dask(output_shape=output_shape, backend=backend)
-        return CACHE.cache_array(dsk, id(self))
-
-    @contextmanager
-    def cached(self, output_shape: _ShapeType = None) -> Iterator[da.Array]:
-        """
-        Context manager for caching subtomograms of give shape.
-
-        Subtomograms are cached in a temporary memory-map file. Within this context
-        loading subtomograms of given output shape will be faster.
-        """
-        with CACHE.temporal():
-            yield self._create_cache(output_shape=output_shape)
 
     def asnumpy(self, output_shape: _ShapeType = None) -> NDArray[np.float32]:
         """Load all the subtomograms as a 4D numpy array."""
@@ -532,16 +485,15 @@ class LoaderBase(ABC):
         if output_shape is None and isinstance(mask, np.ndarray):
             output_shape = mask.shape
         backend = Backend()
-        with self.cached(output_shape=output_shape):
-            template = self.average(output_shape=output_shape, backend=backend)
-            out = self.align(
-                template,
-                mask=mask,
-                max_shifts=max_shifts,
-                alignment_model=alignment_model,
-                backend=backend,
-                **align_kwargs,
-            )
+        template = self.average(output_shape=output_shape, backend=backend)
+        out = self.align(
+            template,
+            mask=mask,
+            max_shifts=max_shifts,
+            alignment_model=alignment_model,
+            backend=backend,
+            **align_kwargs,
+        )
         return out
 
     def align_and_average_pairwise(
@@ -918,38 +870,37 @@ class LoaderBase(ABC):
         else:
             shape = self.output_shape
 
-        with self.cached(shape):
-            if template is None:
-                template = self.average(shape)
-            if tilt_range is not None:
-                warnings.warn(
-                    "tilt_range is deprecated. Use tilt instead",
-                    DeprecationWarning,
-                )
-                tilt = tilt_range
-            model = ZNCCAlignment(template, _mask, cutoff=cutoff, tilt=tilt)
-
-            # PCA requires aggregation along the first axis.
-            # Rechunk to improve performance.
-            stack = (
-                self.iter_mapping_tasks(
-                    model.masked_difference,
-                    output_shape=shape,
-                    var_kwarg=dict(quaternion=self.molecules.quaternion()),
-                )
-                .tolist()
-                .tostack(shape=shape, dtype=np.float32)
-                .rechunk(("auto",) + shape)  # type: ignore
+        if template is None:
+            template = self.average(shape)
+        if tilt_range is not None:
+            warnings.warn(
+                "tilt_range is deprecated. Use tilt instead",
+                DeprecationWarning,
             )
+            tilt = tilt_range
+        model = ZNCCAlignment(template, _mask, cutoff=cutoff, tilt=tilt)
 
-            clf = PcaClassifier(
-                stack,
-                model.mask,
-                n_components=n_components,
-                n_clusters=n_clusters,
-                seed=seed,
+        # PCA requires aggregation along the first axis.
+        # Rechunk to improve performance.
+        stack = (
+            self.iter_mapping_tasks(
+                model.masked_difference,
+                output_shape=shape,
+                var_kwarg=dict(quaternion=self.molecules.quaternion()),
             )
-            clf.run()
+            .tolist()
+            .tostack(shape=shape, dtype=np.float32)
+            .rechunk(("auto",) + shape)  # type: ignore
+        )
+
+        clf = PcaClassifier(
+            stack,
+            model.mask,
+            n_components=n_components,
+            n_clusters=n_clusters,
+            seed=seed,
+        )
+        clf.run()
 
         mole = self.molecules.copy()
         mole.features = mole.features.with_columns(pl.Series(label_name, clf._labels))
@@ -996,14 +947,7 @@ class LoaderBase(ABC):
         predicate: pl.Expr | str | pl.Series | list[bool] | np.ndarray,
     ) -> Self:
         """Return a new loader with filtered molecules."""
-        out = self.replace(molecules=self.molecules.filter(predicate))
-        if (cached := self._get_cached_array(None, None)) is not None:
-            if isinstance(predicate, (str, pl.Expr)):
-                sl = self.molecules.features.select(predicate).to_numpy().ravel()
-            else:
-                sl = np.asarray(predicate)
-            CACHE.cache_array(cached[sl], id(out))
-        return out
+        return self.replace(molecules=self.molecules.filter(predicate))
 
     @overload
     def groupby(self, by: IntoExpr) -> LoaderGroup[str, Self]:

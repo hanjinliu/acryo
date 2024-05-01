@@ -212,8 +212,6 @@ class SubtomogramLoader(LoaderBase):
         """
         output_shape = self._get_output_shape(output_shape)
         xp = backend or Backend()
-        if (cached := self._get_cached_array(output_shape, xp)) is not None:
-            return DaskArrayList(cached[i] for i in range(self.molecules.count()))
 
         image = self.image
         scale = self.scale
