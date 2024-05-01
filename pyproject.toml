@@ -40,3 +40,13 @@ testing = [
     "pytest",
     "scikit-learn",
 ]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+]
+
+[tool.hatch.envs.test]
+features = ["testing"]
+
+[tool.hatch.envs.test.scripts]
+run = "pytest -v"
