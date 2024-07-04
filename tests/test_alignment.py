@@ -248,32 +248,35 @@ def test_max_shifts(alignment_model: "type[TomographyInput]", lim: float):
     assert np.all(distances <= lim + 1e-6)
 
 
+FLOAT_DTYPES = (pl.Float32, pl.Float64)
+
+
 def test_apply():
     loader = SubtomogramLoader(
         tomo, mole, order=0, scale=scale, output_shape=temp_shape
     )
     df = loader.apply(np.mean, np.std)
-    assert df.dtypes[0] in pl.FLOAT_DTYPES
-    assert df.dtypes[1] in pl.FLOAT_DTYPES
+    assert df.dtypes[0] in FLOAT_DTYPES
+    assert df.dtypes[1] in FLOAT_DTYPES
 
     assert df.shape == (len(mole), 2)
 
     df = loader.apply(np.mean, np.std, schema=["mu", "sigma"])
-    assert df.dtypes[0] in pl.FLOAT_DTYPES
-    assert df.dtypes[1] in pl.FLOAT_DTYPES
+    assert df.dtypes[0] in FLOAT_DTYPES
+    assert df.dtypes[1] in FLOAT_DTYPES
 
     assert df.shape == (len(mole), 2)
     assert df.columns == ["mu", "sigma"]
 
     df = loader.apply([np.mean, np.std], schema=["mu", "sigma"])
-    assert df.dtypes[0] in pl.FLOAT_DTYPES
-    assert df.dtypes[1] in pl.FLOAT_DTYPES
+    assert df.dtypes[0] in FLOAT_DTYPES
+    assert df.dtypes[1] in FLOAT_DTYPES
 
     assert df.shape == (len(mole), 2)
     assert df.columns == ["mu", "sigma"]
 
     df = loader.apply([np.mean], schema=["mu"])
-    assert df.dtypes[0] in pl.FLOAT_DTYPES
+    assert df.dtypes[0] in FLOAT_DTYPES
 
     assert df.shape == (len(mole), 1)
     assert df.columns == ["mu"]
