@@ -24,7 +24,7 @@ from acryo.molecules._rotation import (
 
 if TYPE_CHECKING:
     from typing_extensions import Self, TypeGuard
-    from polars.type_aliases import ParquetCompression, FrameInitTypes
+    from polars._typing import ParquetCompression, FrameInitTypes
 
 _CSV_COLUMNS = ["z", "y", "x", "zvec", "yvec", "xvec"]
 PathLike = Union[str, Path]
@@ -262,7 +262,7 @@ class Molecules:
             self._features = None
         else:
             if not isinstance(value, pl.DataFrame):
-                df = pl.DataFrame(value)
+                df = pl.DataFrame(value, strict=False)
             else:
                 df = value
             if df.shape == (0, 0):
@@ -1001,7 +1001,7 @@ class Molecules:
         while cat_name in self.features.columns:
             cat_name = f".{cat_name}"
         feature = self.features[by]
-        cat = feature.cut(bins, as_series=True).alias(cat_name)  # type: ignore
+        cat = feature.cut(bins).alias(cat_name)  # type: ignore
         df = self.to_dataframe().with_columns(cat)
         return MoleculeCutGroup(
             df.group_by([cat_name], maintain_order=True), label=cat_name
