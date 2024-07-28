@@ -32,7 +32,6 @@ from acryo.backend import Backend, AnyArray
 
 if TYPE_CHECKING:
     from dask.delayed import Delayed
-    from numpy.typing import NDArray
     from acryo.loader._base import (
         LoaderBase,
         Unset,
@@ -75,7 +74,9 @@ class LoaderGroup(Generic[_K, _L]):
         ...
 
     @classmethod
-    def _from_loader(cls, loader: _L, by: IntoExpr | tuple[IntoExpr, ...]):  # type: ignore[override]
+    def _from_loader(  # type: ignore[override]
+        cls, loader: _L, by: IntoExpr | tuple[IntoExpr, ...]
+    ):
         return cls(
             LoaderGroupByIterator(
                 loader,
@@ -186,8 +187,8 @@ class LoaderGroup(Generic[_K, _L]):
         Align subtomograms to the template image.
 
         This method conduct so called "subtomogram alignment". Only shifts and rotations
-        are calculated in this method. To get averaged image, you'll have to run "average"
-        method using the resulting LoaderGroup instance.
+        are calculated in this method. To get averaged image, you'll have to run
+        "average" method using the resulting LoaderGroup instance.
 
         Parameters
         ----------
@@ -405,7 +406,7 @@ class LoaderGroup(Generic[_K, _L]):
                 raise ValueError("LoaderGroup has no output shape.")
             taskset = []
             for fn in _funcs:
-                f_as_np = lambda ar: fn(xp.asnumpy(ar))
+                f_as_np = _define_apply_func(fn, xp)
                 tasks = loader.construct_mapping_tasks(
                     f_as_np, output_shape=output_shape
                 )
@@ -524,7 +525,6 @@ class LoaderGroupByIterator(Iterable[tuple[_K, _L]]):
 
     def __iter__(self) -> Iterator[tuple[_K, _L]]:
         loader = self._loader
-        cached = loader._get_cached_array(None, None)
         index_col_name = ".index"
         if index_col_name in loader.molecules.features:
             index_col_name += "."
@@ -537,9 +537,6 @@ class LoaderGroupByIterator(Iterable[tuple[_K, _L]]):
                 output_shape=self._output_shape,
                 corner_safe=self._corner_safe,
             )
-            if cached is not None:
-                sl = mole.features[index_col_name].to_numpy()
-                loader._CACHE.cache_array(cached[sl], id(_loader))
             yield key, _loader  # type: ignore
 
 
@@ -552,6 +549,10 @@ def _normalize_template(template: _T | Mapping[_K, _T]) -> Mapping[_K, _T]:
     from collections import defaultdict
 
     return defaultdict(lambda: template)
+
+
+def _define_apply_func(fn, xp: Backend):
+    return lambda ar: fn(xp.asnumpy(ar))
 
 
 class ArrayDict(dict[_K, NDArray[np.float32]]):
