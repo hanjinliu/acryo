@@ -20,14 +20,16 @@ class ZNCCTemplateMatcher(BaseTemplateMatcher):
 
     Parameters
     ----------
-    template : 3D array or ImageProvider
-        Template image.
-    rotation : range-like
-        3D rotation of template image in degrees.
-    tilt_range: tuple of float, default is (-60, 60)
-        Tilt range in degrees.
-    order : int, default is 1
-        Order of interpolation.
+    image : da.Array
+        The input image.
+    scale : float
+        The scale of the image.
+    min_distance : float
+        The minimum distance between the picked particles.
+    min_score : float
+        The minimum score of the picked particles.
+    boundary : str
+        The boundary condition for the template matching.
     """
 
     def pick_molecules(
