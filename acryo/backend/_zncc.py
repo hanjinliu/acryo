@@ -50,15 +50,13 @@ def ncc_landscape_no_pad(
     return response
 
 
-def zncc_landscape_with_crop(
+def ncc_landscape_with_crop(
     img0: AnyArray[np.float32],
     img1: AnyArray[np.float32],
     max_shifts: tuple[float, ...],
     backend: Backend,
 ) -> AnyArray[np.float32]:
-    response = ncc_landscape(
-        img0 - img0.mean(), img1 - img1.mean(), max_shifts, backend=backend
-    )
+    response = ncc_landscape(img0, img1, max_shifts, backend=backend)
     pad_width_eff = tuple(
         (s - int(m) * 2 - 1) // 2 for m, s in zip(max_shifts, response.shape)
     )
@@ -66,15 +64,23 @@ def zncc_landscape_with_crop(
     return response[sl_res]
 
 
-def subpixel_zncc(
+def zncc_landscape_with_crop(
+    img0: AnyArray[np.float32],
+    img1: AnyArray[np.float32],
+    max_shifts: tuple[float, ...],
+    backend: Backend,
+) -> AnyArray[np.float32]:
+    return ncc_landscape_with_crop(
+        img0 - img0.mean(), img1 - img1.mean(), max_shifts, backend=backend
+    )
+
+
+def subpixel_ncc(
     img0: AnyArray[np.float32],
     img1: AnyArray[np.float32],
     max_shifts: pixel | tuple[pixel, ...],
     backend: Backend,
 ) -> tuple[NDArray[np.float32], float]:
-    """Get the optimal subpixel shift and the score."""
-    img0 = img0 - img0.mean()
-    img1 = img1 - img1.mean()
     if isinstance(max_shifts, (int, float)):
         max_shifts = (max_shifts,) * img0.ndim
     response = ncc_landscape(img0, img1, max_shifts, backend=backend)
@@ -85,6 +91,18 @@ def subpixel_zncc(
     response_center = response[sl_res]
     return upsample(
         response_center, response, max_shifts, pad_width_eff, backend=backend
+    )
+
+
+def subpixel_zncc(
+    img0: AnyArray[np.float32],
+    img1: AnyArray[np.float32],
+    max_shifts: pixel | tuple[pixel, ...],
+    backend: Backend,
+) -> tuple[NDArray[np.float32], float]:
+    """Get the optimal subpixel shift and the score."""
+    return subpixel_ncc(
+        img0 - img0.mean(), img1 - img1.mean(), max_shifts, backend=backend
     )
 
 
