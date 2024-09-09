@@ -88,6 +88,18 @@ def subpixel_zncc(
     )
 
 
+def zncc(
+    img0: AnyArray[np.float32],
+    img1: AnyArray[np.float32],
+    backend: Backend,
+) -> float:
+    img0 = img0 - img0.mean()
+    img1 = img1 - img1.mean()
+    return backend.sum(img0 * img1) / backend.sqrt(
+        backend.sum(img0**2) * backend.sum(img1**2)
+    )
+
+
 def _window_sum_2d(
     image: AnyArray[np.float32],
     window_shape: tuple[int, ...],

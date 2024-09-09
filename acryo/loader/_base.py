@@ -467,7 +467,7 @@ class LoaderBase(ABC):
 
         Parameters
         ----------
-        mask : np.ndarray or callable, optional
+        mask : 3D array, ImageProvider or ImageConverter, optional
             Mask image. Must in the same shape as the template.
         max_shifts : int or tuple of int, default is (1., 1., 1.)
             Maximum shift between subtomograms and template.
@@ -665,6 +665,54 @@ class LoaderBase(ABC):
         )
         return da.stack(task_arrays, axis=0)
 
+    def score(
+        self,
+        templates: list[TemplateInputType],
+        *,
+        mask: MaskInputType = None,
+        alignment_model: type[BaseAlignmentModel] | AlignmentFactory = ZNCCAlignment,
+        **align_kwargs,
+    ) -> list[NDArray[np.float32]]:
+        """
+        Calculate the score of subtomograms against the template image.
+
+        This method internally calls the ``score`` method of the input alignment model.
+
+        Parameters
+        ----------
+        templates : list of 3D arrays or ImageProvider
+            Template images. If ImageProvider is given, the image will be provided
+            accordingly using the scale of the loader object.
+        mask : 3D array, ImageProvider or ImageConverter, optional
+            Mask image. Must in the same shape as the template.
+        alignment_model : subclass of BaseAlignmentModel, optional
+            Alignment model class used for subtomogram alignment. By default,
+            ``ZNCCAlignment`` will be used.
+
+        Returns
+        -------
+        list of np.ndarray
+            1D arrays of scores.
+        """
+        tasks: list[DaskTaskList[float]] = []
+        for template in templates:
+            model = alignment_model(
+                self.normalize_template(template),
+                self.normalize_mask(mask),
+                **align_kwargs,
+            )
+            task = self.construct_mapping_tasks(
+                model.score,
+                output_shape=model.input_shape,
+                var_kwarg=dict(
+                    quaternion=self.molecules.quaternion(),
+                    pos=self.molecules.pos / self.scale,
+                ),
+            )
+            tasks.append(task)
+        out = compute(tasks)
+        return [np.array(r, dtype=np.float32) for r in out]
+
     def apply(
         self,
         func: AggFunction[_R] | Iterable[AggFunction[_R]],
@@ -750,9 +798,28 @@ class LoaderBase(ABC):
         seed: int | None = 0,
         n_set: int = 1,
         dfreq: float | None = None,
+        zero_norm: bool = True,
     ) -> tuple[pl.DataFrame, NDArray[np.float32]]:
+        df, (img0, img1), _ = self.fsc_with_halfmaps(
+            mask=mask,
+            seed=seed,
+            n_set=n_set,
+            dfreq=dfreq,
+            zero_norm=zero_norm,
+        )
+        return df, (img0[0] + img1[0]) / 2
+
+    def fsc_with_halfmaps(
+        self,
+        mask: TemplateInputType | None = None,
+        seed: int | None = 0,
+        n_set: int = 1,
+        dfreq: float | None = None,
+        zero_norm: bool = True,
+        squeeze: bool = True,
+    ) -> FscTuple:
         """
-        Calculate Fourier shell correlation and the resulting averaged image.
+        Calculate Fourier shell correlation and the resulting half maps.
 
         Parameters
         ----------
@@ -764,10 +831,13 @@ class LoaderBase(ABC):
             Number of split set of averaged images.
         dfreq : float, optional
             Frequency sampling width. Automatically determined if not provided.
+        zero_norm : bool, default is True
+            If True, subtract the mean from the half maps to minimize the sharp mask
+            edge effect.
 
         Returns
         -------
-        pl.DataFrame and 3D array
+        pl.DataFrame and two 3D arrays
             A data frame with FSC results and the average image. Data frame has
             columns "freq", "FSC-0", ..., "FSC-{n-1}" where n is the number of
             split.
@@ -791,17 +861,18 @@ class LoaderBase(ABC):
         if n_set <= 0:
             raise ValueError("'n_set' must be positive.")
         dfq = 1.5 / min(output_shape) if dfreq is None else dfreq
-        img = self.average_split(
+        halves = self.average_split(
             n_set=n_set,
             seed=seed,
             squeeze=False,
             output_shape=output_shape,
         )
-        img[:] -= img.mean()  # normalize to minimize the sharp mask edge effect
+        if zero_norm:
+            halves[:] -= halves.mean()
         fsc_all: dict[str, np.ndarray] = {}
         freq = np.zeros(0, dtype=np.float32)
         for i in range(n_set):
-            img0, img1 = img[i]
+            img0, img1 = halves[i]
             freq, fsc = _utils.fourier_shell_correlation(
                 img0 * _mask, img1 * _mask, dfreq=dfq
             )
@@ -809,7 +880,10 @@ class LoaderBase(ABC):
 
         out: dict[str, NDArray[np.float32]] = {"freq": freq}
         out.update(fsc_all)
-        return pl.DataFrame(out), np.mean(img[0], axis=0)
+        if n_set == 1 and squeeze:
+            return FscTuple(pl.DataFrame(out), (halves[0, 0], halves[0, 1]), _mask)
+        else:
+            return FscTuple(pl.DataFrame(out), (halves[:, 0], halves[:, 1]), _mask)
 
     def classify(
         self,
@@ -1039,6 +1113,14 @@ class ClassificationResult(NamedTuple):
 
     loader: LoaderBase
     classifier: PcaClassifier
+
+
+class FscTuple(NamedTuple):
+    """Tuple of FSC results."""
+
+    fsc: pl.DataFrame
+    halfmaps: tuple[NDArray[np.float32], NDArray[np.float32]]
+    mask: NDArray[np.float32]
 
 
 def check_input(

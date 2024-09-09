@@ -51,6 +51,15 @@ def subpixel_fsc(
     return upsample(out, out, max_shifts, (0, 0, 0), backend=backend)
 
 
+def fsc(
+    ft0: AnyArray[np.complex64],
+    ft1: AnyArray[np.complex64],
+    backend: Backend,
+) -> float:
+    out = fsc_landscape(ft0, ft1, (0, 0, 0), backend=backend)
+    return out[0, 0, 0]
+
+
 @lru_cache(maxsize=12)
 def _get_radial_label(
     shape: tuple[int, int, int], backend: Backend
