@@ -1061,6 +1061,8 @@ class LoaderBase(ABC):
     def normalize_template(self, template: TemplateInputType) -> NDArray[np.float32]:
         """Resolve any template input type to a 3D array."""
         if isinstance(template, np.ndarray):
+            if template.ndim != 3:
+                raise ValueError("Template must be a 3D array.")
             return template
         elif isinstance(template, ImageProvider):
             return template(self.scale)

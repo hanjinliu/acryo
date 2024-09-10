@@ -99,7 +99,7 @@ def test_fit_without_rotation(shift, alignment_model: "type[TomographyInput]"):
 
 
 @pytest.mark.parametrize("shift", [[1, 2, 2], [-4, 3, 2]])
-@pytest.mark.parametrize("alignment_model", [ZNCCAlignment, PCCAlignment])
+@pytest.mark.parametrize("alignment_model", [ZNCCAlignment, NCCAlignment, PCCAlignment])
 @pytest.mark.parametrize("upsample", [1, 2])
 def test_landscape(shift, alignment_model: "type[TomographyInput]", upsample):
     model = alignment_model(temp)
@@ -132,6 +132,14 @@ def test_with_params():
     )
     assert model.quaternions.shape == (27, 4)
     assert type(model(temp)) is ZNCCAlignment
+
+
+@pytest.mark.parametrize("alignment_model", [ZNCCAlignment, NCCAlignment, PCCAlignment])
+def test_score(alignment_model):
+    loader = SubtomogramLoader(
+        tomo, mole, order=0, scale=scale, output_shape=temp_shape
+    )
+    loader.score([temp], alignment_model=alignment_model)
 
 
 @pytest.mark.parametrize("upsample", [1, 2])

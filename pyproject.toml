@@ -38,6 +38,7 @@ include = [
 [project.optional-dependencies]
 testing = [
     "pytest",
+    "pytest-cov",
     "scikit-learn",
 ]
 
@@ -50,3 +51,25 @@ features = ["testing"]
 
 [tool.hatch.envs.test.scripts]
 run = "pytest -v"
+
+[tool.coverage.run]
+source = ["acryo"]
+branch = true
+parallel = true
+
+[tool.coverage.paths]
+cylindra = ["acryo/"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    'if __name__ == "__main__":',
+    'def __repr__(self)',
+    "@overload",
+    "except ImportError",
+    "except ImportError*",
+    "except PackageNotFoundError",
+    "raise NotImplementedError",
+    "pass",
+]
