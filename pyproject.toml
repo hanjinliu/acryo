@@ -40,6 +40,8 @@ testing = [
     "pytest",
     "pytest-cov",
     "scikit-learn",
+    "tifffile",
+    "mrcfile>=1.5.3"
 ]
 
 [tool.pytest.ini_options]
