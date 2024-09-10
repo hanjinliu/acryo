@@ -14,6 +14,8 @@ from acryo.backend._zncc import (
     zncc_landscape_with_crop,
 )
 from acryo.backend._fsc import subpixel_fsc, fsc_landscape
+from acryo.backend._zncc import subpixel_zncc, zncc_landscape_with_crop, ncc, zncc
+from acryo.backend._fsc import subpixel_fsc, fsc_landscape, fsc
 
 
 class PCCAlignment(TomographyInput):
@@ -38,6 +40,24 @@ class PCCAlignment(TomographyInput):
             backend=backend,
         )
         return shift, self._DUMMY_QUAT, pcc
+
+    def _score(
+        self,
+        subvolume: AnyArray[np.complex64],
+        template: AnyArray[np.complex64],
+        quaternion: NDArray[np.float32],
+        pos: NDArray[np.float32],
+        backend: Backend,
+    ) -> float:
+        """Score."""
+        mw = self._get_missing_wedge_mask(quaternion, backend)
+        return subpixel_pcc(
+            subvolume * mw,
+            template * mw,
+            upsample_factor=1,
+            max_shifts=(0, 0, 0),
+            backend=backend,
+        )[1]
 
     def _landscape(
         self,
@@ -80,6 +100,21 @@ class NCCAlignment(TomographyInput):
         )
         return shift, self._DUMMY_QUAT, zncc
 
+    def _score(
+        self,
+        subvolume: AnyArray[np.complex64],
+        template: AnyArray[np.complex64],
+        quaternion: NDArray[np.float32],
+        pos: NDArray[np.float32],
+        backend: Backend,
+    ) -> float:
+        mw = self._get_missing_wedge_mask(quaternion, backend)
+        return ncc(
+            backend.ifftn(subvolume * mw).real,
+            backend.ifftn(template * mw).real,
+            backend=backend,
+        )
+
     def _landscape(
         self,
         subvolume: AnyArray[np.complex64],
@@ -121,6 +156,21 @@ class ZNCCAlignment(TomographyInput):
         )
         return shift, self._DUMMY_QUAT, zncc
 
+    def _score(
+        self,
+        subvolume: AnyArray[np.complex64],
+        template: AnyArray[np.complex64],
+        quaternion: NDArray[np.float32],
+        pos: NDArray[np.float32],
+        backend: Backend,
+    ) -> float:
+        mw = self._get_missing_wedge_mask(quaternion, backend)
+        return zncc(
+            backend.ifftn(subvolume * mw).real,
+            backend.ifftn(template * mw).real,
+            backend=backend,
+        )
+
     def _landscape(
         self,
         subvolume: AnyArray[np.complex64],
@@ -161,6 +211,18 @@ class FSCAlignment(TomographyInput):
             backend=backend,
         )
         return shift, self._DUMMY_QUAT, fsc
+
+    def _score(
+        self,
+        subvolume: AnyArray[np.complex64],
+        template: AnyArray[np.complex64],
+        quaternion: NDArray[np.float32],
+        pos: NDArray[np.float32],
+        backend: Backend,
+    ) -> float:
+        """Score."""
+        mw = self._get_missing_wedge_mask(quaternion, backend)
+        return fsc(subvolume * mw, template * mw, backend=backend)
 
     def _landscape(
         self,

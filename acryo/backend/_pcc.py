@@ -82,7 +82,7 @@ def subpixel_pcc(
         shifts = shifts + maxima / upsample_factor
         pcc = math.sqrt(backend.asnumpy(power[tuple(int(round(m)) for m in maxima)]))
     else:
-        pcc = math.sqrt(backend.asnumpy(power[maxima]))
+        pcc = math.sqrt(backend.asnumpy(power[tuple(maxima)]))
     return shifts, pcc
 
 

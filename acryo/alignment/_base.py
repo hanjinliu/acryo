@@ -191,6 +191,17 @@ class BaseAlignmentModel(ABC):
         return ParametrizedModel(cls, **params)
 
     @abstractmethod
+    def _score(
+        self,
+        subvolume: AnyArray[np.complex64],
+        template: _Template,
+        quaternion: NDArray[np.float32],
+        pos: NDArray[np.float32],
+        backend: Backend,
+    ) -> float:
+        """Get the score between the subvolume and the template."""
+
+    @abstractmethod
     def _optimize(
         self,
         subvolume: AnyArray[np.complex64],
@@ -370,6 +381,36 @@ class BaseAlignmentModel(ABC):
         _cval = _normalize_cval(cval, img_input, xp)
         img_trans = xp.affine_transform(img_input, mtx, cval=_cval)
         return xp.asnumpy(img_trans), result
+
+    def score(
+        self,
+        img: NDArray[np.float32],
+        quaternion: NDArray[np.float32],
+        pos: NDArray[np.float32],
+        backend: Backend | None = None,
+    ) -> float:
+        """
+        Calculate the score between the image and the template.
+
+        Parameters
+        ----------
+        img : np.ndarray
+            Input image that will be transformed.
+
+        Returns
+        -------
+        float
+            Score of the alignment.
+        """
+        xp = backend or Backend()
+        _template, _mask = self._get_template_and_mask_input(backend=xp)
+        return self._score(
+            self.pre_transform(xp.asarray(img) * _mask, xp),
+            _template,
+            quaternion=quaternion,
+            pos=pos,
+            backend=xp,
+        )
 
     def landscape(
         self,
