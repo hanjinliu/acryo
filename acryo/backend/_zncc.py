@@ -17,11 +17,14 @@ def ncc_landscape(
     img1: AnyArray[np.float32],
     max_shifts: tuple[float, ...],
     backend: Backend,
+    constant_values: float = 0,
 ) -> AnyArray[np.float32]:
     if max_shifts is not None:
         max_shifts = tuple(max_shifts)
     pad_width = _get_padding_width(max_shifts)
-    padimg = backend.pad(img0, pad_width=pad_width, mode="constant", constant_values=0)
+    padimg = backend.pad(
+        img0, pad_width=pad_width, mode="constant", constant_values=constant_values
+    )
     return ncc_landscape_no_pad(padimg, img1, backend=backend)
 
 
@@ -50,6 +53,22 @@ def ncc_landscape_no_pad(
     return response
 
 
+def ncc_landscape_with_crop(
+    img0: AnyArray[np.float32],
+    img1: AnyArray[np.float32],
+    max_shifts: tuple[float, ...],
+    backend: Backend,
+) -> AnyArray[np.float32]:
+    response = ncc_landscape(
+        img0, img1, max_shifts, backend=backend, constant_values=img0.mean()
+    )
+    pad_width_eff = tuple(
+        (s - int(m) * 2 - 1) // 2 for m, s in zip(max_shifts, response.shape)
+    )
+    sl_res = tuple(slice(w, -w, None) for w in pad_width_eff)
+    return response[sl_res]
+
+
 def zncc_landscape_with_crop(
     img0: AnyArray[np.float32],
     img1: AnyArray[np.float32],
@@ -64,6 +83,31 @@ def zncc_landscape_with_crop(
     )
     sl_res = tuple(slice(w, -w, None) for w in pad_width_eff)
     return response[sl_res]
+
+
+def subpixel_ncc(
+    img0: AnyArray[np.float32],
+    img1: AnyArray[np.float32],
+    max_shifts: pixel | tuple[pixel, ...],
+    backend: Backend,
+) -> tuple[NDArray[np.float32], float]:
+    if isinstance(max_shifts, (int, float)):
+        max_shifts = (max_shifts,) * img0.ndim
+    response = ncc_landscape(
+        img0,
+        img1,
+        max_shifts,
+        backend=backend,
+        constant_values=img0.mean(),
+    )
+    pad_width_eff = tuple(
+        (s - int(m) * 2 - 1) // 2 for m, s in zip(max_shifts, response.shape)
+    )
+    sl_res = tuple(slice(w, -w, None) for w in pad_width_eff)
+    response_center = response[sl_res]
+    return upsample(
+        response_center, response, max_shifts, pad_width_eff, backend=backend
+    )
 
 
 def subpixel_zncc(
@@ -88,16 +132,22 @@ def subpixel_zncc(
     )
 
 
+def ncc(
+    img0: AnyArray[np.float32],
+    img1: AnyArray[np.float32],
+    backend: Backend,
+) -> float:
+    return backend.sum(img0 * img1) / backend.sqrt(
+        backend.sum(img0**2) * backend.sum(img1**2)
+    )
+
+
 def zncc(
     img0: AnyArray[np.float32],
     img1: AnyArray[np.float32],
     backend: Backend,
 ) -> float:
-    img0 = img0 - img0.mean()
-    img1 = img1 - img1.mean()
-    return backend.sum(img0 * img1) / backend.sqrt(
-        backend.sum(img0**2) * backend.sum(img1**2)
-    )
+    return ncc(img0 - img0.mean(), img1 - img1.mean(), backend=backend)
 
 
 def _window_sum_2d(

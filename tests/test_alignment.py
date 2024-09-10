@@ -8,6 +8,7 @@ import polars as pl
 from acryo import SubtomogramLoader, Molecules
 from acryo.alignment import (
     PCCAlignment,
+    NCCAlignment,
     ZNCCAlignment,
     BaseAlignmentModel,
 )
@@ -27,7 +28,7 @@ def measure_time(desc):
     print(f"{desc}: {default_timer() - t0:.3f} s")
 
 
-@pytest.mark.parametrize("alignment_model", [ZNCCAlignment, PCCAlignment])
+@pytest.mark.parametrize("alignment_model", [ZNCCAlignment, NCCAlignment, PCCAlignment])
 @pytest.mark.parametrize("rotations", [None, ((25, 25), (25, 25), (25, 25))])
 def test_run(alignment_model: type[BaseAlignmentModel], rotations):
     scale = 0.32
@@ -69,7 +70,7 @@ def test_fsc():
 
 @pytest.mark.parametrize("shift", [[1, 2, 2], [-4, 3, 2]])
 @pytest.mark.parametrize("rot", [[15, 0, 15], [-15, 15, 15], [0, 0, -15]])
-@pytest.mark.parametrize("alignment_model", [ZNCCAlignment, PCCAlignment])
+@pytest.mark.parametrize("alignment_model", [ZNCCAlignment, NCCAlignment, PCCAlignment])
 def test_fit(shift, rot, alignment_model: "type[TomographyInput]"):
     rotations = ((15, 15), (15, 15), (15, 15))
     model = alignment_model(temp, rotations=rotations)
@@ -84,7 +85,7 @@ def test_fit(shift, rot, alignment_model: "type[TomographyInput]"):
 
 
 @pytest.mark.parametrize("shift", [[1, 1, 2], [-4, 3, 2]])
-@pytest.mark.parametrize("alignment_model", [ZNCCAlignment, PCCAlignment])
+@pytest.mark.parametrize("alignment_model", [ZNCCAlignment, NCCAlignment, PCCAlignment])
 def test_fit_without_rotation(shift, alignment_model: "type[TomographyInput]"):
     model = alignment_model(temp, rotations=((0, 0), (0, 0), (0, 0)))
     temp_transformed = temp * 4 + np.mean(temp)  # linear transformation to input image
@@ -232,7 +233,7 @@ def test_multi_align_with_single_template():
     assert list(out.features[label_name]) == [0, 0, 0]
 
 
-@pytest.mark.parametrize("alignment_model", [ZNCCAlignment, PCCAlignment])
+@pytest.mark.parametrize("alignment_model", [ZNCCAlignment, NCCAlignment, PCCAlignment])
 @pytest.mark.parametrize("lim", [1.2, 0.6, 0.3])
 def test_max_shifts(alignment_model: "type[TomographyInput]", lim: float):
     rng = np.random.default_rng(48172)
