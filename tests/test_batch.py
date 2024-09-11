@@ -43,6 +43,7 @@ def test_add_tomograms():
     assert len(loader.molecules) == 6
     assert len(loader.loaders) == 2
     sub = SubtomogramLoader(np.ones((10, 10, 10)), molecules=Molecules.empty())
+    loader = loader.copy()
     loader.add_loader(sub)
     loader.add_loader(loader.copy())
 
@@ -51,7 +52,7 @@ def test_get_loader():
     loader = _get_batch_loader()
     assert loader.loaders[0].image.mean() == 0
     assert loader.loaders[1].image.mean() == 1
-    loader.from_loaders(loader.loaders)
+    BatchLoader.from_loaders(loader.loaders)
 
 
 def test_iter_loader():
