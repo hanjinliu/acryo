@@ -1,6 +1,6 @@
 from functools import lru_cache
 import numpy as np
-from acryo import BatchLoader, Molecules
+from acryo import BatchLoader, Molecules, SubtomogramLoader
 from scipy.spatial.transform import Rotation
 import polars as pl
 
@@ -32,7 +32,7 @@ def _get_batch_loader():
             Rotation.from_quat(np.ones((2, 4))),
         ),
     )
-
+    repr(loader)
     return loader
 
 
@@ -41,12 +41,17 @@ def test_add_tomograms():
 
     assert list(loader.images.keys()) == [0, 1]
     assert len(loader.molecules) == 6
+    assert len(loader.loaders) == 2
+    sub = SubtomogramLoader(np.ones((10, 10, 10)), molecules=Molecules.empty())
+    loader.add_loader(sub)
+    loader.add_loader(loader.copy())
 
 
 def test_get_loader():
     loader = _get_batch_loader()
     assert loader.loaders[0].image.mean() == 0
     assert loader.loaders[1].image.mean() == 1
+    loader.from_loaders(loader.loaders)
 
 
 def test_iter_loader():
@@ -97,3 +102,8 @@ def test_align_no_template():
     loader = _get_batch_loader()
     out = loader.replace(output_shape=(3, 3, 3)).align_no_template()
     assert len(out.molecules) == 6
+
+
+def test_binning():
+    loader = _get_batch_loader()
+    loader.binning(2)

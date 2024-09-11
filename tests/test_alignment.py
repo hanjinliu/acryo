@@ -38,7 +38,9 @@ def test_run(alignment_model: type[BaseAlignmentModel], rotations):
     )
     tomo = gen.get_tomogram()
     mole = gen.sample_molecules(max_distance=1.0, scale=scale)
-    loader = SubtomogramLoader(tomo, mole, order=0, scale=scale)
+    loader = SubtomogramLoader(tomo, mole, order=0, scale=scale).copy()
+    repr(loader)
+    len(loader)
     with measure_time(alignment_model.__name__):
         out = loader.align(
             template=temp,
@@ -140,6 +142,7 @@ def test_score(alignment_model):
         tomo, mole, order=0, scale=scale, output_shape=temp_shape
     )
     loader.score([temp], alignment_model=alignment_model)
+    loader.binning(2).score([temp], alignment_model=alignment_model)
 
 
 @pytest.mark.parametrize("upsample", [1, 2])
@@ -149,7 +152,10 @@ def test_landscape_in_loader(upsample):
     )
     mask = temp > np.mean(temp)
     arr: np.ndarray = loader.construct_landscape(
-        temp, mask=mask.astype(np.float32), upsample=upsample, max_shifts=1.0
+        temp,
+        mask=mask.astype(np.float32),
+        upsample=upsample,
+        max_shifts=[1.0, 1.0, 1.0],
     ).compute()
     assert arr.shape == (
         len(mole),
@@ -186,7 +192,11 @@ def test_pca_classify():
         tomo, mole, order=0, scale=scale, output_shape=temp_shape
     )
     mask = temp > np.mean(temp)
-    loader.classify(mask.astype(np.float32), tilt=(-60, 60))
+    result = loader.classify(mask.astype(np.float32), tilt=(-60, 60))
+    result.classifier.pca
+    result.classifier.kmeans
+    result.classifier.predict(temp[np.newaxis])
+    result.classifier.split_clusters()
 
 
 def test_load_functions():

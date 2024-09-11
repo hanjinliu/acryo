@@ -148,7 +148,7 @@ class LoaderBase(ABC):
         scale: float | None = None,
         corner_safe: bool | None = None,
     ) -> Self:
-        ...
+        """Return a new loader with updated attributes."""
 
     def copy(self) -> Self:
         """Return a copy of the loader."""
