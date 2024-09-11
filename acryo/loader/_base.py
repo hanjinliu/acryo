@@ -115,7 +115,7 @@ class LoaderBase(ABC):
         self,
         output_shape: _ShapeType = None,
         backend: Backend | None = None,
-    ) -> DaskArrayList:
+    ) -> DaskArrayList[np.number]:
         ...
 
     def construct_dask(
@@ -238,7 +238,7 @@ class LoaderBase(ABC):
         self,
         idx: SupportsIndex | slice | Iterable[SupportsIndex],
         output_shape: _ShapeType = None,
-    ):
+    ) -> NDArray[np.float32]:
         """
         Load subtomogram(s) of given index.
 
@@ -496,24 +496,6 @@ class LoaderBase(ABC):
         )
         return out
 
-    def align_and_average_pairwise(
-        self,
-        *,
-        mask: MaskInputType = None,
-        max_shifts: nm | tuple[nm, nm, nm] = 1.0,
-        output_shape: _ShapeType = None,
-        alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
-        **align_kwargs,
-    ) -> NDArray[np.float32]:
-        _backend = Backend()
-        max_shifts = _normalize_max_shifts(max_shifts)
-
-        dsk = self.construct_dask(output_shape=output_shape, backend=_backend)
-        task = _align_pairwise_recursive(
-            dsk, mask, max_shifts, alignment_model=alignment_model, **align_kwargs
-        )
-        return _backend.asnumpy(task.compute())
-
     def align_multi_templates(
         self,
         templates: list[TemplateInputType] | ImageProvider[list[NDArray[np.float32]]],
@@ -746,6 +728,8 @@ class LoaderBase(ABC):
         if isinstance(schema, list):
             if len(set(schema)) != len(schema):
                 raise ValueError("Schema names must be unique.")
+            elif len(schema) != len(funcs):
+                raise ValueError("Schema must have the same length as the functions.")
         elif isinstance(schema, dict):
             if len(schema) != len(funcs):
                 raise ValueError("Schema must have the same length as the functions.")
@@ -1170,102 +1154,3 @@ def _normalize_max_shifts(x: nm | tuple[nm, nm, nm]) -> tuple[nm, nm, nm]:
             )
         return tup
     return (float(x),) * 3  # type: ignore
-
-
-@delayed
-def _delayed_align_pairwise(
-    img,
-    ref,
-    mask,
-    max_shifts: tuple[nm, nm, nm],
-    alignment_model: type[BaseAlignmentModel],
-    backend: Backend,
-    **align_kwargs,
-):
-    model = alignment_model(ref, mask, **align_kwargs)
-    img_fit, _ = model.fit(img, max_shifts, backend=backend)
-    return (img_fit + ref) / 2
-
-
-@delayed
-def _delayed_align_3(
-    img0,
-    img1,
-    img2,
-    mask,
-    max_shifts: tuple[nm, nm, nm],
-    alignment_model: type[BaseAlignmentModel],
-    backend: Backend,
-    **align_kwargs,
-):
-    model = alignment_model(img0, mask, **align_kwargs)
-    fit_1, _ = model.fit(img1, max_shifts, backend=backend)
-    fit_2, _ = model.fit(img2, max_shifts, backend=backend)
-    return (img0 + fit_1 + fit_2) / 3
-
-
-def _align_pairwise(
-    img,
-    ref,
-    mask,
-    max_shifts: tuple[nm, nm, nm],
-    alignment_model: type[BaseAlignmentModel],
-    backend: Backend,
-    **align_kwargs,
-) -> da.Array:
-    task = _delayed_align_pairwise(
-        img, ref, mask, max_shifts, alignment_model, backend, **align_kwargs
-    )
-    return da.from_delayed(task, shape=img.shape, dtype=img.dtype)
-
-
-def _align_3(
-    img0,
-    img1,
-    img2,
-    mask,
-    max_shifts: tuple[nm, nm, nm],
-    alignment_model: type[BaseAlignmentModel],
-    backend: Backend,
-    **align_kwargs,
-) -> da.Array:
-    task = _delayed_align_3(
-        img0, img1, img2, mask, max_shifts, alignment_model, backend, **align_kwargs
-    )
-    return da.from_delayed(task, shape=img0.shape, dtype=img0.dtype)
-
-
-def _align_pairwise_recursive(
-    dsk: da.Array,
-    mask,
-    max_shifts: tuple[nm, nm, nm],
-    alignment_model: type[BaseAlignmentModel],
-    backend: Backend,
-    **align_kwargs,
-):
-    nimg = dsk.shape[0]
-    if nimg < 2:
-        raise ValueError("Number of molecules must be greater than 1.")
-    elif nimg == 2:
-        return _align_pairwise(
-            dsk[0], dsk[1], mask, max_shifts, alignment_model, backend, **align_kwargs
-        )
-    elif nimg == 3:
-        return _align_3(
-            dsk[0],
-            dsk[1],
-            dsk[2],
-            mask,
-            max_shifts,
-            alignment_model,
-            backend,
-            **align_kwargs,
-        )
-    else:
-        dsk0 = _align_pairwise_recursive(
-            dsk[: nimg // 2], mask, max_shifts, alignment_model, backend, **align_kwargs
-        )
-        dsk1 = _align_pairwise_recursive(
-            dsk[nimg // 2 :], mask, max_shifts, alignment_model, backend, **align_kwargs
-        )
-        return (dsk0 + dsk1) / 2

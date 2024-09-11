@@ -7,6 +7,7 @@ from typing import (
     Callable,
     Generic,
     Iterable,
+    SupportsIndex,
     TypeVar,
     TYPE_CHECKING,
     Iterator,
@@ -139,7 +140,7 @@ class DaskArrayList(Sequence["da.Array"], _DaskComputable[NDArray[_D]]):
         return iter(self._arrays)
 
     @overload
-    def __getitem__(self, index: int) -> da.Array:
+    def __getitem__(self, index: SupportsIndex) -> da.Array:
         ...
 
     @overload
