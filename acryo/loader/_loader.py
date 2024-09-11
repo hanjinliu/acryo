@@ -14,7 +14,6 @@ from acryo._reader import imread
 from acryo.molecules import Molecules
 from acryo.backend import Backend
 from acryo import _utils
-from acryo.loader import _misc
 from acryo.loader._base import LoaderBase, Unset, _ShapeType
 from acryo._dask import DaskTaskPool, DaskArrayList
 
@@ -253,31 +252,3 @@ class ClassificationResult(NamedTuple):
 
     loader: SubtomogramLoader
     classifier: PcaClassifier
-
-
-def check_input(
-    order: int,
-    output_shape: pixel | tuple[pixel, pixel, pixel] | Unset,
-    scale: float,
-    corner_safe: bool,
-    ndim: int,
-):
-    # check interpolation order
-    if order not in (0, 1, 3):
-        raise ValueError(
-            f"The third argument 'order' must be 0, 1 or 3, got {order!r}."
-        )
-
-    # check output_shape
-    if isinstance(output_shape, Unset):
-        _output_shape = output_shape
-    else:
-        _output_shape = _misc.normalize_shape(output_shape, ndim=ndim)
-
-    # check scale
-    _scale = float(scale)
-    if _scale <= 0:
-        raise ValueError("Negative scale is not allowed.")
-
-    _corner_safe = bool(corner_safe)
-    return order, _output_shape, _scale, _corner_safe

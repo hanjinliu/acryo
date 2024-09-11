@@ -5,7 +5,7 @@ from contextlib import contextmanager
 import numpy as np
 from numpy.testing import assert_allclose
 import polars as pl
-from acryo import SubtomogramLoader, Molecules
+from acryo import SubtomogramLoader, Molecules, pipe
 from acryo.alignment import (
     PCCAlignment,
     NCCAlignment,
@@ -38,7 +38,9 @@ def test_run(alignment_model: type[BaseAlignmentModel], rotations):
     )
     tomo = gen.get_tomogram()
     mole = gen.sample_molecules(max_distance=1.0, scale=scale)
-    loader = SubtomogramLoader(tomo, mole, order=0, scale=scale)
+    loader = SubtomogramLoader(tomo, mole, order=0, scale=scale).copy()
+    repr(loader)
+    len(loader)
     with measure_time(alignment_model.__name__):
         out = loader.align(
             template=temp,
@@ -140,6 +142,7 @@ def test_score(alignment_model):
         tomo, mole, order=0, scale=scale, output_shape=temp_shape
     )
     loader.score([temp], alignment_model=alignment_model)
+    loader.binning(2).score([temp], alignment_model=alignment_model)
 
 
 @pytest.mark.parametrize("upsample", [1, 2])
@@ -149,7 +152,10 @@ def test_landscape_in_loader(upsample):
     )
     mask = temp > np.mean(temp)
     arr: np.ndarray = loader.construct_landscape(
-        temp, mask=mask.astype(np.float32), upsample=upsample, max_shifts=1.0
+        temp,
+        mask=mask.astype(np.float32),
+        upsample=upsample,
+        max_shifts=[1.0, 1.0, 1.0],
     ).compute()
     assert arr.shape == (
         len(mole),
@@ -186,7 +192,20 @@ def test_pca_classify():
         tomo, mole, order=0, scale=scale, output_shape=temp_shape
     )
     mask = temp > np.mean(temp)
-    loader.classify(mask.astype(np.float32), tilt=(-60, 60))
+    result = loader.classify(mask.astype(np.float32), tilt=(-60, 60))
+    result.classifier.pca
+    result.classifier.kmeans
+    result.classifier.predict(temp[np.newaxis])
+    result.classifier.split_clusters()
+
+
+def test_load_functions():
+    loader = SubtomogramLoader(tomo, mole, order=0, scale=scale, output_shape=(3, 3, 3))
+    for subtomo in loader.load_iter():
+        assert subtomo.shape == (3, 3, 3)
+    assert loader.load(1).shape == (3, 3, 3)
+    assert loader.load(slice(2, 4)).shape == (2, 3, 3, 3)
+    assert loader.load([1, 4]).shape == (2, 3, 3, 3)
 
 
 def test_multi_align():
@@ -277,15 +296,56 @@ def test_apply():
     assert df.shape == (len(mole), 2)
     assert df.columns == ["mu", "sigma"]
 
-    df = loader.apply([np.mean, np.std], schema=["mu", "sigma"])
-    assert df.dtypes[0] in FLOAT_DTYPES
-    assert df.dtypes[1] in FLOAT_DTYPES
+    df = loader.apply([np.mean, np.std], schema={"mu": pl.Float32, "sigma": pl.Float64})
+    assert df.dtypes[0] == pl.Float32
+    assert df.dtypes[1] == pl.Float64
+
+    with pytest.raises(ValueError):
+        loader.apply([np.mean, np.std], schema=["mu"])
+    with pytest.raises(ValueError):
+        loader.apply([np.mean, np.std], schema=["mu", "mu"])
+    with pytest.raises(ValueError):
+        loader.apply([np.mean, np.std], schema={"mu": pl.Float32})
 
     assert df.shape == (len(mole), 2)
     assert df.columns == ["mu", "sigma"]
 
-    df = loader.apply([np.mean], schema=["mu"])
+    df = loader.apply(np.mean, schema=["mu"])
     assert df.dtypes[0] in FLOAT_DTYPES
 
     assert df.shape == (len(mole), 1)
     assert df.columns == ["mu"]
+
+
+def test_reshape():
+    loader = SubtomogramLoader(tomo, mole, scale=scale)
+    _ones = np.ones((4, 4, 4))
+    _atoms = pipe.from_atoms(np.array([[0, 0, 1], [1, 0, 0]]))
+    _gaussian = pipe.from_gaussian((4, 4, 4))
+    _otsu = pipe.soft_otsu()
+    assert loader.reshape(_ones, None).output_shape == (4, 4, 4)
+    assert loader.reshape(_ones, None, shape=(4, 4, 4)).output_shape == (4, 4, 4)
+    assert loader.reshape(None, _ones).output_shape == (4, 4, 4)
+    assert loader.reshape(_gaussian, None).output_shape == (12, 12, 12)
+    assert loader.reshape(_gaussian, _otsu).output_shape == (12, 12, 12)
+
+    with pytest.raises(ValueError):
+        assert loader.reshape()
+    with pytest.raises(ValueError):
+        assert loader.reshape(_ones, shape=(5, 5, 5))
+    with pytest.raises(ValueError):
+        assert loader.reshape(None, _ones, shape=(5, 5, 5))
+    with pytest.raises(ValueError):
+        assert loader.reshape(_atoms, _ones, shape=(5, 5, 5))
+
+
+def test_normalize_input():
+    loader = SubtomogramLoader(tomo, mole, scale=scale)
+    _ones = np.ones((4, 4, 4))
+    _atoms = pipe.from_atoms(np.array([[0, 0, 1], [1, 0, 0]]))
+    _otsu = pipe.soft_otsu()
+    loader.normalize_input(_ones, _otsu)
+    loader.normalize_input(None, _ones)
+    loader.normalize_input(_atoms, None)
+    with pytest.raises(TypeError):
+        loader.normalize_input(mask=_otsu)

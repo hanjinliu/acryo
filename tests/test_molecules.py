@@ -104,6 +104,12 @@ def test_rotate():
     assert_allclose(rot.apply(mol.y), mol2.y, rtol=1e-8, atol=1e-8)
     assert_allclose(rot.apply(mol.x), mol2.x, rtol=1e-8, atol=1e-8)
 
+    mol.rotate_by_matrix(rot.as_matrix())
+    mol.rotate_by_rotvec(rot.as_rotvec())
+    mol.rotate_by_quaternion(rot.as_quat(), copy=False)
+    mol.rotate_by_euler_angle(rot.as_euler("zyx"), degrees=True)
+    mol.rotate_random(seed=3)
+
 
 def test_internal_transformation():
     pos = np.array([0, 0, 0])
@@ -154,6 +160,7 @@ def test_features():
     assert_allclose(mol.features, mol2.features)
     assert mol.features is not mol2.features
     assert_allclose(mol3.features, mol.features[3:17])
+    mol.translate([1, 2, 3], copy=False)
 
 
 @pytest.mark.parametrize("sl", [2, slice(2, 5), [2, 4, 6], np.array([2, 4, 6])])
@@ -190,7 +197,17 @@ def test_io():
         root = Path(d)
         path = root / "test.csv"
         mol.to_csv(path)
+        mol.to_file(path)
         mol0 = Molecules.from_csv(path)
+        assert_allclose(mol.to_dataframe(), mol0.to_dataframe(), rtol=1e-6, atol=1e-4)
+        mol0 = Molecules.from_file(path)
+        assert_allclose(mol.to_dataframe(), mol0.to_dataframe(), rtol=1e-6, atol=1e-4)
+        path = root / "test.parquet"
+        mol.to_parquet(path)
+        mol.to_file(path)
+        mol0 = Molecules.from_parquet(path)
+        assert_allclose(mol.to_dataframe(), mol0.to_dataframe(), rtol=1e-6, atol=1e-4)
+        mol0 = Molecules.from_file(path)
         assert_allclose(mol.to_dataframe(), mol0.to_dataframe(), rtol=1e-6, atol=1e-4)
 
 
@@ -271,3 +288,16 @@ def test_axes_to_rotator(rotvec: list[float]):
     y0 = rot.apply(y)
     out = axes_to_rotator(z0, y0)
     assert_allclose(out.as_rotvec(), [rotvec], rtol=1e-8, atol=1e-8)
+
+
+def test_local_coordinates():
+    mol = Molecules(np.zeros((1, 3)), Rotation.random(1))
+    coords = mol.local_coordinates((3, 4, 5), squeeze=False)
+    assert coords.shape == (1, 3, 3, 4, 5)
+    coords = mol.local_coordinates((3, 4, 5), squeeze=True)
+    assert coords.shape == (3, 3, 4, 5)
+
+
+def test_sort():
+    mol = Molecules(np.zeros((4, 3)), features={"A": [0.1, 0.2, 0.4, 0.3]})
+    mol.sort("A")
