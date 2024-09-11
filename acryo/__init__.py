@@ -1,4 +1,4 @@
-__version__ = "0.4.12"
+__version__ = "0.4.13"
 
 from acryo.loader import SubtomogramLoader, BatchLoader, MockLoader
 from acryo.molecules import Molecules
