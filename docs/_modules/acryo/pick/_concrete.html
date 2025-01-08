@@ -1,21 +1,28 @@
+
+
 <!DOCTYPE html>
-<html class="writer-html5" lang="en" >
+<html class="writer-html5" lang="en" data-content_root="../../../">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo.pick._concrete &mdash; acryo 0.4.5 documentation</title>
-      <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
-      <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
-  <!--[if lt IE 9]>
-    <script src="../../../_static/js/html5shiv.min.js"></script>
-  <![endif]-->
+  <title>acryo.pick._concrete &mdash; acryo 0.4.13 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=e59714d7" />
 
-        <script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
-        <script src="../../../_static/jquery.js"></script>
-        <script src="../../../_static/underscore.js"></script>
-        <script src="../../../_static/doctools.js"></script>
-        <script src="https://unpkg.com/mermaid@9.4.0/dist/mermaid.min.js"></script>
-        <script>mermaid.initialize({startOnLoad:true});</script>
+
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=d4dc9828"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+      <script type="module" src="https://cdn.jsdelivr.net/npm/mermaid@11.2.0/dist/mermaid.esm.min.mjs"></script>
+      <script type="module" src="https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk@0.1.4/dist/mermaid-layout-elk.esm.min.mjs"></script>
+      <script type="module">import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.2.0/dist/mermaid.esm.min.mjs";import elkLayouts from "https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk@0.1.4/dist/mermaid-layout-elk.esm.min.mjs";mermaid.registerLayoutLoaders(elkLayouts);mermaid.initialize({startOnLoad:false});</script>
+      <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+      <script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.2.0/dist/mermaid.esm.min.mjs";
+window.addEventListener("load", () => mermaid.run());
+</script>
     <script src="../../../_static/js/theme.js"></script>
     <link rel="index" title="Index" href="../../../genindex.html" />
     <link rel="search" title="Search" href="../../../search.html" />
@@ -32,9 +39,6 @@
           <a href="../../../index.html" class="icon icon-home">
             acryo
           </a>
-              <div class="version">
-                0.4.5
-              </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
     <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
@@ -46,7 +50,6 @@
               <ul>
 <li class="toctree-l1"><a class="reference internal" href="../../../main/molecules.html">Molecules</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../main/loader.html">Subtomogram Loader</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../../main/caching.html">Cache Subtomograms</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../main/pipe.html">Piping Images to the Loader</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../main/alignment.html">Alignment Model</a></li>
 </ul>
@@ -77,54 +80,68 @@
 
   <h1>Source code for acryo.pick._concrete</h1><div class="highlight"><pre>
 <span></span><span class="c1"># pyright: reportPrivateImportUsage=false</span>
-<span class="kn">from</span> <span class="nn">__future__</span> <span class="kn">import</span> <span class="n">annotations</span>
-<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Any</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Any</span>
 
-<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
-<span class="kn">from</span> <span class="nn">numpy.typing</span> <span class="kn">import</span> <span class="n">NDArray</span>
-<span class="kn">from</span> <span class="nn">dask</span> <span class="kn">import</span> <span class="n">array</span> <span class="k">as</span> <span class="n">da</span>
-<span class="kn">from</span> <span class="nn">scipy</span> <span class="kn">import</span> <span class="n">ndimage</span> <span class="k">as</span> <span class="n">ndi</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numpy.typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">NDArray</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">dask</span><span class="w"> </span><span class="kn">import</span> <span class="n">array</span> <span class="k">as</span> <span class="n">da</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy</span><span class="w"> </span><span class="kn">import</span> <span class="n">ndimage</span> <span class="k">as</span> <span class="n">ndi</span>
 
-<span class="kn">from</span> <span class="nn">acryo.pick._base</span> <span class="kn">import</span> <span class="n">BasePickerModel</span><span class="p">,</span> <span class="n">BaseTemplateMatcher</span>
-<span class="kn">from</span> <span class="nn">acryo.molecules</span> <span class="kn">import</span> <span class="n">Molecules</span>
-<span class="kn">from</span> <span class="nn">acryo.backend</span> <span class="kn">import</span> <span class="n">NUMPY_BACKEND</span>
-<span class="kn">from</span> <span class="nn">acryo.backend._zncc</span> <span class="kn">import</span> <span class="n">ncc_landscape_no_pad</span>
-<span class="kn">from</span> <span class="nn">acryo._types</span> <span class="kn">import</span> <span class="n">nm</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">acryo.pick._base</span><span class="w"> </span><span class="kn">import</span> <span class="n">BasePickerModel</span><span class="p">,</span> <span class="n">BaseTemplateMatcher</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">acryo.backend</span><span class="w"> </span><span class="kn">import</span> <span class="n">NUMPY_BACKEND</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">acryo.backend._zncc</span><span class="w"> </span><span class="kn">import</span> <span class="n">ncc_landscape_no_pad</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">acryo.molecules</span><span class="w"> </span><span class="kn">import</span> <span class="n">Molecules</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">acryo._types</span><span class="w"> </span><span class="kn">import</span> <span class="n">nm</span>
 
 
-<div class="viewcode-block" id="ZNCCTemplateMatcher"><a class="viewcode-back" href="../../../apidoc/acryo.pick.html#acryo.pick.ZNCCTemplateMatcher">[docs]</a><span class="k">class</span> <span class="nc">ZNCCTemplateMatcher</span><span class="p">(</span><span class="n">BaseTemplateMatcher</span><span class="p">):</span>
+<div class="viewcode-block" id="ZNCCTemplateMatcher">
+<a class="viewcode-back" href="../../../apidoc/acryo.pick.html#acryo.pick.ZNCCTemplateMatcher">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">ZNCCTemplateMatcher</span><span class="p">(</span><span class="n">BaseTemplateMatcher</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Particle picking based on ZNCC template matching.</span>
 
 <span class="sd">    Parameters</span>
 <span class="sd">    ----------</span>
-<span class="sd">    template : 3D array or ImageProvider</span>
-<span class="sd">        Template image.</span>
-<span class="sd">    rotation : range-like</span>
-<span class="sd">        3D rotation of template image in degrees.</span>
-<span class="sd">    tilt_range: tuple of float, default is (-60, 60)</span>
-<span class="sd">        Tilt range in degrees.</span>
-<span class="sd">    order : int, default is 1</span>
-<span class="sd">        Order of interpolation.</span>
+<span class="sd">    image : da.Array</span>
+<span class="sd">        The input image.</span>
+<span class="sd">    scale : float</span>
+<span class="sd">        The scale of the image.</span>
+<span class="sd">    min_distance : float</span>
+<span class="sd">        The minimum distance between the picked particles.</span>
+<span class="sd">    min_score : float</span>
+<span class="sd">        The minimum score of the picked particles.</span>
+<span class="sd">    boundary : str</span>
+<span class="sd">        The boundary condition for the template matching.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
 
-<div class="viewcode-block" id="ZNCCTemplateMatcher.pick_molecules"><a class="viewcode-back" href="../../../apidoc/acryo.pick.html#acryo.pick.ZNCCTemplateMatcher.pick_molecules">[docs]</a>    <span class="k">def</span> <span class="nf">pick_molecules</span><span class="p">(</span>
+<div class="viewcode-block" id="ZNCCTemplateMatcher.pick_molecules">
+<a class="viewcode-back" href="../../../apidoc/acryo.pick.html#acryo.pick.ZNCCTemplateMatcher.pick_molecules">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">pick_molecules</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">image</span><span class="p">:</span> <span class="n">da</span><span class="o">.</span><span class="n">Array</span><span class="p">,</span>
         <span class="n">scale</span><span class="p">:</span> <span class="n">nm</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">,</span>
         <span class="o">*</span><span class="p">,</span>
         <span class="n">min_distance</span><span class="p">:</span> <span class="n">nm</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">,</span>
         <span class="n">min_score</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.02</span><span class="p">,</span>
+        <span class="n">boundary</span><span class="o">=</span><span class="s2">&quot;nearest&quot;</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Molecules</span><span class="p">:</span>
         <span class="k">return</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">pick_molecules</span><span class="p">(</span>
-            <span class="n">image</span><span class="p">,</span> <span class="n">scale</span><span class="p">,</span> <span class="n">min_distance</span><span class="o">=</span><span class="n">min_distance</span><span class="p">,</span> <span class="n">min_score</span><span class="o">=</span><span class="n">min_score</span>
+            <span class="n">image</span><span class="p">,</span>
+            <span class="n">scale</span><span class="p">,</span>
+            <span class="n">boundary</span><span class="o">=</span><span class="n">boundary</span><span class="p">,</span>
+            <span class="n">min_distance</span><span class="o">=</span><span class="n">min_distance</span> <span class="o">/</span> <span class="n">scale</span><span class="p">,</span>
+            <span class="n">min_score</span><span class="o">=</span><span class="n">min_score</span><span class="p">,</span>
         <span class="p">)</span></div>
 
-<div class="viewcode-block" id="ZNCCTemplateMatcher.pick_in_chunk"><a class="viewcode-back" href="../../../apidoc/acryo.pick.html#acryo.pick.ZNCCTemplateMatcher.pick_in_chunk">[docs]</a>    <span class="k">def</span> <span class="nf">pick_in_chunk</span><span class="p">(</span>
+
+<div class="viewcode-block" id="ZNCCTemplateMatcher.pick_in_chunk">
+<a class="viewcode-back" href="../../../apidoc/acryo.pick.html#acryo.pick.ZNCCTemplateMatcher.pick_in_chunk">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">pick_in_chunk</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">image</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
         <span class="n">templates</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]],</span>
-        <span class="n">min_distance</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+        <span class="n">min_distance</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>  <span class="c1"># pixel</span>
         <span class="n">min_score</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
     <span class="p">):</span>
         <span class="n">all_landscapes</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span>
@@ -142,73 +159,84 @@
         <span class="n">img_argmax</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">argmax</span><span class="p">(</span><span class="n">all_landscapes</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
         <span class="n">landscale_max</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">all_landscapes</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
 
-        <span class="n">max_indices</span> <span class="o">=</span> <span class="n">find_maxima</span><span class="p">(</span><span class="n">landscale_max</span><span class="p">,</span> <span class="n">min_distance</span><span class="p">,</span> <span class="n">min_score</span><span class="p">)</span>
-        <span class="n">argmax_indices</span> <span class="o">=</span> <span class="n">img_argmax</span><span class="p">[</span><span class="n">max_indices</span><span class="p">]</span>
-        <span class="n">score</span> <span class="o">=</span> <span class="n">landscale_max</span><span class="p">[</span><span class="n">max_indices</span><span class="p">]</span>
-
-        <span class="n">pos</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">max_indices</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+        <span class="n">pos</span> <span class="o">=</span> <span class="n">find_maxima</span><span class="p">(</span><span class="n">landscale_max</span><span class="p">,</span> <span class="n">min_distance</span><span class="p">,</span> <span class="n">min_score</span><span class="p">)</span>
+        <span class="n">argmax_indices</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">img_argmax</span><span class="p">[</span><span class="nb">tuple</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">p</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">))]</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">pos</span><span class="p">]</span>
+        <span class="p">)</span>
+        <span class="n">score</span> <span class="o">=</span> <span class="n">_sample_score</span><span class="p">(</span><span class="n">landscale_max</span><span class="p">,</span> <span class="n">pos</span><span class="p">)</span>
         <span class="n">quats</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_index_to_quaternions</span><span class="p">(</span><span class="n">argmax_indices</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">pos</span><span class="p">,</span> <span class="n">quats</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;score&quot;</span><span class="p">:</span> <span class="n">score</span><span class="p">}</span></div></div>
+        <span class="n">offset</span> <span class="o">=</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">templates</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
+        <span class="k">return</span> <span class="n">pos</span> <span class="o">+</span> <span class="n">offset</span><span class="p">,</span> <span class="n">quats</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;score&quot;</span><span class="p">:</span> <span class="n">score</span><span class="p">}</span></div>
+</div>
 
 
-<div class="viewcode-block" id="LoGPicker"><a class="viewcode-back" href="../../../apidoc/acryo.pick.html#acryo.pick.LoGPicker">[docs]</a><span class="k">class</span> <span class="nc">LoGPicker</span><span class="p">(</span><span class="n">BasePickerModel</span><span class="p">):</span>
+
+<div class="viewcode-block" id="LoGPicker">
+<a class="viewcode-back" href="../../../apidoc/acryo.pick.html#acryo.pick.LoGPicker">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">LoGPicker</span><span class="p">(</span><span class="n">BasePickerModel</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Particle picking based on Laplacian of Gaussian.&quot;&quot;&quot;</span>
 
-    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sigma</span><span class="p">:</span> <span class="n">nm</span> <span class="o">=</span> <span class="mf">3.5</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sigma</span><span class="p">:</span> <span class="n">nm</span> <span class="o">=</span> <span class="mf">3.5</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_sigma</span> <span class="o">=</span> <span class="n">sigma</span>
 
-<div class="viewcode-block" id="LoGPicker.pick_in_chunk"><a class="viewcode-back" href="../../../apidoc/acryo.pick.html#acryo.pick.LoGPicker.pick_in_chunk">[docs]</a>    <span class="k">def</span> <span class="nf">pick_in_chunk</span><span class="p">(</span>
+<div class="viewcode-block" id="LoGPicker.pick_in_chunk">
+<a class="viewcode-back" href="../../../apidoc/acryo.pick.html#acryo.pick.LoGPicker.pick_in_chunk">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">pick_in_chunk</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">image</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
         <span class="n">sigma</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">uint16</span><span class="p">],</span> <span class="n">Any</span><span class="p">]:</span>
         <span class="n">img_filt</span> <span class="o">=</span> <span class="o">-</span><span class="n">ndi</span><span class="o">.</span><span class="n">gaussian_laplace</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">sigma</span><span class="p">)</span>
-        <span class="n">max_indices</span> <span class="o">=</span> <span class="n">find_maxima</span><span class="p">(</span><span class="n">img_filt</span><span class="p">,</span> <span class="n">sigma</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span>
-        <span class="n">score</span> <span class="o">=</span> <span class="n">img_filt</span><span class="p">[</span><span class="n">max_indices</span><span class="p">]</span>
-        <span class="n">pos</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">max_indices</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
-        <span class="n">quats</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">pos</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="mi">4</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
-        <span class="n">quats</span><span class="p">[:,</span> <span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="mf">1.0</span>
-        <span class="k">return</span> <span class="n">pos</span><span class="p">,</span> <span class="n">quats</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;score&quot;</span><span class="p">:</span> <span class="n">score</span><span class="p">}</span></div>
+        <span class="n">pos</span> <span class="o">=</span> <span class="n">find_maxima</span><span class="p">(</span><span class="n">img_filt</span><span class="p">,</span> <span class="n">sigma</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">simple_pick</span><span class="p">(</span><span class="n">img_filt</span><span class="p">,</span> <span class="n">pos</span><span class="p">)</span></div>
 
-<div class="viewcode-block" id="LoGPicker.get_params_and_depth"><a class="viewcode-back" href="../../../apidoc/acryo.pick.html#acryo.pick.LoGPicker.get_params_and_depth">[docs]</a>    <span class="k">def</span> <span class="nf">get_params_and_depth</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="n">nm</span><span class="p">):</span>
+
+<div class="viewcode-block" id="LoGPicker.get_params_and_depth">
+<a class="viewcode-back" href="../../../apidoc/acryo.pick.html#acryo.pick.LoGPicker.get_params_and_depth">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_params_and_depth</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="n">nm</span><span class="p">):</span>
         <span class="n">sigma_px</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sigma</span> <span class="o">/</span> <span class="n">scale</span>
         <span class="n">depth</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span><span class="n">sigma_px</span> <span class="o">*</span> <span class="mi">2</span><span class="p">))</span>
-        <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;sigma&quot;</span><span class="p">:</span> <span class="n">sigma_px</span><span class="p">},</span> <span class="n">depth</span></div></div>
+        <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;sigma&quot;</span><span class="p">:</span> <span class="n">sigma_px</span><span class="p">},</span> <span class="n">depth</span></div>
+</div>
 
 
-<div class="viewcode-block" id="DoGPicker"><a class="viewcode-back" href="../../../apidoc/acryo.pick.html#acryo.pick.DoGPicker">[docs]</a><span class="k">class</span> <span class="nc">DoGPicker</span><span class="p">(</span><span class="n">BasePickerModel</span><span class="p">):</span>
+
+<div class="viewcode-block" id="DoGPicker">
+<a class="viewcode-back" href="../../../apidoc/acryo.pick.html#acryo.pick.DoGPicker">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">DoGPicker</span><span class="p">(</span><span class="n">BasePickerModel</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Particle picking based on Difference of Gaussian.&quot;&quot;&quot;</span>
 
-    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sigma_low</span><span class="p">:</span> <span class="n">nm</span> <span class="o">=</span> <span class="mf">3.5</span><span class="p">,</span> <span class="n">sigma_high</span><span class="p">:</span> <span class="n">nm</span> <span class="o">=</span> <span class="mf">5.0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sigma_low</span><span class="p">:</span> <span class="n">nm</span> <span class="o">=</span> <span class="mf">3.5</span><span class="p">,</span> <span class="n">sigma_high</span><span class="p">:</span> <span class="n">nm</span> <span class="o">=</span> <span class="mf">5.0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
         <span class="k">if</span> <span class="n">sigma_low</span> <span class="o">&gt;=</span> <span class="n">sigma_high</span><span class="p">:</span>
             <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;sigma_low must be smaller than sigma_high&quot;</span><span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_sigma_low</span> <span class="o">=</span> <span class="n">sigma_low</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_sigma_high</span> <span class="o">=</span> <span class="n">sigma_high</span>
 
-<div class="viewcode-block" id="DoGPicker.pick_in_chunk"><a class="viewcode-back" href="../../../apidoc/acryo.pick.html#acryo.pick.DoGPicker.pick_in_chunk">[docs]</a>    <span class="k">def</span> <span class="nf">pick_in_chunk</span><span class="p">(</span>
+<div class="viewcode-block" id="DoGPicker.pick_in_chunk">
+<a class="viewcode-back" href="../../../apidoc/acryo.pick.html#acryo.pick.DoGPicker.pick_in_chunk">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">pick_in_chunk</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">image</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
         <span class="n">sigma_low</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
         <span class="n">sigma_high</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">uint16</span><span class="p">],</span> <span class="n">Any</span><span class="p">]:</span>
-        <span class="n">img_filt</span> <span class="o">=</span> <span class="n">ndi</span><span class="o">.</span><span class="n">gaussian_filter</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">sigma_low</span><span class="p">)</span> <span class="o">-</span> <span class="n">ndi</span><span class="o">.</span><span class="n">gaussian_filter</span><span class="p">(</span>
-            <span class="n">image</span><span class="p">,</span> <span class="n">sigma_high</span>
-        <span class="p">)</span>
-        <span class="n">max_indices</span> <span class="o">=</span> <span class="n">find_maxima</span><span class="p">(</span><span class="n">img_filt</span><span class="p">,</span> <span class="n">sigma_low</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span>
-        <span class="n">score</span> <span class="o">=</span> <span class="n">img_filt</span><span class="p">[</span><span class="n">max_indices</span><span class="p">]</span>
-        <span class="n">pos</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">max_indices</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
-        <span class="n">quats</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">pos</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="mi">4</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
-        <span class="n">quats</span><span class="p">[:,</span> <span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="mf">1.0</span>
-        <span class="k">return</span> <span class="n">pos</span><span class="p">,</span> <span class="n">quats</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;score&quot;</span><span class="p">:</span> <span class="n">score</span><span class="p">}</span></div>
+        <span class="n">img_filt</span> <span class="o">=</span> <span class="n">_differece_of_gaussian</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">sigma_low</span><span class="p">,</span> <span class="n">sigma_high</span><span class="p">)</span>
+        <span class="n">pos</span> <span class="o">=</span> <span class="n">find_maxima</span><span class="p">(</span><span class="n">img_filt</span><span class="p">,</span> <span class="n">sigma_low</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">simple_pick</span><span class="p">(</span><span class="n">img_filt</span><span class="p">,</span> <span class="n">pos</span><span class="p">)</span></div>
 
-<div class="viewcode-block" id="DoGPicker.get_params_and_depth"><a class="viewcode-back" href="../../../apidoc/acryo.pick.html#acryo.pick.DoGPicker.get_params_and_depth">[docs]</a>    <span class="k">def</span> <span class="nf">get_params_and_depth</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="n">nm</span><span class="p">):</span>
+
+<div class="viewcode-block" id="DoGPicker.get_params_and_depth">
+<a class="viewcode-back" href="../../../apidoc/acryo.pick.html#acryo.pick.DoGPicker.get_params_and_depth">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_params_and_depth</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="n">nm</span><span class="p">):</span>
         <span class="n">sigma1_px</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sigma_low</span> <span class="o">/</span> <span class="n">scale</span>
         <span class="n">sigma2_px</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sigma_high</span> <span class="o">/</span> <span class="n">scale</span>
         <span class="n">depth</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span><span class="n">sigma1_px</span> <span class="o">*</span> <span class="mi">2</span><span class="p">))</span>
-        <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;sigma_low&quot;</span><span class="p">:</span> <span class="n">sigma1_px</span><span class="p">,</span> <span class="s2">&quot;sigma_high&quot;</span><span class="p">:</span> <span class="n">sigma2_px</span><span class="p">},</span> <span class="n">depth</span></div></div>
+        <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;sigma_low&quot;</span><span class="p">:</span> <span class="n">sigma1_px</span><span class="p">,</span> <span class="s2">&quot;sigma_high&quot;</span><span class="p">:</span> <span class="n">sigma2_px</span><span class="p">},</span> <span class="n">depth</span></div>
+</div>
 
 
-<span class="k">def</span> <span class="nf">maximum_filter</span><span class="p">(</span><span class="n">image</span><span class="p">:</span> <span class="n">da</span><span class="o">.</span><span class="n">Array</span><span class="p">,</span> <span class="n">radius</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">maximum_filter</span><span class="p">(</span><span class="n">image</span><span class="p">:</span> <span class="n">da</span><span class="o">.</span><span class="n">Array</span><span class="p">,</span> <span class="n">radius</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
     <span class="k">if</span> <span class="n">radius</span> <span class="o">&lt;</span> <span class="mi">1</span><span class="p">:</span>
         <span class="k">return</span> <span class="n">image</span>
     <span class="n">r_int</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span><span class="n">radius</span><span class="p">))</span>
@@ -218,9 +246,36 @@
     <span class="k">return</span> <span class="n">ndi</span><span class="o">.</span><span class="n">maximum_filter</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">footprint</span><span class="o">=</span><span class="n">foot</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;nearest&quot;</span><span class="p">)</span>  <span class="c1"># type: ignore</span>
 
 
-<span class="k">def</span> <span class="nf">find_maxima</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">min_distance</span><span class="p">,</span> <span class="n">min_intensity</span><span class="p">):</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">find_maxima</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">min_distance</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">min_intensity</span><span class="p">:</span> <span class="nb">float</span><span class="p">):</span>
     <span class="n">img_max_maxfilt</span> <span class="o">=</span> <span class="n">maximum_filter</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">min_distance</span><span class="p">)</span>
-    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">((</span><span class="n">img_max_maxfilt</span> <span class="o">==</span> <span class="n">img</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">img</span> <span class="o">&gt;</span> <span class="n">min_intensity</span><span class="p">))</span>
+    <span class="n">is_maxima</span> <span class="o">=</span> <span class="p">(</span><span class="n">img_max_maxfilt</span> <span class="o">==</span> <span class="n">img</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">img</span> <span class="o">&gt;</span> <span class="n">min_intensity</span><span class="p">)</span>
+    <span class="n">s0</span> <span class="o">=</span> <span class="p">[[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]]</span>
+    <span class="n">s1</span> <span class="o">=</span> <span class="p">[[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">]]</span>
+    <span class="n">structure</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">([</span><span class="n">s0</span><span class="p">,</span> <span class="n">s1</span><span class="p">,</span> <span class="n">s0</span><span class="p">])</span>
+    <span class="n">label_img</span><span class="p">,</span> <span class="n">nfeat</span> <span class="o">=</span> <span class="n">ndi</span><span class="o">.</span><span class="n">label</span><span class="p">(</span><span class="n">is_maxima</span><span class="p">,</span> <span class="n">structure</span><span class="o">=</span><span class="n">structure</span><span class="p">)</span>
+    <span class="n">centers</span> <span class="o">=</span> <span class="n">ndi</span><span class="o">.</span><span class="n">center_of_mass</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">label_img</span><span class="p">,</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">nfeat</span> <span class="o">+</span> <span class="mi">1</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">centers</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">simple_pick</span><span class="p">(</span><span class="n">img</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span> <span class="n">pos</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]):</span>
+    <span class="n">score</span> <span class="o">=</span> <span class="n">_sample_score</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">pos</span><span class="p">)</span>
+    <span class="n">quats</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">pos</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="mi">4</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+    <span class="n">quats</span><span class="p">[:,</span> <span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="mf">1.0</span>
+    <span class="k">return</span> <span class="n">pos</span><span class="p">,</span> <span class="n">quats</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;score&quot;</span><span class="p">:</span> <span class="n">score</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_sample_score</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">pos</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
+    <span class="k">return</span> <span class="n">ndi</span><span class="o">.</span><span class="n">map_coordinates</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">pos</span><span class="o">.</span><span class="n">T</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;reflect&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_differece_of_gaussian</span><span class="p">(</span>
+    <span class="n">image</span><span class="p">:</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">],</span>
+    <span class="n">sigma_low</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+    <span class="n">sigma_high</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]:</span>
+    <span class="n">img_l</span> <span class="o">=</span> <span class="n">ndi</span><span class="o">.</span><span class="n">gaussian_filter</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">sigma_low</span><span class="p">)</span>
+    <span class="n">img_h</span> <span class="o">=</span> <span class="n">ndi</span><span class="o">.</span><span class="n">gaussian_filter</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">sigma_high</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">img_l</span> <span class="o">-</span> <span class="n">img_h</span>
 </pre></div>
 
            </div>

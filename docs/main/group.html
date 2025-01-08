@@ -1,22 +1,21 @@
+
+
 <!DOCTYPE html>
-<html class="writer-html5" lang="en" >
+<html class="writer-html5" lang="en" data-content_root="../">
 <head>
-  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Loader Group &mdash; acryo 0.4.5 documentation</title>
-      <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
-      <link rel="stylesheet" href="../_static/css/theme.css" type="text/css" />
-  <!--[if lt IE 9]>
-    <script src="../_static/js/html5shiv.min.js"></script>
-  <![endif]-->
+  <title>Loader Group &mdash; acryo 0.4.13 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
 
-        <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
-        <script src="../_static/jquery.js"></script>
-        <script src="../_static/underscore.js"></script>
-        <script src="../_static/doctools.js"></script>
-        <script src="https://unpkg.com/mermaid@9.4.0/dist/mermaid.min.js"></script>
-        <script>mermaid.initialize({startOnLoad:true});</script>
+
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=d4dc9828"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/js/theme.js"></script>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
@@ -33,9 +32,6 @@
           <a href="../index.html" class="icon icon-home">
             acryo
           </a>
-              <div class="version">
-                0.4.5
-              </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
     <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
@@ -47,7 +43,6 @@
               <ul>
 <li class="toctree-l1"><a class="reference internal" href="molecules.html">Molecules</a></li>
 <li class="toctree-l1"><a class="reference internal" href="loader.html">Subtomogram Loader</a></li>
-<li class="toctree-l1"><a class="reference internal" href="caching.html">Cache Subtomograms</a></li>
 <li class="toctree-l1"><a class="reference internal" href="pipe.html">Piping Images to the Loader</a></li>
 <li class="toctree-l1"><a class="reference internal" href="alignment.html">Alignment Model</a></li>
 </ul>
@@ -77,12 +72,13 @@
            <div itemprop="articleBody">
 
   <section id="loader-group">
-<h1>Loader Group<a class="headerlink" href="#loader-group" title="Permalink to this headline"></a></h1>
+<h1>Loader Group<a class="headerlink" href="#loader-group" title="Link to this heading"></a></h1>
 <p>The <code class="xref py py-meth docutils literal notranslate"><span class="pre">groupby()</span></code> of subtomogram loaders returns a <code class="xref py py-class docutils literal notranslate"><span class="pre">LoaderGroup</span></code> object.
 An <code class="xref py py-class docutils literal notranslate"><span class="pre">LoaderGroup</span></code> object is very similar to those returned by <code class="xref py py-meth docutils literal notranslate"><span class="pre">groupby()</span></code>
 methods of <code class="xref py py-class docutils literal notranslate"><span class="pre">polars.DataFrame</span></code>, <code class="xref py py-class docutils literal notranslate"><span class="pre">Molecules</span></code> or <code class="xref py py-class docutils literal notranslate"><span class="pre">pandas.DataFrame</span></code>.</p>
-<a class="reference internal image-reference" href="../_images/loader_group.png"><img alt="../_images/loader_group.png" src="../_images/loader_group.png" style="width: 50%;" /></a>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">acryo</span> <span class="kn">import</span> <span class="n">SubtomogramLoader</span>
+<a class="reference internal image-reference" href="../_images/loader_group.png"><img alt="../_images/loader_group.png" src="../_images/loader_group.png" style="width: 50%;" />
+</a>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">acryo</span><span class="w"> </span><span class="kn">import</span> <span class="n">SubtomogramLoader</span>
 
 <span class="n">loader</span> <span class="o">=</span> <span class="n">SubtomogramLoader</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">molecules</span><span class="p">)</span>
 <span class="k">for</span> <span class="n">cluster</span><span class="p">,</span> <span class="n">ldr</span> <span class="ow">in</span> <span class="n">loader</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;cluster_id&quot;</span><span class="p">):</span>
@@ -91,7 +87,7 @@ methods of <code class="xref py py-class docutils literal notranslate"><span cla
 </div>
 <p><code class="xref py py-class docutils literal notranslate"><span class="pre">LoaderGroup</span></code> has many methods of the same name as those in <code class="xref py py-class docutils literal notranslate"><span class="pre">SubtomogramLoader</span></code>.</p>
 <section id="group-wise-averaging">
-<h2>Group-wise Averaging<a class="headerlink" href="#group-wise-averaging" title="Permalink to this headline"></a></h2>
+<h2>Group-wise Averaging<a class="headerlink" href="#group-wise-averaging" title="Link to this heading"></a></h2>
 <p><code class="xref py py-class docutils literal notranslate"><span class="pre">LoaderGroup</span></code> supports all the averaging methods.</p>
 <ul class="simple">
 <li><p><code class="xref py py-meth docutils literal notranslate"><span class="pre">average()</span></code></p></li>
@@ -101,7 +97,7 @@ methods of <code class="xref py py-class docutils literal notranslate"><span cla
 of group key and the averages.</p>
 </section>
 <section id="group-wise-alignment">
-<h2>Group-wise Alignment<a class="headerlink" href="#group-wise-alignment" title="Permalink to this headline"></a></h2>
+<h2>Group-wise Alignment<a class="headerlink" href="#group-wise-alignment" title="Link to this heading"></a></h2>
 <p><code class="xref py py-class docutils literal notranslate"><span class="pre">LoaderGroup</span></code> also supports all the alignment methods</p>
 <ul class="simple">
 <li><p><code class="xref py py-meth docutils literal notranslate"><span class="pre">align()</span></code></p></li>

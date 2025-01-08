@@ -1,21 +1,28 @@
+
+
 <!DOCTYPE html>
-<html class="writer-html5" lang="en" >
+<html class="writer-html5" lang="en" data-content_root="./">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Index &mdash; acryo 0.4.5 documentation</title>
-      <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-      <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
-  <!--[if lt IE 9]>
-    <script src="_static/js/html5shiv.min.js"></script>
-  <![endif]-->
+  <title>Index &mdash; acryo 0.4.13 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
 
-        <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
-        <script src="_static/jquery.js"></script>
-        <script src="_static/underscore.js"></script>
-        <script src="_static/doctools.js"></script>
-        <script src="https://unpkg.com/mermaid@9.4.0/dist/mermaid.min.js"></script>
-        <script>mermaid.initialize({startOnLoad:true});</script>
+
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=d4dc9828"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+      <script type="module" src="https://cdn.jsdelivr.net/npm/mermaid@11.2.0/dist/mermaid.esm.min.mjs"></script>
+      <script type="module" src="https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk@0.1.4/dist/mermaid-layout-elk.esm.min.mjs"></script>
+      <script type="module">import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.2.0/dist/mermaid.esm.min.mjs";import elkLayouts from "https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk@0.1.4/dist/mermaid-layout-elk.esm.min.mjs";mermaid.registerLayoutLoaders(elkLayouts);mermaid.initialize({startOnLoad:false});</script>
+      <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+      <script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.2.0/dist/mermaid.esm.min.mjs";
+window.addEventListener("load", () => mermaid.run());
+</script>
     <script src="_static/js/theme.js"></script>
     <link rel="index" title="Index" href="#" />
     <link rel="search" title="Search" href="search.html" />
@@ -32,9 +39,6 @@
           <a href="index.html" class="icon icon-home">
             acryo
           </a>
-              <div class="version">
-                0.4.5
-              </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
     <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
@@ -46,7 +50,6 @@
               <ul>
 <li class="toctree-l1"><a class="reference internal" href="main/molecules.html">Molecules</a></li>
 <li class="toctree-l1"><a class="reference internal" href="main/loader.html">Subtomogram Loader</a></li>
-<li class="toctree-l1"><a class="reference internal" href="main/caching.html">Cache Subtomograms</a></li>
 <li class="toctree-l1"><a class="reference internal" href="main/pipe.html">Piping Images to the Loader</a></li>
 <li class="toctree-l1"><a class="reference internal" href="main/alignment.html">Alignment Model</a></li>
 </ul>
@@ -296,8 +299,6 @@
         <li><a href="apidoc/acryo.loader.html#acryo.loader.BatchLoader">(class in acryo.loader)</a>
 </li>
       </ul></li>
-  </ul></td>
-  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="apidoc/acryo.html#acryo.BatchLoader.binning">binning() (acryo.BatchLoader method)</a>
 
       <ul>
@@ -308,7 +309,11 @@
         <li><a href="apidoc/acryo.html#acryo.SubtomogramLoader.binning">(acryo.SubtomogramLoader method)</a>
 </li>
       </ul></li>
+  </ul></td>
+  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="apidoc/acryo.testing.html#acryo.testing.blobs">blobs() (in module acryo.testing)</a>
+</li>
+      <li><a href="apidoc/acryo.backend.html#acryo.backend.build_mesh">build_mesh() (in module acryo.backend)</a>
 </li>
   </ul></td>
 </tr></table>
@@ -596,6 +601,8 @@
         <li><a href="apidoc/acryo.molecules.html#acryo.molecules.Molecules.from_parquet">(acryo.molecules.Molecules class method)</a>
 </li>
       </ul></li>
+      <li><a href="apidoc/acryo.pipe.html#acryo.pipe.from_pdb">from_pdb() (in module acryo.pipe)</a>
+</li>
       <li><a href="apidoc/acryo.html#acryo.Molecules.from_quat">from_quat() (acryo.Molecules class method)</a>
 
       <ul>
@@ -620,6 +627,8 @@
         <li><a href="apidoc/acryo.molecules.html#acryo.molecules.Molecules.from_rotvec">(acryo.molecules.Molecules class method)</a>
 </li>
       </ul></li>
+      <li><a href="apidoc/acryo.alignment.html#acryo.alignment.FSCAlignment">FSCAlignment (class in acryo.alignment)</a>
+</li>
       <li><a href="apidoc/acryo.backend.html#acryo.backend.Backend.full">full() (acryo.backend.Backend method)</a>
 </li>
   </ul></td>
@@ -792,14 +801,16 @@
         <li><a href="apidoc/acryo.molecules.html#acryo.molecules.Molecules.linear_transform">(acryo.molecules.Molecules method)</a>
 </li>
       </ul></li>
+      <li><a href="apidoc/acryo.backend.html#acryo.backend.Backend.linspace">linspace() (acryo.backend.Backend method)</a>
+</li>
+  </ul></td>
+  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="apidoc/acryo.html#acryo.BatchLoader.loaders">loaders (acryo.BatchLoader property)</a>
 
       <ul>
         <li><a href="apidoc/acryo.loader.html#acryo.loader.BatchLoader.loaders">(acryo.loader.BatchLoader property)</a>
 </li>
       </ul></li>
-  </ul></td>
-  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="apidoc/acryo.html#acryo.Molecules.local_coordinates">local_coordinates() (acryo.Molecules method)</a>
 
       <ul>
@@ -840,8 +851,12 @@
         <li><a href="apidoc/acryo.molecules.html#acryo.molecules.Molecules.matrix">(acryo.molecules.Molecules method)</a>
 </li>
       </ul></li>
-      <li><a href="apidoc/acryo.backend.html#acryo.backend.Backend.max">max() (acryo.backend.Backend method)</a>
+      <li><a href="apidoc/acryo.backend.html#acryo.backend.AnyArray.max">max() (acryo.backend.AnyArray method)</a>
+
+      <ul>
+        <li><a href="apidoc/acryo.backend.html#acryo.backend.Backend.max">(acryo.backend.Backend method)</a>
 </li>
+      </ul></li>
       <li><a href="apidoc/acryo.backend.html#acryo.backend.Backend.maycopy">maycopy() (acryo.backend.Backend method)</a>
 </li>
       <li><a href="apidoc/acryo.backend.html#acryo.backend.AnyArray.mean">mean() (acryo.backend.AnyArray method)</a>
@@ -930,6 +945,8 @@
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="apidoc/acryo.backend.html#acryo.backend.Backend.name">name (acryo.backend.Backend property)</a>
+</li>
+      <li><a href="apidoc/acryo.alignment.html#acryo.alignment.NCCAlignment">NCCAlignment (class in acryo.alignment)</a>
 </li>
       <li><a href="apidoc/acryo.backend.html#acryo.backend.AnyArray.ndim">ndim (acryo.backend.AnyArray property)</a>
 </li>
@@ -1197,6 +1214,8 @@
       </ul></li>
       <li><a href="apidoc/acryo.alignment.html#acryo.alignment.AlignmentResult.score">score (acryo.alignment.AlignmentResult attribute)</a>
 </li>
+      <li><a href="apidoc/acryo.alignment.html#acryo.alignment.BaseAlignmentModel.score">score() (acryo.alignment.BaseAlignmentModel method)</a>
+</li>
       <li><a href="apidoc/acryo.backend.html#acryo.backend.set_backend">set_backend() (in module acryo.backend)</a>
 </li>
       <li><a href="apidoc/acryo.backend.html#acryo.backend.AnyArray.shape">shape (acryo.backend.AnyArray property)</a>
@@ -1282,6 +1301,8 @@
 </li>
       </ul></li>
       <li><a href="apidoc/acryo.backend.html#acryo.backend.Backend.sum">sum() (acryo.backend.Backend method)</a>
+</li>
+      <li><a href="apidoc/acryo.backend.html#acryo.backend.Backend.sum_labels">sum_labels() (acryo.backend.Backend method)</a>
 </li>
   </ul></td>
 </tr></table>

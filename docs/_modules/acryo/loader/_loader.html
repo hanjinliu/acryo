@@ -1,20 +1,28 @@
+
+
 <!DOCTYPE html>
-<html class="writer-html5" lang="en" >
+<html class="writer-html5" lang="en" data-content_root="../../../">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>acryo.loader._loader &mdash; acryo 0.4.4 documentation</title>
-      <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
-      <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
-  <!--[if lt IE 9]>
-    <script src="../../../_static/js/html5shiv.min.js"></script>
-  <![endif]-->
+  <title>acryo.loader._loader &mdash; acryo 0.4.13 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=e59714d7" />
 
-        <script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
-        <script src="../../../_static/doctools.js"></script>
-        <script src="../../../_static/sphinx_highlight.js"></script>
-        <script src="https://unpkg.com/mermaid@9.4.0/dist/mermaid.min.js"></script>
-        <script>mermaid.initialize({startOnLoad:true});</script>
+
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=d4dc9828"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+      <script type="module" src="https://cdn.jsdelivr.net/npm/mermaid@11.2.0/dist/mermaid.esm.min.mjs"></script>
+      <script type="module" src="https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk@0.1.4/dist/mermaid-layout-elk.esm.min.mjs"></script>
+      <script type="module">import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.2.0/dist/mermaid.esm.min.mjs";import elkLayouts from "https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk@0.1.4/dist/mermaid-layout-elk.esm.min.mjs";mermaid.registerLayoutLoaders(elkLayouts);mermaid.initialize({startOnLoad:false});</script>
+      <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+      <script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.2.0/dist/mermaid.esm.min.mjs";
+window.addEventListener("load", () => mermaid.run());
+</script>
     <script src="../../../_static/js/theme.js"></script>
     <link rel="index" title="Index" href="../../../genindex.html" />
     <link rel="search" title="Search" href="../../../search.html" />
@@ -31,9 +39,6 @@
           <a href="../../../index.html" class="icon icon-home">
             acryo
           </a>
-              <div class="version">
-                0.4.4
-              </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
     <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
@@ -45,7 +50,6 @@
               <ul>
 <li class="toctree-l1"><a class="reference internal" href="../../../main/molecules.html">Molecules</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../main/loader.html">Subtomogram Loader</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../../main/caching.html">Cache Subtomograms</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../main/pipe.html">Piping Images to the Loader</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../main/alignment.html">Alignment Model</a></li>
 </ul>
@@ -77,31 +81,32 @@
   <h1>Source code for acryo.loader._loader</h1><div class="highlight"><pre>
 <span></span><span class="c1"># pyright: reportPrivateImportUsage=false</span>
 
-<span class="kn">from</span> <span class="nn">__future__</span> <span class="kn">import</span> <span class="n">annotations</span>
-<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="p">(</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
     <span class="n">TYPE_CHECKING</span><span class="p">,</span>
     <span class="n">NamedTuple</span><span class="p">,</span>
     <span class="n">Any</span><span class="p">,</span>
 <span class="p">)</span>
-<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
-<span class="kn">from</span> <span class="nn">dask</span> <span class="kn">import</span> <span class="n">array</span> <span class="k">as</span> <span class="n">da</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">dask</span><span class="w"> </span><span class="kn">import</span> <span class="n">array</span> <span class="k">as</span> <span class="n">da</span>
 
-<span class="kn">from</span> <span class="nn">acryo._types</span> <span class="kn">import</span> <span class="n">nm</span><span class="p">,</span> <span class="n">pixel</span>
-<span class="kn">from</span> <span class="nn">acryo._reader</span> <span class="kn">import</span> <span class="n">imread</span>
-<span class="kn">from</span> <span class="nn">acryo.molecules</span> <span class="kn">import</span> <span class="n">Molecules</span>
-<span class="kn">from</span> <span class="nn">acryo.backend</span> <span class="kn">import</span> <span class="n">Backend</span>
-<span class="kn">from</span> <span class="nn">acryo</span> <span class="kn">import</span> <span class="n">_utils</span>
-<span class="kn">from</span> <span class="nn">acryo.loader</span> <span class="kn">import</span> <span class="n">_misc</span>
-<span class="kn">from</span> <span class="nn">acryo.loader._base</span> <span class="kn">import</span> <span class="n">LoaderBase</span><span class="p">,</span> <span class="n">Unset</span><span class="p">,</span> <span class="n">_ShapeType</span>
-<span class="kn">from</span> <span class="nn">acryo._dask</span> <span class="kn">import</span> <span class="n">DaskTaskPool</span><span class="p">,</span> <span class="n">DaskArrayList</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">acryo._types</span><span class="w"> </span><span class="kn">import</span> <span class="n">nm</span><span class="p">,</span> <span class="n">pixel</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">acryo._reader</span><span class="w"> </span><span class="kn">import</span> <span class="n">imread</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">acryo.molecules</span><span class="w"> </span><span class="kn">import</span> <span class="n">Molecules</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">acryo.backend</span><span class="w"> </span><span class="kn">import</span> <span class="n">Backend</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">acryo</span><span class="w"> </span><span class="kn">import</span> <span class="n">_utils</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">acryo.loader._base</span><span class="w"> </span><span class="kn">import</span> <span class="n">LoaderBase</span><span class="p">,</span> <span class="n">Unset</span><span class="p">,</span> <span class="n">_ShapeType</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">acryo._dask</span><span class="w"> </span><span class="kn">import</span> <span class="n">DaskTaskPool</span><span class="p">,</span> <span class="n">DaskArrayList</span>
 
 <span class="k">if</span> <span class="n">TYPE_CHECKING</span><span class="p">:</span>
-    <span class="kn">from</span> <span class="nn">typing_extensions</span> <span class="kn">import</span> <span class="n">Self</span>
-    <span class="kn">from</span> <span class="nn">numpy.typing</span> <span class="kn">import</span> <span class="n">NDArray</span>
-    <span class="kn">from</span> <span class="nn">acryo.classification</span> <span class="kn">import</span> <span class="n">PcaClassifier</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">typing_extensions</span><span class="w"> </span><span class="kn">import</span> <span class="n">Self</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">numpy.typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">NDArray</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">acryo.classification</span><span class="w"> </span><span class="kn">import</span> <span class="n">PcaClassifier</span>
 
 
-<div class="viewcode-block" id="SubtomogramLoader"><a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.SubtomogramLoader">[docs]</a><span class="k">class</span> <span class="nc">SubtomogramLoader</span><span class="p">(</span><span class="n">LoaderBase</span><span class="p">):</span>
+<div class="viewcode-block" id="SubtomogramLoader">
+<a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.SubtomogramLoader">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">SubtomogramLoader</span><span class="p">(</span><span class="n">LoaderBase</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    A class for efficient loading of subtomograms.</span>
 
@@ -137,7 +142,7 @@
 <span class="sd">        should be set false to save computation time.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
 
-    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">image</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="n">da</span><span class="o">.</span><span class="n">Array</span><span class="p">,</span>
         <span class="n">molecules</span><span class="p">:</span> <span class="n">Molecules</span><span class="p">,</span>
@@ -167,7 +172,7 @@
             <span class="n">order</span><span class="o">=</span><span class="n">order</span><span class="p">,</span> <span class="n">scale</span><span class="o">=</span><span class="n">scale</span><span class="p">,</span> <span class="n">output_shape</span><span class="o">=</span><span class="n">output_shape</span><span class="p">,</span> <span class="n">corner_safe</span><span class="o">=</span><span class="n">corner_safe</span>
         <span class="p">)</span>
 
-    <span class="k">def</span> <span class="fm">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
         <span class="n">shape</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">image</span><span class="o">.</span><span class="n">shape</span>
         <span class="n">mole_repr</span> <span class="o">=</span> <span class="nb">repr</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">molecules</span><span class="p">)</span>
         <span class="k">return</span> <span class="p">(</span>
@@ -176,8 +181,10 @@
             <span class="sa">f</span><span class="s2">&quot;scale=</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">scale</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">)&quot;</span>
         <span class="p">)</span>
 
-<div class="viewcode-block" id="SubtomogramLoader.imread"><a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.SubtomogramLoader.imread">[docs]</a>    <span class="nd">@classmethod</span>
-    <span class="k">def</span> <span class="nf">imread</span><span class="p">(</span>
+<div class="viewcode-block" id="SubtomogramLoader.imread">
+<a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.SubtomogramLoader.imread">[docs]</a>
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">imread</span><span class="p">(</span>
         <span class="bp">cls</span><span class="p">,</span>
         <span class="n">path</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
         <span class="n">molecules</span><span class="p">:</span> <span class="n">Molecules</span><span class="p">,</span>
@@ -199,21 +206,24 @@
             <span class="n">corner_safe</span><span class="o">=</span><span class="n">corner_safe</span><span class="p">,</span>
         <span class="p">)</span></div>
 
+
     <span class="nd">@property</span>
-    <span class="k">def</span> <span class="nf">image</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span> <span class="o">|</span> <span class="n">da</span><span class="o">.</span><span class="n">Array</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">image</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">]</span> <span class="o">|</span> <span class="n">da</span><span class="o">.</span><span class="n">Array</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Return tomogram image.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_image</span>
 
     <span class="nd">@property</span>
-    <span class="k">def</span> <span class="nf">molecules</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Molecules</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">molecules</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Molecules</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the molecules of the subtomogram loader.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_molecules</span>
 
-    <span class="k">def</span> <span class="fm">__len__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__len__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the number of subtomograms.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">molecules</span><span class="o">.</span><span class="n">pos</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
 
-<div class="viewcode-block" id="SubtomogramLoader.replace"><a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.SubtomogramLoader.replace">[docs]</a>    <span class="k">def</span> <span class="nf">replace</span><span class="p">(</span>
+<div class="viewcode-block" id="SubtomogramLoader.replace">
+<a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.SubtomogramLoader.replace">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">replace</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">molecules</span><span class="p">:</span> <span class="n">Molecules</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">output_shape</span><span class="p">:</span> <span class="n">pixel</span> <span class="o">|</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pixel</span><span class="p">,</span> <span class="n">pixel</span><span class="p">,</span> <span class="n">pixel</span><span class="p">]</span> <span class="o">|</span> <span class="n">Unset</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
@@ -241,7 +251,10 @@
             <span class="n">corner_safe</span><span class="o">=</span><span class="n">corner_safe</span><span class="p">,</span>
         <span class="p">)</span></div>
 
-<div class="viewcode-block" id="SubtomogramLoader.binning"><a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.SubtomogramLoader.binning">[docs]</a>    <span class="k">def</span> <span class="nf">binning</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">binsize</span><span class="p">:</span> <span class="n">pixel</span> <span class="o">=</span> <span class="mi">2</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">compute</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
+
+<div class="viewcode-block" id="SubtomogramLoader.binning">
+<a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.SubtomogramLoader.binning">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">binning</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">binsize</span><span class="p">:</span> <span class="n">pixel</span> <span class="o">=</span> <span class="mi">2</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">compute</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Return a new instance with binned image.</span>
 
@@ -274,7 +287,10 @@
         <span class="n">out</span><span class="o">.</span><span class="n">_image</span> <span class="o">=</span> <span class="n">binned_image</span>
         <span class="k">return</span> <span class="n">out</span></div>
 
-<div class="viewcode-block" id="SubtomogramLoader.construct_loading_tasks"><a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.SubtomogramLoader.construct_loading_tasks">[docs]</a>    <span class="k">def</span> <span class="nf">construct_loading_tasks</span><span class="p">(</span>
+
+<div class="viewcode-block" id="SubtomogramLoader.construct_loading_tasks">
+<a class="viewcode-back" href="../../../apidoc/acryo.loader.html#acryo.SubtomogramLoader.construct_loading_tasks">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">construct_loading_tasks</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">output_shape</span><span class="p">:</span> <span class="n">_ShapeType</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">backend</span><span class="p">:</span> <span class="n">Backend</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
@@ -289,8 +305,6 @@
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="n">output_shape</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_output_shape</span><span class="p">(</span><span class="n">output_shape</span><span class="p">)</span>
         <span class="n">xp</span> <span class="o">=</span> <span class="n">backend</span> <span class="ow">or</span> <span class="n">Backend</span><span class="p">()</span>
-        <span class="k">if</span> <span class="p">(</span><span class="n">cached</span> <span class="o">:=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_cached_array</span><span class="p">(</span><span class="n">output_shape</span><span class="p">,</span> <span class="n">xp</span><span class="p">))</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-            <span class="k">return</span> <span class="n">DaskArrayList</span><span class="p">(</span><span class="n">cached</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">molecules</span><span class="o">.</span><span class="n">count</span><span class="p">()))</span>
 
         <span class="n">image</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">image</span>
         <span class="n">scale</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">scale</span>
@@ -309,6 +323,7 @@
                     <span class="n">center</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">molecules</span><span class="o">.</span><span class="n">pos</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">/</span> <span class="n">scale</span><span class="p">,</span>
                     <span class="n">output_shape</span><span class="o">=</span><span class="n">output_shape</span><span class="p">,</span>
                     <span class="n">rot</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">molecules</span><span class="o">.</span><span class="n">rotator</span><span class="p">[</span><span class="n">i</span><span class="p">],</span>
+                    <span class="n">order</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">order</span><span class="p">,</span>
                 <span class="p">)</span>
             <span class="k">except</span> <span class="n">_utils</span><span class="o">.</span><span class="n">SubvolumeOutOfBoundError</span> <span class="k">as</span> <span class="n">err</span><span class="p">:</span>
                 <span class="k">raise</span> <span class="n">err</span><span class="o">.</span><span class="n">with_msg</span><span class="p">(</span>
@@ -323,42 +338,16 @@
                 <span class="n">cval</span><span class="o">=</span><span class="n">xp</span><span class="o">.</span><span class="n">mean</span><span class="p">,</span>
             <span class="p">)</span>
 
-        <span class="k">return</span> <span class="n">pool</span><span class="o">.</span><span class="n">asarrays</span><span class="p">(</span><span class="n">shape</span><span class="o">=</span><span class="n">output_shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span></div></div>
+        <span class="k">return</span> <span class="n">pool</span><span class="o">.</span><span class="n">asarrays</span><span class="p">(</span><span class="n">shape</span><span class="o">=</span><span class="n">output_shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span></div>
+</div>
 
 
-<span class="k">class</span> <span class="nc">ClassificationResult</span><span class="p">(</span><span class="n">NamedTuple</span><span class="p">):</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">ClassificationResult</span><span class="p">(</span><span class="n">NamedTuple</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Tuple of classification results.&quot;&quot;&quot;</span>
 
     <span class="n">loader</span><span class="p">:</span> <span class="n">SubtomogramLoader</span>
     <span class="n">classifier</span><span class="p">:</span> <span class="n">PcaClassifier</span>
-
-
-<span class="k">def</span> <span class="nf">check_input</span><span class="p">(</span>
-    <span class="n">order</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
-    <span class="n">output_shape</span><span class="p">:</span> <span class="n">pixel</span> <span class="o">|</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pixel</span><span class="p">,</span> <span class="n">pixel</span><span class="p">,</span> <span class="n">pixel</span><span class="p">]</span> <span class="o">|</span> <span class="n">Unset</span><span class="p">,</span>
-    <span class="n">scale</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
-    <span class="n">corner_safe</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
-    <span class="n">ndim</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
-<span class="p">):</span>
-    <span class="c1"># check interpolation order</span>
-    <span class="k">if</span> <span class="n">order</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">):</span>
-        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
-            <span class="sa">f</span><span class="s2">&quot;The third argument &#39;order&#39; must be 0, 1 or 3, got </span><span class="si">{</span><span class="n">order</span><span class="si">!r}</span><span class="s2">.&quot;</span>
-        <span class="p">)</span>
-
-    <span class="c1"># check output_shape</span>
-    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">output_shape</span><span class="p">,</span> <span class="n">Unset</span><span class="p">):</span>
-        <span class="n">_output_shape</span> <span class="o">=</span> <span class="n">output_shape</span>
-    <span class="k">else</span><span class="p">:</span>
-        <span class="n">_output_shape</span> <span class="o">=</span> <span class="n">_misc</span><span class="o">.</span><span class="n">normalize_shape</span><span class="p">(</span><span class="n">output_shape</span><span class="p">,</span> <span class="n">ndim</span><span class="o">=</span><span class="n">ndim</span><span class="p">)</span>
-
-    <span class="c1"># check scale</span>
-    <span class="n">_scale</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">scale</span><span class="p">)</span>
-    <span class="k">if</span> <span class="n">_scale</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
-        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Negative scale is not allowed.&quot;</span><span class="p">)</span>
-
-    <span class="n">_corner_safe</span> <span class="o">=</span> <span class="nb">bool</span><span class="p">(</span><span class="n">corner_safe</span><span class="p">)</span>
-    <span class="k">return</span> <span class="n">order</span><span class="p">,</span> <span class="n">_output_shape</span><span class="p">,</span> <span class="n">_scale</span><span class="p">,</span> <span class="n">_corner_safe</span>
 </pre></div>
 
            </div>
