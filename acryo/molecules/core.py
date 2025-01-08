@@ -63,18 +63,18 @@ class Molecules:
         if _pos.shape[1] != 3:
             raise ValueError("Shape of pos must be (N, 3).")
 
+        nmol = _pos.shape[0]
         if rot is None:
-            nmol = _pos.shape[0]
             if nmol > 0:
-                quat = np.stack([np.array([0, 0, 0, 1])] * _pos.shape[0], axis=0)
+                quat = np.stack([np.array([0, 0, 0, 1])] * nmol, axis=0)
+                rot = Rotation.from_quat(quat)
             else:
-                quat = np.zeros((0, 4))
-            rot = Rotation.from_quat(quat)
+                rot = Rotation.identity()
         elif not isinstance(rot, Rotation):
             raise TypeError(f"`rot` must be a Rotation object, got {type(rot)}.")
-        elif _pos.shape[0] != len(rot):
+        elif nmol > 0 and nmol != len(rot):
             raise ValueError(
-                f"Length mismatch. There are {_pos.shape[0]} molecules but {len(rot)} "
+                f"Length mismatch. There are {nmol} molecules but {len(rot)} "
                 "rotation were given."
             )
 
@@ -134,7 +134,7 @@ class Molecules:
         angles: _Array2D,
         seq: str = "ZXZ",
         degrees: bool = False,
-        order: str = "xyz",
+        order: Literal["xyz", "zyx"] = "xyz",
         features: pl.DataFrame | None = None,
     ) -> Self:
         """Create molecules from Euler angles."""
@@ -154,7 +154,12 @@ class Molecules:
         features: pl.DataFrame | None = None,
     ) -> Self:
         """Create molecules from quaternions."""
-        return cls(pos, Rotation.from_quat(quat), features)
+        quat = np.asarray(quat)
+        if quat.shape[0] == 0:
+            rot = None
+        else:
+            rot = Rotation.from_quat(quat)
+        return cls(pos, rot, features)
 
     @classmethod
     def from_rotvec(
@@ -164,7 +169,12 @@ class Molecules:
         features: pl.DataFrame | None = None,
     ) -> Self:
         """Create molecules from rotation vectors."""
-        return cls(pos, Rotation.from_rotvec(vec), features)
+        vec = np.asarray(vec)
+        if vec.shape[0] == 0:
+            rot = None
+        else:
+            rot = Rotation.from_rotvec(vec)
+        return cls(pos, rot, features)
 
     @classmethod
     def from_matrix(
@@ -174,7 +184,11 @@ class Molecules:
         features: pl.DataFrame | None = None,
     ) -> Self:
         """Create molecules from rotation matrices."""
-        return cls(pos, Rotation.from_matrix(matrix), features)
+        if matrix.shape[0] == 0:
+            rot = None
+        else:
+            rot = Rotation.from_matrix(matrix)
+        return cls(pos, rot, features)
 
     @classmethod
     def from_file(
@@ -230,11 +244,11 @@ class Molecules:
             features = None
         else:
             features = df.select(feature_columns)
-        return cls(
-            pos.to_numpy(),
-            Rotation.from_rotvec(rotvec.to_numpy()),
-            features=features,
-        )
+        if len(pos) == 0:
+            rot = None
+        else:
+            rot = Rotation.from_rotvec(rotvec.to_numpy())
+        return cls(pos.to_numpy(), rot, features=features)
 
     @classmethod
     def from_random(
@@ -244,7 +258,11 @@ class Molecules:
         features: pl.DataFrame | None = None,
     ) -> Self:
         """Create randomly oriented molecules from given positions."""
-        rot = Rotation.random(len(pos), random_state=seed)
+        pos = np.asarray(pos)
+        if pos.shape[0] == 0:
+            rot = None
+        else:
+            rot = Rotation.random(pos.shape[0], random_state=seed)
         return cls(pos, rot, features=features)
 
     @property
@@ -447,7 +465,7 @@ class Molecules:
         else:
             _spec = spec
         pos = self.pos[_spec]
-        quat = self._rotator.as_quat(canonical=False)[_spec]
+        quat = self.quaternion(canonical=False)[_spec]
         if self._features is None:
             return self.__class__(pos, Rotation(quat))
         if _is_boolean_array(_spec):
@@ -480,7 +498,8 @@ class Molecules:
             dst = self.pos
 
         nmole = len(self)
-
+        if nmole == 0:
+            return np.zeros((0, 4, 4), dtype=np.float32)
         if inverse:
             mat = self._rotator.inv().as_matrix()
         else:
@@ -562,6 +581,8 @@ class Molecules:
             Rotation matrices. Rotations represented by these matrices transform
             molecules to the same orientations, i.e., align all the molecules.
         """
+        if self.count() == 0:
+            return np.zeros((0, 3, 3), dtype=np.float64)
         return self._rotator.as_matrix()
 
     def euler_angle(
@@ -588,6 +609,8 @@ class Molecules:
         (N, 3) ndarray
             Euler angles.
         """
+        if self.count() == 0:
+            return np.zeros((0, 3), dtype=np.float64)
         seq = translate_euler(seq)
         return self._rotator.as_euler(seq, degrees=degrees)[..., ::-1]
 
@@ -601,6 +624,8 @@ class Molecules:
         (N, 4) ndarray
             Quaternions.
         """
+        if self.count() == 0:
+            return np.zeros((0, 4), dtype=np.float64)
         return self._rotator.as_quat(canonical=canonical)
 
     def rotvec(self) -> NDArray[np.float64]:
@@ -613,6 +638,8 @@ class Molecules:
         (N, 3) ndarray
             Rotation vectors.
         """
+        if self.count() == 0:
+            return np.zeros((0, 3), dtype=np.float64)
         return self._rotator.as_rotvec()
 
     def translate(self, shifts: _Array1D | _Array2D, copy: bool = True) -> Self:
@@ -642,7 +669,7 @@ class Molecules:
         if copy:
             features = self._features
             if features is not None:
-                features = pl.DataFrame(list(features))  # copy
+                features = features.clone()
             out = self.__class__(coords, self._rotator, features=features)
         else:
             self._pos = coords
@@ -883,7 +910,7 @@ class Molecules:
         if copy:
             features = self._features
             if features is not None:
-                features = pl.DataFrame(list(features))
+                features = features.clone()
             out = self.__class__(self._pos, rot, features=features)
         else:
             self._rotator = rot
@@ -947,10 +974,7 @@ class Molecules:
         """
         pos = np.concatenate([self.pos, other.pos], axis=0)
         rot = np.concatenate(
-            [
-                self.rotator.as_quat(canonical=False),
-                other.rotator.as_quat(canonical=False),
-            ],
+            [self.quaternion(), other.quaternion()],
             axis=0,
         )
         if len(self.features) == 0:
@@ -963,22 +987,19 @@ class Molecules:
         return self.__class__(pos, Rotation.from_quat(rot), features=feat)
 
     @overload
-    def groupby(self, by: IntoExpr) -> MoleculeGroup[str]:
-        ...
+    def group_by(self, by: IntoExpr) -> MoleculeGroup[str]: ...
 
     @overload
-    def groupby(
+    def group_by(
         self, by: Sequence[IntoExpr] | tuple[IntoExpr, ...]
-    ) -> MoleculeGroup[tuple[str, ...]]:
-        ...
+    ) -> MoleculeGroup[tuple[str, ...]]: ...
 
     @overload
-    def groupby(
+    def group_by(
         self, by: IntoExpr, *more_by: IntoExpr
-    ) -> MoleculeGroup[tuple[str, ...]]:
-        ...
+    ) -> MoleculeGroup[tuple[str, ...]]: ...
 
-    def groupby(self, by, *more_by):
+    def group_by(self, by, *more_by):
         """Group molecules into sub-groups."""
         df = self.to_dataframe()
         is_single = len(more_by) == 0 and isinstance(by, str)
@@ -993,7 +1014,7 @@ class Molecules:
                 single=is_single,
             )
 
-    group_by = groupby  # alias
+    groupby = group_by  # alias
 
     def cutby(self, by: str, bins: list[float]) -> MoleculeCutGroup:
         """Cut molecules into sub-groups by binning."""
@@ -1092,10 +1113,7 @@ class Molecules:
             raise TypeError(f"Expected Molecules, got {type(other)}")
         pos = np.concatenate([self.pos, other.pos], axis=0)
         rot = np.concatenate(
-            [
-                self.rotator.as_quat(canonical=False),
-                other.rotator.as_quat(canonical=False),
-            ],
+            [self.quaternion(), other.quaternion()],
             axis=0,
         )
 
