@@ -299,5 +299,18 @@ def test_local_coordinates():
 
 
 def test_sort():
-    mol = Molecules(np.zeros((4, 3)), features={"A": [0.1, 0.2, 0.4, 0.3]})
-    mol.sort("A")
+    pos = np.stack([np.arange(4)] * 3, axis=1)
+    mol = Molecules(pos, features={"A": [11, 12, 14, 13]})
+    mol_sorted = mol.sort("A")
+    assert mol_sorted.features["A"].to_list() == [11, 12, 13, 14]
+    assert mol_sorted.pos[:, 0].tolist() == [0, 1, 3, 2]
+
+
+def test_concat_molecules():
+    mole0 = Molecules(np.zeros((4, 3)), features={"A": [1, 2, 3, 4]})
+    mole1 = Molecules.empty(feature_labels=["A"])
+    mole2 = Molecules(np.ones((2, 3)), features={"A": [5, 6]})
+    mole = Molecules.concat([mole0, mole1, mole2], concat_features=True)
+    assert mole.count() == 6
+    assert_allclose(mole.pos, np.vstack([np.zeros((4, 3)), np.ones((2, 3))]))
+    assert mole.features["A"].to_list() == [1, 2, 3, 4, 5, 6]
