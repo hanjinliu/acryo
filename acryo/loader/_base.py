@@ -7,6 +7,7 @@ from typing import (
     TYPE_CHECKING,
     Iterable,
     Iterator,
+    Literal,
     NamedTuple,
     Any,
     Sequence,
@@ -115,8 +116,7 @@ class LoaderBase(ABC):
         self,
         output_shape: _ShapeType = None,
         backend: Backend | None = None,
-    ) -> DaskArrayList[np.number]:
-        ...
+    ) -> DaskArrayList[np.number]: ...
 
     def construct_dask(
         self,
@@ -401,7 +401,7 @@ class LoaderBase(ABC):
         max_shifts = _normalize_max_shifts(max_shifts)
 
         model = alignment_model(
-            self.normalize_template(template),
+            self.normalize_template(template, allow_multiple=True),
             self.normalize_mask(mask),
             **align_kwargs,
         )
@@ -620,7 +620,7 @@ class LoaderBase(ABC):
         _max_shifts_px = tuple(np.asarray(max_shifts) / self.scale)
 
         model = alignment_model(
-            self.normalize_template(template),
+            self.normalize_template(template, allow_multiple=True),
             self.normalize_mask(mask),
             **align_kwargs,
         )
@@ -790,6 +790,7 @@ class LoaderBase(ABC):
             n_set=n_set,
             dfreq=dfreq,
             zero_norm=zero_norm,
+            squeeze=False,
         )
         return df, (img0[0] + img1[0]) / 2
 
@@ -830,7 +831,7 @@ class LoaderBase(ABC):
         --------
         fsc
         """
-        if mask is None:
+        if mask is None or isinstance(mask, ImageConverter):
             _mask = 1.0
             output_shape = self.output_shape
             if isinstance(output_shape, Unset):
@@ -851,6 +852,9 @@ class LoaderBase(ABC):
             squeeze=False,
             output_shape=output_shape,
         )
+        if isinstance(mask, ImageConverter):
+            avg = (halves[0, 0] + halves[0, 1]) / 2
+            _mask = mask.convert(avg, self.scale)
         if zero_norm:
             halves[:] -= halves.mean()
         fsc_all: dict[str, np.ndarray] = {}
@@ -1008,14 +1012,12 @@ class LoaderBase(ABC):
         return self.replace(molecules=self.molecules.filter(predicate))
 
     @overload
-    def groupby(self, by: IntoExpr) -> LoaderGroup[str, Self]:
-        ...
+    def groupby(self, by: IntoExpr) -> LoaderGroup[str, Self]: ...
 
     @overload
     def groupby(
         self, by: Sequence[IntoExpr] | tuple[IntoExpr, ...]
-    ) -> LoaderGroup[tuple[str, ...], Self]:
-        ...
+    ) -> LoaderGroup[tuple[str, ...], Self]: ...
 
     def groupby(self, by):
         """
@@ -1042,14 +1044,32 @@ class LoaderBase(ABC):
             _output_shape = _misc.normalize_shape(output_shape, ndim=3)
         return _output_shape  # type: ignore
 
-    def normalize_template(self, template: TemplateInputType) -> NDArray[np.float32]:
+    @overload
+    def normalize_template(
+        self,
+        template: TemplateInputType,
+        allow_multiple: Literal[False] = False,
+    ) -> NDArray[np.float32]: ...
+    @overload
+    def normalize_template(
+        self,
+        template: TemplateInputType,
+        allow_multiple: Literal[True],
+    ) -> NDArray[np.float32] | list[NDArray[np.float32]]: ...
+
+    def normalize_template(self, template, allow_multiple=False):
         """Resolve any template input type to a 3D array."""
         if isinstance(template, np.ndarray):
-            if template.ndim != 3:
+            if template.ndim == 3:
+                return template
+            elif template.ndim == 4 and allow_multiple:
+                return list(template)
+            else:
                 raise ValueError("Template must be a 3D array.")
-            return template
         elif isinstance(template, ImageProvider):
             return template(self.scale)
+        elif isinstance(template, (list, tuple)):
+            return [self.normalize_template(t, allow_multiple=False) for t in template]
         raise TypeError(f"Invalid template type: {type(template)}")
 
     def normalize_mask(self, mask: MaskInputType) -> MaskType:
@@ -1068,16 +1088,14 @@ class LoaderBase(ABC):
         self,
         template: None = None,
         mask: MaskInputType = None,
-    ) -> tuple[None, NDArray[np.float32] | None]:
-        ...
+    ) -> tuple[None, NDArray[np.float32] | None]: ...
 
     @overload
     def normalize_input(
         self,
         template: TemplateInputType,
         mask: MaskInputType = None,
-    ) -> tuple[NDArray[np.float32], NDArray[np.float32] | None]:
-        ...
+    ) -> tuple[NDArray[np.float32], NDArray[np.float32] | None]: ...
 
     def normalize_input(self, template=None, mask=None):
         """Resolve any template and mask input types to 3D arrays."""
