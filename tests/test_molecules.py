@@ -290,6 +290,14 @@ def test_axes_to_rotator(rotvec: list[float]):
     assert_allclose(out.as_rotvec(), [rotvec], rtol=1e-8, atol=1e-8)
 
 
+def test_axes_to_rotator_invert():
+    z = [[-1, 0, 0]]
+    y = [[0, -1, 0]]
+    assert_allclose(
+        axes_to_rotator(z, y).as_rotvec(), [[0, 0, np.pi]], rtol=1e-8, atol=1e-8
+    )
+
+
 def test_local_coordinates():
     mol = Molecules(np.zeros((1, 3)), Rotation.random(1))
     coords = mol.local_coordinates((3, 4, 5), squeeze=False)

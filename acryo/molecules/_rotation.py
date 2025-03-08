@@ -25,10 +25,17 @@ def _get_align_rotator(src, dst) -> Rotation:
     """R.apply(src) == dst. Both length must be 1."""
     if np.all(np.abs(src + dst) < 1e-6):
         # Cross product cannot be used for antiparallel vectors.
-        # Use Rodrigues' rotation formula instead to obtain the rotation matrix that
-        # rotates v to -v: R = I - 2vv^T.
-        mat = np.eye(3) - 2 * np.outer(src, src)
-        return Rotation.from_matrix(mat)
+        src = np.atleast_2d(src)
+        # both rotvec_0 and rotvec_1 are orthogonal to src.
+        rotvec_0 = np.stack([np.zeros(src.shape[0]), -src[:, 2], src[:, 1]], axis=1)
+        rotvec_1 = np.stack([src[:, 2], np.zeros(src.shape[0]), -src[:, 0]], axis=1)
+        rotvec = np.where(
+            np.linalg.norm(rotvec_0, axis=1) > np.linalg.norm(rotvec_1, axis=1),
+            rotvec_0,
+            rotvec_1,
+        )
+        rotvec /= np.linalg.norm(rotvec, axis=1, keepdims=True)
+        return Rotation.from_rotvec(rotvec * np.pi)
     cross = np.cross(src, dst)
     sin = norm = np.sqrt(np.sum(cross**2, axis=1, keepdims=True))
     cos = np.sum(src * dst, axis=1, keepdims=True)
