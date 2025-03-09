@@ -24,8 +24,7 @@ if TYPE_CHECKING:
 
 
 class SubtomogramLoader(LoaderBase):
-    """
-    A class for efficient loading of subtomograms.
+    """A class for efficient loading of subtomograms.
 
     A ``SubtomogramLoader`` instance is basically composed of two elements,
     an image and a Molecules object. A subtomogram is loaded by creating a
@@ -164,8 +163,7 @@ class SubtomogramLoader(LoaderBase):
         )
 
     def binning(self, binsize: pixel = 2, *, compute: bool = True) -> Self:
-        """
-        Return a new instance with binned image.
+        """Return a new instance with binned image.
 
         This method also properly translates the molecule coordinates.
 
@@ -201,8 +199,7 @@ class SubtomogramLoader(LoaderBase):
         output_shape: _ShapeType = None,
         backend: Backend | None = None,
     ) -> DaskArrayList:
-        """
-        Construct a list of subtomogram lazy loader.
+        """Construct a list of subtomogram lazy loader.
 
         Returns
         -------

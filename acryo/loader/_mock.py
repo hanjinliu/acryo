@@ -23,8 +23,7 @@ if TYPE_CHECKING:
 
 
 class MockLoader(LoaderBase):
-    """
-    A subtomogram loader from a virtual tomogram.
+    """A subtomogram loader from a virtual tomogram.
 
     This loader is for testing purpose only. The tomogram does not actually exist
     but subtomograms are generated on the fly based on the template image. The

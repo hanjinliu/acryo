@@ -20,8 +20,7 @@ def get_feature_list(corr_max, local_shifts, rotvec) -> list[pl.Series]:
 
 
 def dict_iterrows(d: dict[str, Iterable[Any]]):
-    """
-    Generater similar to pl.DataFrame.iterrows().
+    """Generater similar to pl.DataFrame.iterrows().
 
     >>> dict_iterrows({'a': [1, 2, 3], 'b': [4, 5, 6]})
 

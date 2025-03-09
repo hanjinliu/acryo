@@ -27,8 +27,7 @@ IMAGE_ID_LABEL = "image-id"
 
 
 class BatchLoader(LoaderBase):
-    """
-    Collection of tomograms and their molecules.
+    """Collection of tomograms and their molecules.
 
     A `BatchLoader` is similar to a list of `SubtomogramLoader` objects, but with
     better consistency in loader parameters and more convenient access to the molecules.
@@ -79,8 +78,7 @@ class BatchLoader(LoaderBase):
         molecules: Molecules,
         image_id: Hashable | None = None,
     ) -> Self:
-        """
-        Add a tomogram and its molecules to the collection.
+        """Add a tomogram and its molecules to the collection.
 
         Parameters
         ----------

@@ -123,8 +123,7 @@ class LoaderBase(ABC):
         output_shape: pixel | tuple[pixel, ...] | None = None,
         backend: Backend | None = None,
     ) -> da.Array:
-        """
-        Construct a dask array of subtomograms.
+        """Construct a dask array of subtomograms.
 
         This function is always needed before parallel processing.
 
@@ -166,8 +165,7 @@ class LoaderBase(ABC):
         var_kwarg: dict[str, Iterable[Any]] | None = None,
         **const_kwargs,
     ) -> DaskTaskIterator[_R]:
-        """
-        Iterate over delayed mapping tasks using subtomograms.
+        """Iterate over delayed mapping tasks using subtomograms.
 
         Parameters
         ----------
@@ -204,8 +202,7 @@ class LoaderBase(ABC):
         var_kwarg: dict[str, Iterable[Any]] | None = None,
         **const_kwargs,
     ) -> DaskTaskList[_R]:
-        """
-        Construct delayed mapping tasks using subtomograms.
+        """Construct delayed mapping tasks using subtomograms.
 
         Parameters
         ----------
@@ -239,8 +236,7 @@ class LoaderBase(ABC):
         idx: SupportsIndex | slice | Iterable[SupportsIndex],
         output_shape: _ShapeType = None,
     ) -> NDArray[np.float32]:
-        """
-        Load subtomogram(s) of given index.
+        """Load subtomogram(s) of given index.
 
         Parameters
         ----------
@@ -267,8 +263,7 @@ class LoaderBase(ABC):
     def load_iter(
         self, output_shape: _ShapeType = None
     ) -> Iterator[NDArray[np.float32]]:
-        """
-        Iterate over subtomograms.
+        """Iterate over subtomograms.
 
         Parameters
         ----------
@@ -287,8 +282,7 @@ class LoaderBase(ABC):
     def average(
         self, output_shape: _ShapeType = None, *, backend: Backend | None = None
     ) -> NDArray[np.float32]:
-        """
-        Calculate the average of subtomograms.
+        """Calculate the average of subtomograms.
 
         This function execute so-called "subtomogram averaging". The size of
         subtomograms is determined by the ``self.output_shape`` attribute.
@@ -311,8 +305,7 @@ class LoaderBase(ABC):
         squeeze: bool = True,
         output_shape: _ShapeType = None,
     ) -> NDArray[np.float32]:
-        """
-        Split subtomograms into two set and average separately.
+        """Split subtomograms into two set and average separately.
 
         This method executes pairwise subtomogram averaging using randomly
         selected molecules, which is useful for calculation of such as Fourier
@@ -370,8 +363,7 @@ class LoaderBase(ABC):
         backend: Backend | None = None,
         **align_kwargs,
     ) -> Self:
-        """
-        Align subtomograms to the template image.
+        """Align subtomograms to the template image.
 
         This method conduct so called "subtomogram alignment". Only shifts and rotations
         are calculated in this method. To get averaged image, you'll have to run
@@ -457,8 +449,7 @@ class LoaderBase(ABC):
         alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
         **align_kwargs,
     ) -> Self:
-        """
-        Align subtomograms without template image.
+        """Align subtomograms without template image.
 
         A template-free version of :func:`align`. This method first
         calculates averaged image and uses it for the alignment template. To
@@ -507,8 +498,7 @@ class LoaderBase(ABC):
         label_name: str = "labels",
         **align_kwargs,
     ) -> Self:
-        """
-        Align subtomograms with multiple template images.
+        """Align subtomograms with multiple template images.
 
         A multi-template version of :func:`align`. This method calculate cross
         correlation for every template and uses the best local shift, rotation and
@@ -602,8 +592,7 @@ class LoaderBase(ABC):
         upsample: int = 1,
         **align_kwargs,
     ) -> da.Array:
-        """
-        Construct a dask array of correlation landscape.
+        """Construct a dask array of correlation landscape.
 
         This method internally calls the ``landscape`` method of the input alignment
         model.
@@ -655,8 +644,7 @@ class LoaderBase(ABC):
         alignment_model: type[BaseAlignmentModel] | AlignmentFactory = ZNCCAlignment,
         **align_kwargs,
     ) -> list[NDArray[np.float32]]:
-        """
-        Calculate the score of subtomograms against the template image.
+        """Calculate the score of subtomograms against the template image.
 
         This method internally calls the ``score`` method of the input alignment model.
 
@@ -701,8 +689,7 @@ class LoaderBase(ABC):
         *more_funcs: AggFunction[_R],
         schema: list[str] | dict[str, type[pl.DataType]] | None = None,
     ) -> pl.DataFrame:
-        """
-        Apply functions to subtomograms.
+        """Apply functions to subtomograms.
 
         Parameters
         ----------
@@ -751,8 +738,7 @@ class LoaderBase(ABC):
         n_set: int = 1,
         dfreq: float = 0.05,
     ) -> pl.DataFrame:
-        """
-        Calculate Fourier shell correlation.
+        """Calculate Fourier shell correlation.
 
         Parameters
         ----------
@@ -803,8 +789,7 @@ class LoaderBase(ABC):
         zero_norm: bool = True,
         squeeze: bool = True,
     ) -> FscTuple:
-        """
-        Calculate Fourier shell correlation and the resulting half maps.
+        """Calculate Fourier shell correlation and the resulting half maps.
 
         Parameters
         ----------
@@ -886,8 +871,7 @@ class LoaderBase(ABC):
         seed: int = 0,
         label_name: str = "cluster",
     ) -> ClassificationResult:
-        """
-        Classify 3D densities by PCA of wedge-masked differences.
+        """Classify 3D densities by PCA of wedge-masked differences.
 
         Parameters
         ----------
@@ -1020,8 +1004,7 @@ class LoaderBase(ABC):
     ) -> LoaderGroup[tuple[str, ...], Self]: ...
 
     def groupby(self, by):
-        """
-        Group loader by given feature column(s).
+        """Group loader by given feature column(s).
 
         >>> for key, loader in loader.groupby("score"):
         ...     print(key, loader)

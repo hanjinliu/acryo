@@ -63,15 +63,13 @@ class LoaderGroup(Generic[_K, _L]):
 
     @overload
     @classmethod
-    def _from_loader(cls, loader: _L, by: IntoExpr) -> LoaderGroup[str, _L]:
-        ...
+    def _from_loader(cls, loader: _L, by: IntoExpr) -> LoaderGroup[str, _L]: ...
 
     @overload
     @classmethod
     def _from_loader(
         cls, loader: _L, by: tuple[IntoExpr, ...]
-    ) -> LoaderGroup[tuple[str, ...], _L]:
-        ...
+    ) -> LoaderGroup[tuple[str, ...], _L]: ...
 
     @classmethod
     def _from_loader(  # type: ignore[override]
@@ -119,8 +117,7 @@ class LoaderGroup(Generic[_K, _L]):
         *,
         backend: Backend | None = None,
     ) -> ArrayDict[_K]:
-        """
-        Split subtomograms into two set and average separately.
+        """Split subtomograms into two set and average separately.
 
         This method executes pairwise subtomogram averaging using randomly
         selected molecules, which is useful for calculation of such as Fourier
@@ -183,8 +180,7 @@ class LoaderGroup(Generic[_K, _L]):
         backend: Backend | None = None,
         **align_kwargs,
     ) -> LoaderGroup[_K, _L]:
-        """
-        Align subtomograms to the template image.
+        """Align subtomograms to the template image.
 
         This method conduct so called "subtomogram alignment". Only shifts and rotations
         are calculated in this method. To get averaged image, you'll have to run
@@ -252,8 +248,7 @@ class LoaderGroup(Generic[_K, _L]):
         backend: Backend | None = None,
         **align_kwargs,
     ) -> LoaderGroup[_K, _L]:
-        """
-        Align subtomograms without template image.
+        """Align subtomograms without template image.
 
         A template-free version of :func:`align`. This method first
         calculates averaged image and uses it for the alignment template. To
@@ -374,8 +369,7 @@ class LoaderGroup(Generic[_K, _L]):
         funcs: AggFunction[_R] | Sequence[AggFunction[_R]],
         schema: list[str] | None = None,
     ) -> DataFrameDict[_K]:
-        """
-        Apply functions to subtomograms for each group.
+        """Apply functions to subtomograms for each group.
 
         Parameters
         ----------
@@ -426,8 +420,7 @@ class LoaderGroup(Generic[_K, _L]):
         n_set: int = 1,
         dfreq: float = 0.05,
     ) -> DataFrameDict[_K]:
-        """
-        Calculate Fourier shell correlation for each group.
+        """Calculate Fourier shell correlation for each group.
 
         Parameters
         ----------
