@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     import polars as pl
 
 ColorType = Union[tuple[float, float, float], tuple[float, float, float, float]]
+ColorFunc = Callable[["pl.DataFrame"], ColorType]
 
 
 class Component(NamedTuple):
@@ -38,8 +39,7 @@ class Component(NamedTuple):
 
 
 class TomogramSimulator:
-    """
-    An object for tomogram simulation
+    """An object for tomogram simulation
 
     A TomogramSimulator contains set(s) of molecules and their corresponding density
     and additional information for tomogram generation. For instance, to simulate a
@@ -68,6 +68,7 @@ class TomogramSimulator:
         self,
         order: Literal[0, 1, 3] = 3,
         scale: nm = 1.0,
+        *,
         corner_safe: bool = False,
     ) -> None:
         # check interpolation order
@@ -141,8 +142,7 @@ class TomogramSimulator:
         name: str | None = None,
         overwrite: bool = False,
     ) -> Self:
-        """
-        Add molecules to the tomogram.
+        """Add molecules to the tomogram.
 
         Parameters
         ----------
@@ -179,8 +179,7 @@ class TomogramSimulator:
         return Molecules.concat(comp.molecules for comp in self._components.values())
 
     def subset(self, names: str | Sequence[str]) -> Self:
-        """
-        Construct a simulator composed of a subset of the components.
+        """Construct a simulator composed of a subset of the components.
 
         Parameters
         ----------
@@ -207,12 +206,9 @@ class TomogramSimulator:
     def simulate(
         self,
         shape: tuple[pixel, pixel, pixel],
-        colormap: Callable[[pl.DataFrame], ColorType]
-        | NDArray[np.float32]
-        | None = None,
+        colormap: ColorFunc | NDArray[np.float32] | None = None,
     ) -> NDArray[np.float32]:
-        """
-        Simulate a tomogram.
+        """Simulate a tomogram.
 
         Parameters
         ----------
@@ -258,7 +254,7 @@ class TomogramSimulator:
     def _simulate_with_color(
         self,
         shape: tuple[pixel, pixel, pixel],
-        colormap: Callable[[pl.DataFrame], ColorType] | NDArray[np.float32],
+        colormap: ColorFunc | NDArray[np.float32],
     ):
         """Simulate a colored tomogram."""
         if isinstance(colormap, np.ndarray):
@@ -320,8 +316,7 @@ class TomogramSimulator:
         xaxis: tuple[float, float, float],
         yaxis: tuple[float, float, float],
     ) -> NDArray[np.float32]:
-        """
-        Simulate a projection of the tomogram in any direction.
+        """Simulate a projection of the tomogram in any direction.
 
         Projection plane and the projection range are defined by the given parameters.
         ``shape`` and ``center`` define the range of the projection plane. Technically,
@@ -373,8 +368,7 @@ class TomogramSimulator:
         degrees: Iterable[float],
         shape: tuple[int, int, int],
     ) -> NDArray[np.float32]:
-        """
-        Simulate a tilt series of the tomogram.
+        """Simulate a tilt series of the tomogram.
 
         This method is a simplified version of :meth:`simulate_projection`. Projection
         angles are restricted to the rotation around the y-axis of the world coordinate
