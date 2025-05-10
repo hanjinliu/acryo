@@ -14,11 +14,11 @@ class CTFModel:
     Attributes
     ----------
     spherical_aberration : float or callable
-        Spherical aberration in μm.
+        Spherical aberration in mm.
     defocus : float or callable
         Defocus in μm.
     wave_length : float or callable
-        Wave length in Å.
+        Wave length in angstrom.
     bfactor : float
         B-factor.
     """

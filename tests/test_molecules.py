@@ -276,8 +276,12 @@ def test_append_empty():
         [1, -0.3, -0.2],
         [-0.2, -0.8, -1.3],
         [0.0, 0.0, 0.0],
+        [0.0, 0.0, -1.0],
         [0.0, -1.0, 0.0],
         [-1.0, 0.0, 0.0],
+        [0.0, 0.0, np.pi / 2],
+        [0.0, np.pi / 2, 0.0],
+        [np.pi / 2, 0.0, 0.0],
     ],
 )
 def test_axes_to_rotator(rotvec: list[float]):
@@ -293,9 +297,9 @@ def test_axes_to_rotator(rotvec: list[float]):
 def test_axes_to_rotator_invert():
     z = [[-1, 0, 0]]
     y = [[0, -1, 0]]
-    assert_allclose(
-        axes_to_rotator(z, y).as_rotvec(), [[0, 0, np.pi]], rtol=1e-8, atol=1e-8
-    )
+    rot = axes_to_rotator(z, y)
+    assert_allclose(rot.apply([[1.0, 0.0, 0.0]]), z, rtol=1e-8, atol=1e-8)
+    assert_allclose(rot.apply([[0.0, 1.0, 0.0]]), y, rtol=1e-8, atol=1e-8)
 
 
 def test_local_coordinates():
