@@ -1,6 +1,7 @@
 # pyright: reportPrivateImportUsage=false
 from __future__ import annotations
 
+import warnings
 from types import MappingProxyType
 from typing import (
     Callable,
@@ -224,8 +225,6 @@ class TomogramSimulator:
             Simulated tomogram image.
         """
         if len(self._components) == 0:
-            import warnings
-
             warnings.warn("No molecules are added to the simulator.", UserWarning)
 
         if colormap is not None:
