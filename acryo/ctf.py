@@ -56,7 +56,7 @@ class CTFModel:
         freq = np.sqrt(yfreq**2 + xfreq**2)
         return self.simulate(freq)
 
-    def filter_apply_ctf(
+    def apply_ctf(
         self,
         img: NDArray[np.floating],
         scale: nm,
@@ -66,7 +66,7 @@ class CTFModel:
         img_ft = fftn(img, axes=(-2, -1))
         return ifftn(_multiply_multi(ctf, img_ft), axes=(-2, -1)).real
 
-    def filter_phase_flip(
+    def phase_flip(
         self,
         img: NDArray[np.floating],
         scale: nm,
@@ -75,21 +75,6 @@ class CTFModel:
         ctf = self.simulate_image(img.shape[-2:], scale)
         img_ft = fftn(img, axes=(-2, -1))
         return ifftn(_multiply_multi(np.sign(ctf), img_ft), axes=(-2, -1)).real
-
-    def filter_phase_amplitude_correction(
-        self,
-        img: NDArray[np.floating],
-        scale: nm,
-        cutoff_amplitude: float = 1e-3,
-    ) -> NDArray[np.floating]:
-        """Apply phase flip and amplitude correction to the image."""
-        ctf = self.simulate_image(img.shape[-2:], scale)
-        img_ft = fftn(img, axes=(-2, -1))
-        zero_div_mask = np.abs(ctf) < cutoff_amplitude
-        out = np.zeros_like(img_ft)
-        out[..., ~zero_div_mask] = img_ft[..., ~zero_div_mask] / ctf[~zero_div_mask]
-        out[..., zero_div_mask] = img_ft[..., zero_div_mask]
-        return ifftn(out, axes=(-2, -1)).real
 
     def simulate(self, freq):
         f2 = freq**2
