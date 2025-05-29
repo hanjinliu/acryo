@@ -11,10 +11,17 @@ from dask import array as da
 
 from acryo._types import nm, pixel
 from acryo._reader import imread
+from acryo.alignment._concrete import ZNCCAlignment
 from acryo.molecules import Molecules
 from acryo.backend import Backend
 from acryo import _utils
-from acryo.loader._base import LoaderBase, Unset, _ShapeType
+from acryo.loader._base import (
+    LoaderBase,
+    MaskInputType,
+    TemplateInputType,
+    Unset,
+    _ShapeType,
+)
 from acryo.tilt import TiltSeriesModel, NoWedge
 from acryo._dask import DaskTaskPool, DaskArrayList
 
@@ -234,6 +241,31 @@ class SubtomogramLoader(LoaderBase):
             )
 
         return pool.asarrays(shape=output_shape, dtype=np.float32)
+
+    def _default_align_kwargs(self) -> dict[str, Any]:
+        """Return default keyword arguments for alignment."""
+        return {"tilt": self.tilt_model}
+
+    def _prep_classify_stack(
+        self,
+        template: TemplateInputType,
+        mask: MaskInputType,
+        cutoff: float = 1.0,
+        shape: tuple[int, int, int] | None = None,
+    ):
+        model = ZNCCAlignment(template, mask, cutoff=cutoff, tilt=self.tilt_model)
+        return (
+            self.iter_mapping_tasks(
+                model.masked_difference,
+                output_shape=shape,
+                var_kwarg={
+                    "quaternion": self.molecules.quaternion(),
+                    "pos": self.molecules.pos / self.scale,
+                },
+            )
+            .tolist()
+            .tostack(shape=shape, dtype=np.float32)
+        )
 
 
 class ClassificationResult(NamedTuple):

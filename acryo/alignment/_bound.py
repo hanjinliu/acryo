@@ -20,15 +20,17 @@ class ParametrizedModel(Generic[_T]):
         self._params = params
 
     def create_model(
-        self, template: TemplateType, mask: NDArray[np.float32] | None = None
+        self, template: TemplateType, mask: NDArray[np.float32] | None = None, **kwargs
     ) -> _T:
-        bound = inspect.signature(self._cls).bind_partial(**self._params)
+        params = self._params
+        params.update(kwargs)
+        bound = inspect.signature(self._cls).bind_partial(**params)
         return self._cls(template, mask, *bound.args, **bound.kwargs)
 
     def __call__(
-        self, template: TemplateType, mask: NDArray[np.float32] | None = None
+        self, template: TemplateType, mask: NDArray[np.float32] | None = None, **kwargs
     ) -> _T:
-        return self.create_model(template, mask)
+        return self.create_model(template, mask, **kwargs)
 
     def __repr__(self) -> str:
         _args = ", ".join(f"{k}={v!r}" for k, v in self._params.items())

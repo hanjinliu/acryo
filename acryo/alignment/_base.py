@@ -606,6 +606,9 @@ class BaseAlignmentModel(ABC):
         """Number of templates."""
         return self._n_templates
 
+    def remainder(self) -> int:
+        return -1
+
 
 class RotationImplemented(BaseAlignmentModel):
     """
@@ -867,6 +870,13 @@ class RotationImplemented(BaseAlignmentModel):
     def niter(self) -> int:
         """Number of iteration per sub-volume."""
         return self._n_templates * self._n_rotations
+
+    def remainder(self) -> int:
+        if self._n_rotations > 1:
+            remainder = len(self._n_templates)
+        else:
+            remainder = -1
+        return remainder
 
 
 class TomographyInput(RotationImplemented):
