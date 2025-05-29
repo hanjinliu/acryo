@@ -8,7 +8,6 @@ import polars as pl
 def test_replace():
     loader = BatchLoader()
     assert loader.replace(order=1).order == 1
-    assert loader.replace(order=1).corner_safe == loader.corner_safe
     assert loader.replace(output_shape=(1, 2, 3)).output_shape == (1, 2, 3)
     assert loader.replace(scale=0.5).scale == 0.5
 

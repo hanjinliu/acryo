@@ -10,7 +10,6 @@ from typing import (
     Union,
 )
 from typing_extensions import Self
-import warnings
 
 import numpy as np
 from numpy.typing import NDArray
@@ -69,6 +68,12 @@ class TemplateMaskCache:
 
     def set(self, backend: Backend, template: _Template, mask: _Mask):
         self._dict[backend] = template, mask
+
+    def clone(self) -> TemplateMaskCache:
+        """Clone the cache."""
+        new_cache = TemplateMaskCache()
+        new_cache._dict = self._dict.copy()
+        return new_cache
 
 
 class BaseAlignmentModel(ABC):
@@ -156,6 +161,15 @@ class BaseAlignmentModel(ABC):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(shape={self._template.shape})"
+
+    def clone(self) -> Self:
+        """Clone the alignment model."""
+        new_model = type(self)(
+            template=self._template,
+            mask=self._mask,
+        )
+        new_model._template_mask_cache = self._template_mask_cache.clone()
+        return new_model
 
     @property
     def template(self) -> NDArray[np.float32]:
@@ -612,6 +626,16 @@ class RotationImplemented(BaseAlignmentModel):
         self._n_rotations = self.quaternions.shape[0]
         super().__init__(template=template, mask=mask)
 
+    def clone(self) -> Self:
+        """Clone the alignment model."""
+        new_model = type(self)(
+            template=self._template,
+            mask=self._mask,
+            rotations=self.quaternions.copy(),
+        )
+        new_model._template_mask_cache = self._template_mask_cache.clone()
+        return new_model
+
     @classmethod
     def with_params(
         cls,
@@ -846,8 +870,7 @@ class RotationImplemented(BaseAlignmentModel):
 
 
 class TomographyInput(RotationImplemented):
-    """
-    An alignment model that implements missing-wedge masking and low-pass filter.
+    """An alignment model that implements missing-wedge masking and low-pass filter.
 
     This alignment model is useful for subtomogram averaging of real experimental
     data with limited tilt ranges. Template image will be masked with synthetic
@@ -861,16 +884,9 @@ class TomographyInput(RotationImplemented):
         rotations: RotationType | None = None,
         cutoff: float | None = None,
         tilt: TiltSeriesModel | tuple[degree, degree] | None = None,
-        tilt_range: tuple[degree, degree] | None = None,
+        # TODO: ctf: CTFModel | None = None,
     ):
         self._cutoff = cutoff or 1.0
-        if tilt_range is not None:
-            warnings.warn(
-                "`tilt_range` is deprecated. Use `tilt` for more precise setting "
-                "of the tilt series model.",
-                DeprecationWarning,
-            )
-            tilt_model = single_axis(tilt_range)
         if tilt is None:
             tilt_model = no_wedge()
         elif isinstance(tilt, TiltSeriesModel):
@@ -881,6 +897,18 @@ class TomographyInput(RotationImplemented):
         self._tilt_model: TiltSeriesModel = tilt_model
         super().__init__(template, mask, rotations)
 
+    def clone(self) -> Self:
+        """Clone the alignment model."""
+        new_model = type(self)(
+            template=self._template,
+            mask=self._mask,
+            rotations=self.quaternions.copy(),
+            cutoff=self._cutoff,
+            tilt=self._tilt_model,
+        )
+        new_model._template_mask_cache = self._template_mask_cache.clone()
+        return new_model
+
     @classmethod
     def with_params(
         cls,
@@ -888,7 +916,6 @@ class TomographyInput(RotationImplemented):
         rotations: RotationType | None = None,
         cutoff: float | None = None,
         tilt: TiltSeriesModel | None = None,
-        tilt_range: tuple[degree, degree] | None = None,
     ) -> ParametrizedModel[Self]:
         """Create an alignment model instance with parameters."""
         return ParametrizedModel(
@@ -896,8 +923,32 @@ class TomographyInput(RotationImplemented):
             rotations=rotations,
             cutoff=cutoff,
             tilt=tilt,
-            tilt_range=tilt_range,
         )
+
+    def clone(self) -> Self:
+        """Create a clone of the current instance."""
+        return self.with_params(
+            rotations=self.quaternions,
+            cutoff=self._cutoff,
+            tilt=self._tilt_model,
+        )
+
+    def with_tilt(self, tilt: TiltSeriesModel) -> Self:
+        """Create a new instance with an updated tilt series model.
+
+        Parameters
+        ----------
+        tilt : TiltSeriesModel
+            New tilt series model to use.
+
+        Returns
+        -------
+        TomographyInput
+            New instance with the specified tilt series model.
+        """
+        out = self.clone()
+        out._tilt_model = tilt
+        return out
 
     def pre_transform(
         self, image: AnyArray[np.float32], backend: Backend
@@ -909,18 +960,20 @@ class TomographyInput(RotationImplemented):
         self,
         image: NDArray[np.float32],
         quaternion: NDArray[np.float32],
+        pos: NDArray[np.float32] | None = None,
         backend: Backend | None = None,
     ) -> NDArray[np.float32]:
-        """
-        Difference between an image and the template, considering the missing wedge.
+        """Difference between an image and the template, considering the missing wedge.
 
         Parameters
         ----------
         image : 3D array
             Input image, usually a subvolume from a tomogram.
         quaternion : (4,) array
-            Rotation of the image, usually the quaternion array of a Molecules
+            Rotation of the ``image``, usually the quaternion array of a Molecules
             object.
+        pos : (3,) array, optional
+            Position of the ``image`` in the tomogram.
 
         Returns
         -------
@@ -935,7 +988,9 @@ class TomographyInput(RotationImplemented):
         _template, _mask = self._get_template_and_mask_input(xp)
         image_input = self.pre_transform(xp.asarray(image) * _mask, xp)
         mw = self._get_missing_wedge_mask(quaternion, xp)
+        # ctf_mask = self.CTF_MASK(pos)
         template_masked = xp.ifftn(_template * mw).real
+        # template_masked = xp.ifftn(_template * mw * ctf_mask).real
         img_input = xp.ifftn(image_input * mw).real
         return xp.asnumpy(img_input - template_masked)
 

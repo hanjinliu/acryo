@@ -15,6 +15,7 @@ from acryo.molecules import Molecules
 from acryo.backend import Backend
 from acryo import _utils
 from acryo.loader._base import LoaderBase, Unset, _ShapeType
+from acryo.tilt import TiltSeriesModel, NoWedge
 from acryo._dask import DaskTaskPool, DaskArrayList
 
 if TYPE_CHECKING:
@@ -51,11 +52,6 @@ class SubtomogramLoader(LoaderBase):
     output_shape : int or tuple of int, optional
         Shape of output subtomogram in pixel. This parameter is not required
         if template (or mask) image is available immediately.
-    corner_safe : bool, default is False
-        If true, regions around molecules will be cropped at a volume larger
-        than ``output_shape`` so that densities at the corners will not be
-        lost due to rotation. If target density is globular, this parameter
-        should be set false to save computation time.
     """
 
     def __init__(
@@ -65,7 +61,7 @@ class SubtomogramLoader(LoaderBase):
         order: int = 3,
         scale: nm = 1.0,
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
-        corner_safe: bool = False,
+        tilt_model: TiltSeriesModel | None = None,
     ) -> None:
         # check type of input image
         if not isinstance(image, (np.ndarray, da.Array)):
@@ -83,10 +79,8 @@ class SubtomogramLoader(LoaderBase):
                 f"{type(molecules)}."
             )
         self._molecules = molecules
-
-        super().__init__(
-            order=order, scale=scale, output_shape=output_shape, corner_safe=corner_safe
-        )
+        self._tilt_model = tilt_model or NoWedge()
+        super().__init__(order=order, scale=scale, output_shape=output_shape)
 
     def __repr__(self) -> str:
         shape = self.image.shape
@@ -105,8 +99,8 @@ class SubtomogramLoader(LoaderBase):
         order: int = 3,
         scale: nm | None = None,
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
-        corner_safe: bool = False,
         chunks: Any = "auto",
+        tilt_model: TiltSeriesModel | None = None,
     ):
         dask_array, _scale = imread(str(path), chunks)
         if scale is None:
@@ -117,7 +111,7 @@ class SubtomogramLoader(LoaderBase):
             order=order,
             scale=scale,
             output_shape=output_shape,
-            corner_safe=corner_safe,
+            tilt_model=tilt_model,
         )
 
     @property
@@ -130,6 +124,11 @@ class SubtomogramLoader(LoaderBase):
         """Return the molecules of the subtomogram loader."""
         return self._molecules
 
+    @property
+    def tilt_model(self) -> TiltSeriesModel:
+        """Return the tilt model of the subtomogram loader."""
+        return self._tilt_model
+
     def __len__(self) -> int:
         """Return the number of subtomograms."""
         return self.molecules.pos.shape[0]
@@ -140,7 +139,6 @@ class SubtomogramLoader(LoaderBase):
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset | None = None,
         order: int | None = None,
         scale: float | None = None,
-        corner_safe: bool | None = None,
     ) -> Self:
         """Return a new instance with different parameter(s)."""
         if molecules is None:
@@ -151,15 +149,13 @@ class SubtomogramLoader(LoaderBase):
             order = self.order
         if scale is None:
             scale = self.scale
-        if corner_safe is None:
-            corner_safe = self.corner_safe
         return self.__class__(
             self.image,
             molecules=molecules,
             output_shape=output_shape,
             order=order,
             scale=scale,
-            corner_safe=corner_safe,
+            tilt_model=self.tilt_model,
         )
 
     def binning(self, binsize: pixel = 2, *, compute: bool = True) -> Self:
@@ -214,14 +210,10 @@ class SubtomogramLoader(LoaderBase):
         if isinstance(image, np.ndarray):
             image = da.from_array(image, asarray=xp.asarray)
 
-        if self.corner_safe:
-            _prep = _utils.prepare_affine_cornersafe
-        else:
-            _prep = _utils.prepare_affine
         pool = DaskTaskPool.from_func(xp.rotated_crop)
         for i in range(self.molecules.count()):
             try:
-                subvol, mtx = _prep(
+                subvol, mtx = _utils.prepare_affine(
                     image,
                     center=self.molecules.pos[i] / scale,
                     output_shape=output_shape,

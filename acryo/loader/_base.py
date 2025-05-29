@@ -17,7 +17,6 @@ from typing import (
     overload,
 )
 from typing_extensions import TypeGuard
-import warnings
 import numpy as np
 from numpy.typing import NDArray
 from dask import array as da
@@ -73,11 +72,10 @@ class LoaderBase(ABC):
         order: int = 3,
         scale: nm = 1.0,
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
-        corner_safe: bool = False,
     ) -> None:
         ndim = 3
-        self._order, self._output_shape, self._scale, self._corner_safe = check_input(
-            order, output_shape, scale, corner_safe, ndim
+        self._order, self._output_shape, self._scale = check_input(
+            order, output_shape, scale, ndim
         )
 
     @property
@@ -105,11 +103,6 @@ class LoaderBase(ABC):
     def order(self) -> int:
         """Return the interpolation order."""
         return self._order
-
-    @property
-    def corner_safe(self) -> bool:
-        """Whether rotation is corner-safe."""
-        return self._corner_safe
 
     @abstractmethod
     def construct_loading_tasks(
@@ -145,7 +138,6 @@ class LoaderBase(ABC):
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset | None = None,
         order: int | None = None,
         scale: float | None = None,
-        corner_safe: bool | None = None,
     ) -> Self:
         """Return a new loader with updated attributes."""
 
@@ -407,38 +399,9 @@ class LoaderBase(ABC):
                 **align_kwargs,
             )
 
-        _max_shifts_px = tuple(np.asarray(max_shifts) / self.scale)
-        tasks = self.construct_mapping_tasks(
-            model.align,
-            max_shifts=_max_shifts_px,
-            output_shape=model.input_shape,
-            backend=_backend,
-            var_kwarg=dict(
-                quaternion=self.molecules.quaternion(),
-                pos=self.molecules.pos / self.scale,
-            ),
-        )
+        tasks = self._prep_align_tasks(model, max_shifts, _backend)
         all_results = tasks.compute()
         return self._post_align(all_results, model.input_shape)
-
-    def _post_align(
-        self,
-        results: list[AlignmentResult],
-        shape: tuple[int, int, int],
-    ) -> Self:
-        local_shifts, local_rot, scores = _misc.allocate(len(results))
-        for i, result in enumerate(results):
-            _, loc_shift, local_rot[i], scores[i] = result
-            local_shifts[i] = loc_shift * self.scale
-
-        rotator = Rotation.from_quat(local_rot)
-        mole_aligned = self.molecules.linear_transform(local_shifts, rotator)
-
-        mole_aligned.features = self.molecules.features.with_columns(
-            _misc.get_feature_list(scores, local_shifts, rotator.as_rotvec()),
-        )
-
-        return self.replace(molecules=mole_aligned, output_shape=shape)
 
     def align_no_template(
         self,
@@ -524,8 +487,6 @@ class LoaderBase(ABC):
         subtomogram loader object
             A loader instance of the same type with updated molecules.
         """
-        _backend = backend or Backend()
-        _max_shifts_px = np.asarray(max_shifts) / self.scale
 
         if isinstance(templates, ImageProvider):
             _templates = templates(self.scale)
@@ -536,16 +497,7 @@ class LoaderBase(ABC):
             mask=self.normalize_mask(mask),
             **align_kwargs,
         )
-        tasks = self.construct_mapping_tasks(
-            model.align,
-            max_shifts=_max_shifts_px,
-            output_shape=model.input_shape,
-            backend=_backend,
-            var_kwarg=dict(
-                quaternion=self.molecules.quaternion(),
-                pos=self.molecules.pos / self.scale,
-            ),
-        )
+        tasks = self._prep_align_multi_templates(model, max_shifts, backend)
         all_results = tasks.compute()
         if isinstance(model, RotationImplemented) and model._n_rotations > 1:
             remainder = len(_templates)
@@ -554,33 +506,6 @@ class LoaderBase(ABC):
         return self._post_align_multi_templates(
             all_results, model.input_shape, remainder, label_name
         )
-
-    def _post_align_multi_templates(
-        self,
-        results: list[AlignmentResult],
-        shape: tuple[int, int, int],
-        remainder: int = -1,
-        label_name: str = "labels",
-    ):
-        local_shifts, local_rot, scores = _misc.allocate(len(results))
-        labels = np.zeros(len(results), dtype=np.uint32)
-        for i, result in enumerate(results):
-            labels[i], loc_shift, local_rot[i], scores[i] = result
-            local_shifts[i] = loc_shift * self.scale
-
-        rotator = Rotation.from_quat(local_rot)
-        mole_aligned = self.molecules.linear_transform(local_shifts, rotator)
-
-        if remainder > 1:
-            labels %= remainder  # type: ignore
-        labels = labels.astype(np.uint8)
-
-        feature_list = _misc.get_feature_list(scores, local_shifts, rotator.as_rotvec())
-        mole_aligned.features = self.molecules.features.with_columns(
-            feature_list + [pl.Series(label_name, labels)]
-        )
-
-        return self.replace(molecules=mole_aligned, output_shape=shape)
 
     def construct_landscape(
         self,
@@ -867,7 +792,6 @@ class LoaderBase(ABC):
         n_components: int = 2,
         n_clusters: int = 2,
         tilt: tuple[float, float] | None = None,
-        tilt_range=None,
         seed: int = 0,
         label_name: str = "cluster",
     ) -> ClassificationResult:
@@ -918,12 +842,6 @@ class LoaderBase(ABC):
 
         if template is None:
             template = self.average(shape)
-        if tilt_range is not None:
-            warnings.warn(
-                "tilt_range is deprecated. Use tilt instead",
-                DeprecationWarning,
-            )
-            tilt = tilt_range
         model = ZNCCAlignment(template, _mask, cutoff=cutoff, tilt=tilt)
 
         # PCA requires aggregation along the first axis.
@@ -932,7 +850,10 @@ class LoaderBase(ABC):
             self.iter_mapping_tasks(
                 model.masked_difference,
                 output_shape=shape,
-                var_kwarg=dict(quaternion=self.molecules.quaternion()),
+                var_kwarg={
+                    "quaternion": self.molecules.quaternion(),
+                    "pos": self.molecules.pos / self.scale,
+                },
             )
             .tolist()
             .tostack(shape=shape, dtype=np.float32)
@@ -1094,6 +1015,89 @@ class LoaderBase(ABC):
                 raise TypeError("Cannot determine mask array without template.")
             return None, _mask
 
+    def _prep_align_tasks(
+        self,
+        model: BaseAlignmentModel,
+        max_shifts: nm | tuple[nm, nm, nm],
+        backend: Backend,
+    ) -> DaskTaskList[AlignmentResult]:
+        _max_shifts_px = tuple(np.asarray(max_shifts) / self.scale)
+        return self.construct_mapping_tasks(
+            model.align,
+            max_shifts=_max_shifts_px,
+            output_shape=model.input_shape,
+            backend=backend,
+            var_kwarg=dict(
+                quaternion=self.molecules.quaternion(),
+                pos=self.molecules.pos / self.scale,
+            ),
+        )
+
+    def _post_align(
+        self,
+        results: list[AlignmentResult],
+        shape: tuple[int, int, int],
+    ) -> Self:
+        local_shifts, local_rot, scores = _misc.allocate(len(results))
+        for i, result in enumerate(results):
+            _, loc_shift, local_rot[i], scores[i] = result
+            local_shifts[i] = loc_shift * self.scale
+
+        rotator = Rotation.from_quat(local_rot)
+        mole_aligned = self.molecules.linear_transform(local_shifts, rotator)
+
+        mole_aligned.features = self.molecules.features.with_columns(
+            _misc.get_feature_list(scores, local_shifts, rotator.as_rotvec()),
+        )
+
+        return self.replace(molecules=mole_aligned, output_shape=shape)
+
+    def _prep_align_multi_templates(
+        self,
+        model: BaseAlignmentModel,
+        max_shifts: nm | tuple[nm, nm, nm],
+        backend: Backend | None = None,
+    ) -> DaskTaskList[AlignmentResult]:
+        """Prepare the alignment tasks for multiple templates."""
+        _max_shifts_px = np.asarray(max_shifts) / self.scale
+        return self.construct_mapping_tasks(
+            model.align,
+            max_shifts=_max_shifts_px,
+            output_shape=model.input_shape,
+            backend=backend,
+            var_kwarg=dict(
+                quaternion=self.molecules.quaternion(),
+                pos=self.molecules.pos / self.scale,
+            ),
+        )
+
+    def _post_align_multi_templates(
+        self,
+        results: list[AlignmentResult],
+        shape: tuple[int, int, int],
+        remainder: int = -1,
+        label_name: str = "labels",
+    ):
+        local_shifts, local_rot, scores = _misc.allocate(len(results))
+        labels = np.zeros(len(results), dtype=np.uint32)
+        for i, result in enumerate(results):
+            labels[i], loc_shift, local_rot[i], scores[i] = result
+            local_shifts[i] = loc_shift * self.scale
+
+        rotator = Rotation.from_quat(local_rot)
+        mole_aligned = self.molecules.linear_transform(local_shifts, rotator)
+
+        if remainder > 1:
+            labels %= remainder  # type: ignore
+        labels = labels.astype(np.uint8)
+
+        feature_list = _misc.get_feature_list(scores, local_shifts, rotator.as_rotvec())
+        mole_aligned.features = self.molecules.features.with_columns(
+            feature_list + [pl.Series(label_name, labels)]
+        )
+
+        return self.replace(molecules=mole_aligned, output_shape=shape)
+
 
 class ClassificationResult(NamedTuple):
     """Tuple of classification results."""
@@ -1114,9 +1118,8 @@ def check_input(
     order: int,
     output_shape: pixel | tuple[pixel, pixel, pixel] | Unset,
     scale: float,
-    corner_safe: bool,
     ndim: int,
-):
+) -> tuple[int, Unset | tuple[pixel, pixel, pixel], float]:
     # check interpolation order
     if order not in (0, 1, 3):
         raise ValueError(
@@ -1136,8 +1139,7 @@ def check_input(
     if _scale <= 0:
         raise ValueError("Negative scale is not allowed.")
 
-    _corner_safe = bool(corner_safe)
-    return order, _output_shape, _scale, _corner_safe
+    return order, _output_shape, _scale
 
 
 def _is_iterable_of_funcs(x: Any) -> TypeGuard[Iterable[AggFunction]]:
