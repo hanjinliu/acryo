@@ -71,11 +71,13 @@ class LoaderBase(ABC):
         order: int = 3,
         scale: nm = 1.0,
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
+        corner_safe: bool = False,
     ) -> None:
         ndim = 3
         self._order, self._output_shape, self._scale = check_input(
             order, output_shape, scale, ndim
         )
+        self._corner_safe = corner_safe
 
     @property
     @abstractmethod
@@ -102,6 +104,11 @@ class LoaderBase(ABC):
     def order(self) -> int:
         """Return the interpolation order."""
         return self._order
+
+    @property
+    def corner_safe(self) -> bool:
+        """Return whether the loader is corner-safe."""
+        return self._corner_safe
 
     @abstractmethod
     def construct_loading_tasks(

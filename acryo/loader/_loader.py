@@ -59,6 +59,13 @@ class SubtomogramLoader(LoaderBase):
     output_shape : int or tuple of int, optional
         Shape of output subtomogram in pixel. This parameter is not required
         if template (or mask) image is available immediately.
+    corner_safe : bool, default is False
+        If true, regions around molecules will be cropped at a volume larger
+        than ``output_shape`` so that densities at the corners will not be
+        lost due to rotation. If target density is globular, this parameter
+        should be set false to save computation time.
+    tilt_model : TiltSeriesModel, optional
+        Tilt series model to be used for alignment.
     """
 
     def __init__(
@@ -68,6 +75,7 @@ class SubtomogramLoader(LoaderBase):
         order: int = 3,
         scale: nm = 1.0,
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
+        corner_safe: bool = False,
         tilt_model: TiltSeriesModel | None = None,
     ) -> None:
         # check type of input image
@@ -87,7 +95,9 @@ class SubtomogramLoader(LoaderBase):
             )
         self._molecules = molecules
         self._tilt_model = tilt_model or NoWedge()
-        super().__init__(order=order, scale=scale, output_shape=output_shape)
+        super().__init__(
+            order=order, scale=scale, output_shape=output_shape, corner_safe=corner_safe
+        )
 
     def __repr__(self) -> str:
         shape = self.image.shape
@@ -106,6 +116,7 @@ class SubtomogramLoader(LoaderBase):
         order: int = 3,
         scale: nm | None = None,
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
+        corner_safe: bool = False,
         chunks: Any = "auto",
         tilt_model: TiltSeriesModel | None = None,
     ):
@@ -118,6 +129,7 @@ class SubtomogramLoader(LoaderBase):
             order=order,
             scale=scale,
             output_shape=output_shape,
+            corner_safe=corner_safe,
             tilt_model=tilt_model,
         )
 
@@ -146,6 +158,7 @@ class SubtomogramLoader(LoaderBase):
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset | None = None,
         order: int | None = None,
         scale: float | None = None,
+        corner_safe: bool | None = None,
     ) -> Self:
         """Return a new instance with different parameter(s)."""
         if molecules is None:
@@ -156,6 +169,8 @@ class SubtomogramLoader(LoaderBase):
             order = self.order
         if scale is None:
             scale = self.scale
+        if corner_safe is None:
+            corner_safe = self.corner_safe
         return self.__class__(
             self.image,
             molecules=molecules,
@@ -217,10 +232,14 @@ class SubtomogramLoader(LoaderBase):
         if isinstance(image, np.ndarray):
             image = da.from_array(image, asarray=xp.asarray)
 
+        if self.corner_safe:
+            _prep = _utils.prepare_affine_cornersafe
+        else:
+            _prep = _utils.prepare_affine
         pool = DaskTaskPool.from_func(xp.rotated_crop)
         for i in range(self.molecules.count()):
             try:
-                subvol, mtx = _utils.prepare_affine(
+                subvol, mtx = _prep(
                     image,
                     center=self.molecules.pos[i] / scale,
                     output_shape=output_shape,

@@ -45,8 +45,9 @@ class BatchLoader(LoaderBase):
         order: int = 3,
         scale: nm = 1.0,
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
+        corner_safe: bool = False,
     ) -> None:
-        super().__init__(order, scale, output_shape)
+        super().__init__(order, scale, output_shape, corner_safe)
         self._images: dict[Hashable, NDArray[np.float32] | da.Array] = {}
         self._molecules: Molecules = Molecules.empty([IMAGE_ID_LABEL])
         self._tilt_models: dict[Hashable, TomographyInput] = {}
@@ -134,12 +135,14 @@ class BatchLoader(LoaderBase):
         order: int = 3,
         scale: nm = 1.0,
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
+        corner_safe: bool = False,
     ) -> Self:
         """Construct a loader from a list of loaders."""
         self = cls(
             order=order,
             scale=scale,
             output_shape=output_shape,
+            corner_safe=corner_safe,
         )
         for loader in loaders:
             self.add_loader(loader)
@@ -156,6 +159,7 @@ class BatchLoader(LoaderBase):
         output_shape: _ShapeType | Unset = None,
         order: int | None = None,
         scale: float | None = None,
+        corner_safe: bool | None = None,
     ) -> Self:
         """Return a new instance with different parameter(s)."""
         if output_shape is None:
@@ -164,6 +168,8 @@ class BatchLoader(LoaderBase):
             order = self.order
         if scale is None:
             scale = self.scale
+        if corner_safe is None:
+            corner_safe = self.corner_safe
         out = type(self)(
             order=order,
             scale=scale,
@@ -363,12 +369,15 @@ class LoaderAccessor:
         ldr = self._get_loader()
         for key, group in ldr.molecules.groupby(IMAGE_ID_LABEL):
             image = ldr._images[key]
+            tilt_model = ldr._tilt_models.get(key, None)
             loader = SubtomogramLoader(
                 image,
                 group,
                 ldr.order,
                 ldr.scale,
                 ldr.output_shape,
+                tilt_model=tilt_model,
+                corner_safe=ldr.corner_safe,
             )
             yield loader
 

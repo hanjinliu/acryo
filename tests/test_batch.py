@@ -10,6 +10,7 @@ def test_replace():
     assert loader.replace(order=1).order == 1
     assert loader.replace(output_shape=(1, 2, 3)).output_shape == (1, 2, 3)
     assert loader.replace(scale=0.5).scale == 0.5
+    assert loader.replace(order=1).corner_safe == loader.corner_safe
 
 
 @lru_cache(maxsize=1)

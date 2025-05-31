@@ -82,6 +82,7 @@ class LoaderGroup(Generic[_K, _L]):
                 order=loader.order,
                 scale=loader.scale,
                 output_shape=loader.output_shape,
+                corner_safe=loader.corner_safe,
             )
         )
 
@@ -506,12 +507,14 @@ class LoaderGroupByIterator(Iterable[tuple[_K, _L]]):
         order: int,
         scale: float,
         output_shape: tuple[int, int, int] | Unset | None,
+        corner_safe: bool = False,
     ):
         self._loader = loader
         self._by = by
         self._order = order
         self._scale = scale
         self._output_shape = output_shape
+        self._corner_safe = corner_safe
 
     def __iter__(self) -> Iterator[tuple[_K, _L]]:
         loader = self._loader
@@ -525,6 +528,7 @@ class LoaderGroupByIterator(Iterable[tuple[_K, _L]]):
                 order=self._order,
                 scale=self._scale,
                 output_shape=self._output_shape,
+                corner_safe=self._corner_safe,
             )
             yield key, _loader  # type: ignore
 
