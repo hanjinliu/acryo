@@ -4,6 +4,7 @@ from typing import Iterable, Any, Sequence
 import numpy as np
 from numpy.typing import NDArray
 import polars as pl
+from acryo._types import nm
 
 
 def get_feature_list(corr_max, local_shifts, rotvec) -> list[pl.Series]:
@@ -73,3 +74,14 @@ def normalize_shape(a: int | Sequence[int], ndim: int):
     else:
         _output_shape = tuple(a)
     return _output_shape
+
+
+def normalize_max_shifts(x: nm | tuple[nm, nm, nm]) -> tuple[nm, nm, nm]:
+    if hasattr(x, "__iter__"):
+        tup = tuple(float(x0) for x0 in x)  # type: ignore
+        if len(tup) != 3:
+            raise ValueError(
+                "max_shifts must be a 3-tuple if multiple values are given."
+            )
+        return tup
+    return (float(x),) * 3  # type: ignore

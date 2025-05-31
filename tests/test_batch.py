@@ -8,16 +8,17 @@ import polars as pl
 def test_replace():
     loader = BatchLoader()
     assert loader.replace(order=1).order == 1
-    assert loader.replace(order=1).corner_safe == loader.corner_safe
     assert loader.replace(output_shape=(1, 2, 3)).output_shape == (1, 2, 3)
     assert loader.replace(scale=0.5).scale == 0.5
+    assert loader.replace(order=1).corner_safe == loader.corner_safe
 
 
 @lru_cache(maxsize=1)
 def _get_batch_loader():
     loader = BatchLoader()
-    img0 = np.zeros((10, 10, 10))
-    img1 = np.ones((10, 10, 10))
+    rng = np.random.default_rng(42)
+    img0 = rng.normal(size=(10, 10, 10))
+    img1 = rng.normal(loc=1.0, size=(10, 10, 10))
     loader.add_tomogram(
         img0,
         Molecules(
@@ -50,8 +51,8 @@ def test_add_tomograms():
 
 def test_get_loader():
     loader = _get_batch_loader()
-    assert loader.loaders[0].image.mean() == 0
-    assert loader.loaders[1].image.mean() == 1
+    assert loader.loaders[0].molecules.count() == 4
+    assert loader.loaders[1].molecules.count() == 2
     BatchLoader.from_loaders(loader.loaders)
 
 
@@ -99,6 +100,12 @@ def test_alignment():
     assert len(out.molecules) == 6
 
 
+def test_construct_landscape():
+    loader = _get_batch_loader()
+    land = loader.construct_landscape(np.ones((3, 3, 3), dtype=np.float32))
+    assert land.shape == (6, 3, 3, 3)
+
+
 def test_align_no_template():
     loader = _get_batch_loader()
     out = loader.replace(output_shape=(3, 3, 3)).align_no_template()
@@ -108,3 +115,16 @@ def test_align_no_template():
 def test_binning():
     loader = _get_batch_loader()
     loader.binning(2)
+
+
+def test_score():
+    loader = _get_batch_loader()
+    template = np.ones((3, 3, 3), dtype=np.float32)
+    template[0, 0, 0] = template[1, 1, 1] = 0.0
+    loader.score([template])
+
+
+def test_classification():
+    loader = _get_batch_loader()
+    mask = np.ones((3, 3, 3), dtype=np.float32)
+    loader.classify(mask=mask)

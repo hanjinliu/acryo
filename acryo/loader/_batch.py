@@ -11,12 +11,17 @@ import polars as pl
 from dask import array as da
 
 from acryo import _utils
+from acryo.alignment._base import TomographyInput
 from acryo.molecules import Molecules
 from acryo.backend import Backend
 from acryo._types import nm, pixel
-from acryo._dask import DaskArrayList
-from acryo.loader._base import LoaderBase
+from acryo._dask import DaskArrayList, DaskTaskList
+from acryo.loader import _misc
+from acryo.loader._base import LoaderBase, MaskInputType, TemplateInputType
 from acryo.loader._loader import SubtomogramLoader, Unset
+
+from acryo.alignment import BaseAlignmentModel, ZNCCAlignment, AlignmentFactory
+from acryo.tilt._base import TiltSeriesModel
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -45,6 +50,7 @@ class BatchLoader(LoaderBase):
         super().__init__(order, scale, output_shape, corner_safe)
         self._images: dict[Hashable, NDArray[np.float32] | da.Array] = {}
         self._molecules: Molecules = Molecules.empty([IMAGE_ID_LABEL])
+        self._tilt_models: dict[Hashable, TomographyInput] = {}
 
     def __repr__(self) -> str:
         loaders_repr = []
@@ -77,6 +83,7 @@ class BatchLoader(LoaderBase):
         image: np.ndarray | da.Array,
         molecules: Molecules,
         image_id: Hashable | None = None,
+        tilt_model: TiltSeriesModel | None = None,
     ) -> Self:
         """Add a tomogram and its molecules to the collection.
 
@@ -104,6 +111,7 @@ class BatchLoader(LoaderBase):
         _molecules_new = self._molecules.concat_with(molecules)
 
         self._images[image_id] = image
+        self._tilt_models[image_id] = tilt_model
         self._molecules = _molecules_new
         return self
 
@@ -112,7 +120,7 @@ class BatchLoader(LoaderBase):
         if isinstance(loader, SubtomogramLoader):
             image = loader.image
             molecules = loader.molecules
-            self.add_tomogram(image, molecules)
+            self.add_tomogram(image, molecules, tilt_model=loader.tilt_model)
         elif isinstance(loader, BatchLoader):
             for sub in loader.loaders:
                 self.add_loader(sub)
@@ -162,13 +170,13 @@ class BatchLoader(LoaderBase):
             scale = self.scale
         if corner_safe is None:
             corner_safe = self.corner_safe
-        out = self.__class__(
+        out = type(self)(
             order=order,
             scale=scale,
             output_shape=output_shape,
-            corner_safe=corner_safe,
         )
         out._images = self._images.copy()
+        out._tilt_models = self._tilt_models.copy()
         if molecules is None:
             out._molecules = self._molecules.copy()
         else:
@@ -216,8 +224,128 @@ class BatchLoader(LoaderBase):
             for loader in self.loaders
         )
 
+    def align(
+        self,
+        template: TemplateInputType,
+        *,
+        mask: MaskInputType = None,
+        max_shifts: nm | tuple[nm, nm, nm] = 1.0,
+        alignment_model: type[BaseAlignmentModel] | AlignmentFactory = ZNCCAlignment,
+        backend: Backend | None = None,
+        **align_kwargs,
+    ) -> Self:
+        """Align subtomograms to the template image.
+
+        This method conduct so called "subtomogram alignment". Only shifts and rotations
+        are calculated in this method. To get averaged image, you'll have to run
+        "average" method using the resulting SubtomogramLoader instance.
+
+        Parameters
+        ----------
+        template : 3D array or ImageProvider
+            Template image. If ImageProvider is given, the image will be provided
+            accordingly using the scale of the loader object.
+        mask : np.ndarray or callable of np.ndarray to np.ndarray optional
+            Mask image. Must in the same shape as the template.
+        max_shifts : int or tuple of int, default is (1., 1., 1.)
+            Maximum shift between subtomograms and template.
+        alignment_model : subclass of BaseAlignmentModel, optional
+            Alignment model class used for subtomogram alignment. By default,
+            ``ZNCCAlignment`` will be used.
+        align_kwargs : optional keyword arguments
+            Additional keyword arguments passed to the input alignment model.
+
+        Returns
+        -------
+        subtomogram loader object
+            A loader instance of the same type with updated molecules.
+        """
+        _backend = backend or Backend()
+        max_shifts = _misc.normalize_max_shifts(max_shifts)
+        tasks = DaskTaskList([])
+        is_multi = False
+        for each in self.loaders:
+            model = alignment_model(
+                self.normalize_template(template, allow_multiple=True),
+                self.normalize_mask(mask),
+                **each._update_align_kwargs(align_kwargs),
+            )
+            if model.has_hetero_templates:
+                is_multi = True
+                remainder = model.remainder()
+                tasks.extend(
+                    each._prep_align_multi_templates(model, max_shifts, _backend)
+                )
+            else:
+                tasks.extend(each._prep_align_tasks(model, max_shifts, _backend))
+
+        all_results = tasks.compute()
+
+        if is_multi:
+            return self._post_align_multi_templates(
+                all_results, model.input_shape, remainder
+            )
+        return self._post_align(all_results, model.input_shape)
+
+    def construct_landscape(
+        self,
+        template: TemplateInputType,
+        *,
+        mask: MaskInputType = None,
+        max_shifts: nm | tuple[nm, nm, nm] = 1.0,
+        alignment_model: type[BaseAlignmentModel] | AlignmentFactory = ZNCCAlignment,
+        upsample: int = 1,
+        **align_kwargs,
+    ) -> da.Array:
+        arrays: list[da.Array] = []
+        for each in self.loaders:
+            arr = each.construct_landscape(
+                template,
+                mask=mask,
+                max_shifts=max_shifts,
+                alignment_model=alignment_model,
+                upsample=upsample,
+                **align_kwargs,
+            )
+            arrays.append(arr)
+        return da.concatenate(arrays, axis=0)
+
+    def score(
+        self,
+        templates: list[TemplateInputType],
+        *,
+        mask: MaskInputType = None,
+        alignment_model: type[BaseAlignmentModel] | AlignmentFactory = ZNCCAlignment,
+        **align_kwargs,
+    ) -> list[NDArray[np.float32]]:
+        scores = []
+        for each in self.loaders:
+            scores.append(
+                each.score(
+                    templates,
+                    mask=mask,
+                    alignment_model=alignment_model,
+                    **align_kwargs,
+                )
+            )
+        return np.concatenate(scores, axis=1)
+
+    def _prep_classify_stack(
+        self,
+        template: TemplateInputType,
+        mask: MaskInputType,
+        cutoff: float = 1.0,
+        shape: tuple[int, int, int] | None = None,
+    ):
+        stacks = []
+        for each in self.loaders:
+            stacks.append(each._prep_classify_stack(template, mask, cutoff, shape))
+        return da.concatenate(stacks, axis=0)
+
 
 class LoaderAccessor:
+    """The interface to access subtomogram loaders in a BatchLoader."""
+
     def __init__(self, collection: BatchLoader):
         self._loader = weakref.ref(collection)
 
@@ -230,10 +358,10 @@ class LoaderAccessor:
         loader = SubtomogramLoader(
             image,
             mole,
-            ldr.order,
-            ldr.scale,
-            ldr.output_shape,
-            ldr.corner_safe,
+            order=ldr.order,
+            scale=ldr.scale,
+            output_shape=ldr.output_shape,
+            tilt_model=ldr._tilt_models.get(idx, None),
         )
         return loader
 
@@ -241,13 +369,15 @@ class LoaderAccessor:
         ldr = self._get_loader()
         for key, group in ldr.molecules.groupby(IMAGE_ID_LABEL):
             image = ldr._images[key]
+            tilt_model = ldr._tilt_models.get(key, None)
             loader = SubtomogramLoader(
                 image,
                 group,
                 ldr.order,
                 ldr.scale,
                 ldr.output_shape,
-                ldr.corner_safe,
+                tilt_model=tilt_model,
+                corner_safe=ldr.corner_safe,
             )
             yield loader
 

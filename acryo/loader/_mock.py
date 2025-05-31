@@ -61,7 +61,7 @@ class MockLoader(LoaderBase):
     ) -> None:
         if noise < 0:
             raise ValueError("Noise must be non-negative.")
-        super().__init__(order, scale, corner_safe)
+        super().__init__(order, scale, corner_safe=corner_safe)
         self._template = template
         self._noise = noise
         if degrees is None:
@@ -144,7 +144,7 @@ class MockLoader(LoaderBase):
         output_shape: None = None,  # just for compatibility
         order: int | None = None,
         scale: float | None = None,
-        corner_safe: bool | None = None,
+        corner_safe: bool = None,
     ) -> Self:
         if molecules is None:
             molecules = self.molecules

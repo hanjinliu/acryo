@@ -61,16 +61,12 @@ class TomogramSimulator:
     scale : float, default is 1.0
         Scale of the pixel. This value is used to determine the position of the
         molecules.
-    corner_safe : bool, default is False
-        Not implemented yet.
     """
 
     def __init__(
         self,
         order: Literal[0, 1, 3] = 3,
         scale: nm = 1.0,
-        *,
-        corner_safe: bool = False,
     ) -> None:
         # check interpolation order
         if order not in (0, 1, 3):
@@ -83,7 +79,6 @@ class TomogramSimulator:
         self._scale = float(scale)
         if self._scale <= 0:
             raise ValueError("Negative scale is not allowed.")
-        self._corner_safe = corner_safe
 
         self._components: dict[str, Component] = {}
 
@@ -106,27 +101,19 @@ class TomogramSimulator:
         """The physical scale of the tomogram."""
         return self._scale
 
-    @property
-    def corner_safe(self) -> bool:
-        return self._corner_safe
-
     def replace(
         self,
         order: Literal[0, 1, 3] | None = None,
         scale: float | None = None,
-        corner_safe: bool | None = None,
     ) -> Self:
         """Return a new instance with different parameter(s)."""
         if order is None:
             order = self.order
         if scale is None:
             scale = self.scale
-        if corner_safe is None:
-            corner_safe = self.corner_safe
         out = self.__class__(
             order=order,
             scale=scale,
-            corner_safe=corner_safe,
         )
         out._components = self._components.copy()
         return out
@@ -196,9 +183,7 @@ class TomogramSimulator:
             _names = {names}
         else:
             _names = set(names)
-        new = type(self)(
-            order=self.order, scale=self._scale, corner_safe=self.corner_safe
-        )
+        new = type(self)(order=self.order, scale=self._scale)
         for name, comp in self._components.items():
             if name in _names:
                 new._components[name] = comp

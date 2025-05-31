@@ -10,7 +10,6 @@ from typing import (
     Union,
 )
 from typing_extensions import Self
-import warnings
 
 import numpy as np
 from numpy.typing import NDArray
@@ -592,6 +591,9 @@ class BaseAlignmentModel(ABC):
         """Number of templates."""
         return self._n_templates
 
+    def remainder(self) -> int:
+        return -1
+
 
 class RotationImplemented(BaseAlignmentModel):
     """
@@ -844,10 +846,16 @@ class RotationImplemented(BaseAlignmentModel):
         """Number of iteration per sub-volume."""
         return self._n_templates * self._n_rotations
 
+    def remainder(self) -> int:
+        if self._n_rotations > 1:
+            remainder = len(self._n_templates)
+        else:
+            remainder = -1
+        return remainder
+
 
 class TomographyInput(RotationImplemented):
-    """
-    An alignment model that implements missing-wedge masking and low-pass filter.
+    """An alignment model that implements missing-wedge masking and low-pass filter.
 
     This alignment model is useful for subtomogram averaging of real experimental
     data with limited tilt ranges. Template image will be masked with synthetic
@@ -861,16 +869,9 @@ class TomographyInput(RotationImplemented):
         rotations: RotationType | None = None,
         cutoff: float | None = None,
         tilt: TiltSeriesModel | tuple[degree, degree] | None = None,
-        tilt_range: tuple[degree, degree] | None = None,
+        # TODO: ctf: CTFModel | None = None,
     ):
         self._cutoff = cutoff or 1.0
-        if tilt_range is not None:
-            warnings.warn(
-                "`tilt_range` is deprecated. Use `tilt` for more precise setting "
-                "of the tilt series model.",
-                DeprecationWarning,
-            )
-            tilt_model = single_axis(tilt_range)
         if tilt is None:
             tilt_model = no_wedge()
         elif isinstance(tilt, TiltSeriesModel):
@@ -888,7 +889,6 @@ class TomographyInput(RotationImplemented):
         rotations: RotationType | None = None,
         cutoff: float | None = None,
         tilt: TiltSeriesModel | None = None,
-        tilt_range: tuple[degree, degree] | None = None,
     ) -> ParametrizedModel[Self]:
         """Create an alignment model instance with parameters."""
         return ParametrizedModel(
@@ -896,7 +896,6 @@ class TomographyInput(RotationImplemented):
             rotations=rotations,
             cutoff=cutoff,
             tilt=tilt,
-            tilt_range=tilt_range,
         )
 
     def pre_transform(
@@ -909,18 +908,20 @@ class TomographyInput(RotationImplemented):
         self,
         image: NDArray[np.float32],
         quaternion: NDArray[np.float32],
+        pos: NDArray[np.float32] | None = None,
         backend: Backend | None = None,
     ) -> NDArray[np.float32]:
-        """
-        Difference between an image and the template, considering the missing wedge.
+        """Difference between an image and the template, considering the missing wedge.
 
         Parameters
         ----------
         image : 3D array
             Input image, usually a subvolume from a tomogram.
         quaternion : (4,) array
-            Rotation of the image, usually the quaternion array of a Molecules
+            Rotation of the ``image``, usually the quaternion array of a Molecules
             object.
+        pos : (3,) array, optional
+            Position of the ``image`` in the tomogram.
 
         Returns
         -------
@@ -935,7 +936,9 @@ class TomographyInput(RotationImplemented):
         _template, _mask = self._get_template_and_mask_input(xp)
         image_input = self.pre_transform(xp.asarray(image) * _mask, xp)
         mw = self._get_missing_wedge_mask(quaternion, xp)
+        # ctf_mask = self.CTF_MASK(pos)
         template_masked = xp.ifftn(_template * mw).real
+        # template_masked = xp.ifftn(_template * mw * ctf_mask).real
         img_input = xp.ifftn(image_input * mw).real
         return xp.asnumpy(img_input - template_masked)
 

@@ -11,10 +11,18 @@ from dask import array as da
 
 from acryo._types import nm, pixel
 from acryo._reader import imread
+from acryo.alignment._concrete import ZNCCAlignment
 from acryo.molecules import Molecules
 from acryo.backend import Backend
 from acryo import _utils
-from acryo.loader._base import LoaderBase, Unset, _ShapeType
+from acryo.loader._base import (
+    LoaderBase,
+    MaskInputType,
+    TemplateInputType,
+    Unset,
+    _ShapeType,
+)
+from acryo.tilt import TiltSeriesModel, NoWedge
 from acryo._dask import DaskTaskPool, DaskArrayList
 
 if TYPE_CHECKING:
@@ -56,6 +64,8 @@ class SubtomogramLoader(LoaderBase):
         than ``output_shape`` so that densities at the corners will not be
         lost due to rotation. If target density is globular, this parameter
         should be set false to save computation time.
+    tilt_model : TiltSeriesModel, optional
+        Tilt series model to be used for alignment.
     """
 
     def __init__(
@@ -66,6 +76,7 @@ class SubtomogramLoader(LoaderBase):
         scale: nm = 1.0,
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
         corner_safe: bool = False,
+        tilt_model: TiltSeriesModel | None = None,
     ) -> None:
         # check type of input image
         if not isinstance(image, (np.ndarray, da.Array)):
@@ -83,7 +94,7 @@ class SubtomogramLoader(LoaderBase):
                 f"{type(molecules)}."
             )
         self._molecules = molecules
-
+        self._tilt_model = tilt_model or NoWedge()
         super().__init__(
             order=order, scale=scale, output_shape=output_shape, corner_safe=corner_safe
         )
@@ -107,6 +118,7 @@ class SubtomogramLoader(LoaderBase):
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
         corner_safe: bool = False,
         chunks: Any = "auto",
+        tilt_model: TiltSeriesModel | None = None,
     ):
         dask_array, _scale = imread(str(path), chunks)
         if scale is None:
@@ -118,6 +130,7 @@ class SubtomogramLoader(LoaderBase):
             scale=scale,
             output_shape=output_shape,
             corner_safe=corner_safe,
+            tilt_model=tilt_model,
         )
 
     @property
@@ -129,6 +142,11 @@ class SubtomogramLoader(LoaderBase):
     def molecules(self) -> Molecules:
         """Return the molecules of the subtomogram loader."""
         return self._molecules
+
+    @property
+    def tilt_model(self) -> TiltSeriesModel:
+        """Return the tilt model of the subtomogram loader."""
+        return self._tilt_model
 
     def __len__(self) -> int:
         """Return the number of subtomograms."""
@@ -159,7 +177,7 @@ class SubtomogramLoader(LoaderBase):
             output_shape=output_shape,
             order=order,
             scale=scale,
-            corner_safe=corner_safe,
+            tilt_model=self.tilt_model,
         )
 
     def binning(self, binsize: pixel = 2, *, compute: bool = True) -> Self:
@@ -242,6 +260,31 @@ class SubtomogramLoader(LoaderBase):
             )
 
         return pool.asarrays(shape=output_shape, dtype=np.float32)
+
+    def _default_align_kwargs(self) -> dict[str, Any]:
+        """Return default keyword arguments for alignment."""
+        return {"tilt": self.tilt_model}
+
+    def _prep_classify_stack(
+        self,
+        template: TemplateInputType,
+        mask: MaskInputType,
+        cutoff: float = 1.0,
+        shape: tuple[int, int, int] | None = None,
+    ):
+        model = ZNCCAlignment(template, mask, cutoff=cutoff, tilt=self.tilt_model)
+        return (
+            self.iter_mapping_tasks(
+                model.masked_difference,
+                output_shape=shape,
+                var_kwarg={
+                    "quaternion": self.molecules.quaternion(),
+                    "pos": self.molecules.pos / self.scale,
+                },
+            )
+            .tolist()
+            .tostack(shape=shape, dtype=np.float32)
+        )
 
 
 class ClassificationResult(NamedTuple):

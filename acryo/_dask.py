@@ -79,6 +79,9 @@ class DaskTaskList(_DaskComputable[_R]):
     def __len__(self) -> int:
         return len(self._tasks)
 
+    def extend(self, tasks: Iterable[da.Array | Delayed]) -> None:
+        self._tasks.extend(tasks)
+
 
 class DaskTaskPool(DaskTaskList[_R], Generic[_P, _R]):
     def __init__(self, func: Delayed) -> None:
@@ -140,12 +143,10 @@ class DaskArrayList(Sequence["da.Array"], _DaskComputable[NDArray[_D]]):
         return iter(self._arrays)
 
     @overload
-    def __getitem__(self, index: SupportsIndex) -> da.Array:
-        ...
+    def __getitem__(self, index: SupportsIndex) -> da.Array: ...
 
     @overload
-    def __getitem__(self, index: slice) -> list[da.Array]:
-        ...
+    def __getitem__(self, index: slice) -> list[da.Array]: ...
 
     def __getitem__(self, index):
         return self._arrays[index]
@@ -188,29 +189,25 @@ _R2 = TypeVar("_R2")
 
 
 @overload
-def compute(arg: _DaskComputable[_R]) -> list[_R]:
-    ...
+def compute(arg: _DaskComputable[_R]) -> list[_R]: ...
 
 
 @overload
 def compute(
     arg: tuple[_DaskComputable[_R], _DaskComputable[_R1]]
-) -> tuple[list[_R], list[_R1]]:
-    ...
+) -> tuple[list[_R], list[_R1]]: ...
 
 
 @overload
 def compute(
     arg: tuple[_DaskComputable[_R], _DaskComputable[_R1], _DaskComputable[_R2]]
-) -> tuple[list[_R], list[_R1], list[_R2]]:
-    ...
+) -> tuple[list[_R], list[_R1], list[_R2]]: ...
 
 
 @overload
 def compute(
     arg: Sequence[_DaskComputable[_R]],
-) -> list[list[_R]]:
-    ...
+) -> list[list[_R]]: ...
 
 
 def compute(

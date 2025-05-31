@@ -53,7 +53,7 @@ A :class:`SubtomogramLoader` is a pair of a 3D tomogram image and a
 
 .. code-block:: python
 
-    def __init__(self, image, molecules, order=3, scale=1.0, output_shape=Unset(), corner_safe=False): ...
+    def __init__(self, image, molecules, order=3, scale=1.0, output_shape=Unset(), corner_safe=False, tilt_model: TiltSeriesModel | None = None,): ...
 
 1. ``image`` (`numpy.ndarray` or `dask.Array`) ... the tomogram image.
 2. ``molecules`` (`Molecules`) ... molecules in the tomogram.
@@ -254,7 +254,7 @@ shares the same interface with :class:`SubtomogramLoader`. It is constructed usi
 
 .. code-block:: python
 
-    def __init__(self, order=3, scale=1.0, output_shape=Unset(), corner_safe=False): ...
+    def __init__(self, order=3, scale=1.0, output_shape=Unset()): ...
 
 :class:`BatchLoader` can be constructed from a list of :class:`SubtomogramLoader` objects.
 

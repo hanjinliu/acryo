@@ -15,8 +15,7 @@ from acryo._types import nm
 
 
 class ZNCCTemplateMatcher(BaseTemplateMatcher):
-    """
-    Particle picking based on ZNCC template matching.
+    """Particle picking based on ZNCC template matching.
 
     Parameters
     ----------

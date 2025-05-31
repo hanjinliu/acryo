@@ -192,7 +192,7 @@ def test_pca_classify():
         tomo, mole, order=0, scale=scale, output_shape=temp_shape
     )
     mask = temp > np.mean(temp)
-    result = loader.classify(mask.astype(np.float32), tilt=(-60, 60))
+    result = loader.classify(mask.astype(np.float32))
     result.classifier.pca
     result.classifier.kmeans
     result.classifier.predict(temp[np.newaxis])

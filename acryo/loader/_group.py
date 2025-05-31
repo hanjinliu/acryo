@@ -507,7 +507,7 @@ class LoaderGroupByIterator(Iterable[tuple[_K, _L]]):
         order: int,
         scale: float,
         output_shape: tuple[int, int, int] | Unset | None,
-        corner_safe: bool,
+        corner_safe: bool = False,
     ):
         self._loader = loader
         self._by = by

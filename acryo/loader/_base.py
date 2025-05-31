@@ -17,7 +17,6 @@ from typing import (
     overload,
 )
 from typing_extensions import TypeGuard
-import warnings
 import numpy as np
 from numpy.typing import NDArray
 from dask import array as da
@@ -28,7 +27,6 @@ import polars as pl
 from acryo.alignment import (
     BaseAlignmentModel,
     ZNCCAlignment,
-    RotationImplemented,
     AlignmentFactory,
     AlignmentResult,
 )
@@ -76,9 +74,10 @@ class LoaderBase(ABC):
         corner_safe: bool = False,
     ) -> None:
         ndim = 3
-        self._order, self._output_shape, self._scale, self._corner_safe = check_input(
-            order, output_shape, scale, corner_safe, ndim
+        self._order, self._output_shape, self._scale = check_input(
+            order, output_shape, scale, ndim
         )
+        self._corner_safe = corner_safe
 
     @property
     @abstractmethod
@@ -108,7 +107,7 @@ class LoaderBase(ABC):
 
     @property
     def corner_safe(self) -> bool:
-        """Whether rotation is corner-safe."""
+        """Return whether the loader is corner-safe."""
         return self._corner_safe
 
     @abstractmethod
@@ -145,7 +144,6 @@ class LoaderBase(ABC):
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset | None = None,
         order: int | None = None,
         scale: float | None = None,
-        corner_safe: bool | None = None,
     ) -> Self:
         """Return a new loader with updated attributes."""
 
@@ -389,13 +387,10 @@ class LoaderBase(ABC):
         subtomogram loader object
             A loader instance of the same type with updated molecules.
         """
-        _backend = backend or Backend()
-        max_shifts = _normalize_max_shifts(max_shifts)
-
         model = alignment_model(
             self.normalize_template(template, allow_multiple=True),
             self.normalize_mask(mask),
-            **align_kwargs,
+            **self._update_align_kwargs(align_kwargs),
         )
         if model.has_hetero_templates:
             return self.align_multi_templates(
@@ -407,38 +402,11 @@ class LoaderBase(ABC):
                 **align_kwargs,
             )
 
-        _max_shifts_px = tuple(np.asarray(max_shifts) / self.scale)
-        tasks = self.construct_mapping_tasks(
-            model.align,
-            max_shifts=_max_shifts_px,
-            output_shape=model.input_shape,
-            backend=_backend,
-            var_kwarg=dict(
-                quaternion=self.molecules.quaternion(),
-                pos=self.molecules.pos / self.scale,
-            ),
-        )
+        _backend = backend or Backend()
+        max_shifts = _misc.normalize_max_shifts(max_shifts)
+        tasks = self._prep_align_tasks(model, max_shifts, _backend)
         all_results = tasks.compute()
         return self._post_align(all_results, model.input_shape)
-
-    def _post_align(
-        self,
-        results: list[AlignmentResult],
-        shape: tuple[int, int, int],
-    ) -> Self:
-        local_shifts, local_rot, scores = _misc.allocate(len(results))
-        for i, result in enumerate(results):
-            _, loc_shift, local_rot[i], scores[i] = result
-            local_shifts[i] = loc_shift * self.scale
-
-        rotator = Rotation.from_quat(local_rot)
-        mole_aligned = self.molecules.linear_transform(local_shifts, rotator)
-
-        mole_aligned.features = self.molecules.features.with_columns(
-            _misc.get_feature_list(scores, local_shifts, rotator.as_rotvec()),
-        )
-
-        return self.replace(molecules=mole_aligned, output_shape=shape)
 
     def align_no_template(
         self,
@@ -524,8 +492,6 @@ class LoaderBase(ABC):
         subtomogram loader object
             A loader instance of the same type with updated molecules.
         """
-        _backend = backend or Backend()
-        _max_shifts_px = np.asarray(max_shifts) / self.scale
 
         if isinstance(templates, ImageProvider):
             _templates = templates(self.scale)
@@ -534,53 +500,14 @@ class LoaderBase(ABC):
         model = alignment_model(
             template=_templates,
             mask=self.normalize_mask(mask),
-            **align_kwargs,
+            **self._update_align_kwargs(align_kwargs),
         )
-        tasks = self.construct_mapping_tasks(
-            model.align,
-            max_shifts=_max_shifts_px,
-            output_shape=model.input_shape,
-            backend=_backend,
-            var_kwarg=dict(
-                quaternion=self.molecules.quaternion(),
-                pos=self.molecules.pos / self.scale,
-            ),
-        )
+        tasks = self._prep_align_multi_templates(model, max_shifts, backend)
         all_results = tasks.compute()
-        if isinstance(model, RotationImplemented) and model._n_rotations > 1:
-            remainder = len(_templates)
-        else:
-            remainder = -1
+        remainder = model.remainder()
         return self._post_align_multi_templates(
             all_results, model.input_shape, remainder, label_name
         )
-
-    def _post_align_multi_templates(
-        self,
-        results: list[AlignmentResult],
-        shape: tuple[int, int, int],
-        remainder: int = -1,
-        label_name: str = "labels",
-    ):
-        local_shifts, local_rot, scores = _misc.allocate(len(results))
-        labels = np.zeros(len(results), dtype=np.uint32)
-        for i, result in enumerate(results):
-            labels[i], loc_shift, local_rot[i], scores[i] = result
-            local_shifts[i] = loc_shift * self.scale
-
-        rotator = Rotation.from_quat(local_rot)
-        mole_aligned = self.molecules.linear_transform(local_shifts, rotator)
-
-        if remainder > 1:
-            labels %= remainder  # type: ignore
-        labels = labels.astype(np.uint8)
-
-        feature_list = _misc.get_feature_list(scores, local_shifts, rotator.as_rotvec())
-        mole_aligned.features = self.molecules.features.with_columns(
-            feature_list + [pl.Series(label_name, labels)]
-        )
-
-        return self.replace(molecules=mole_aligned, output_shape=shape)
 
     def construct_landscape(
         self,
@@ -605,13 +532,13 @@ class LoaderBase(ABC):
             each molecules, M is the number of created template images, and Nz, Ny and
             Nx is the up-sampled shape of search range.
         """
-        max_shifts = _normalize_max_shifts(max_shifts)
+        max_shifts = _misc.normalize_max_shifts(max_shifts)
         _max_shifts_px = tuple(np.asarray(max_shifts) / self.scale)
 
         model = alignment_model(
             self.normalize_template(template, allow_multiple=True),
             self.normalize_mask(mask),
-            **align_kwargs,
+            **self._update_align_kwargs(align_kwargs),
         )
 
         if model.is_multi_templates:
@@ -643,7 +570,7 @@ class LoaderBase(ABC):
         mask: MaskInputType = None,
         alignment_model: type[BaseAlignmentModel] | AlignmentFactory = ZNCCAlignment,
         **align_kwargs,
-    ) -> list[NDArray[np.float32]]:
+    ) -> NDArray[np.float32]:
         """Calculate the score of subtomograms against the template image.
 
         This method internally calls the ``score`` method of the input alignment model.
@@ -661,15 +588,16 @@ class LoaderBase(ABC):
 
         Returns
         -------
-        list of np.ndarray
-            1D arrays of scores.
+        np.ndarray
+            2D arrays of scores, where score[i, j] is the score of the i-th template
+            for the j-th subtomogram.
         """
         tasks: list[DaskTaskList[float]] = []
         for template in templates:
             model = alignment_model(
                 self.normalize_template(template),
                 self.normalize_mask(mask),
-                **align_kwargs,
+                **self._update_align_kwargs(align_kwargs),
             )
             task = self.construct_mapping_tasks(
                 model.score,
@@ -681,7 +609,7 @@ class LoaderBase(ABC):
             )
             tasks.append(task)
         out = compute(tasks)
-        return [np.array(r, dtype=np.float32) for r in out]
+        return np.array(out, dtype=np.float32)
 
     def apply(
         self,
@@ -866,8 +794,6 @@ class LoaderBase(ABC):
         cutoff: float = 0.5,
         n_components: int = 2,
         n_clusters: int = 2,
-        tilt: tuple[float, float] | None = None,
-        tilt_range=None,
         seed: int = 0,
         label_name: str = "cluster",
     ) -> ClassificationResult:
@@ -918,30 +844,17 @@ class LoaderBase(ABC):
 
         if template is None:
             template = self.average(shape)
-        if tilt_range is not None:
-            warnings.warn(
-                "tilt_range is deprecated. Use tilt instead",
-                DeprecationWarning,
-            )
-            tilt = tilt_range
-        model = ZNCCAlignment(template, _mask, cutoff=cutoff, tilt=tilt)
+        stack = self._prep_classify_stack(template, mask, cutoff, shape)
 
-        # PCA requires aggregation along the first axis.
-        # Rechunk to improve performance.
-        stack = (
-            self.iter_mapping_tasks(
-                model.masked_difference,
-                output_shape=shape,
-                var_kwarg=dict(quaternion=self.molecules.quaternion()),
-            )
-            .tolist()
-            .tostack(shape=shape, dtype=np.float32)
-            .rechunk(("auto",) + shape)  # type: ignore
-        )
-
+        if callable(_mask):
+            mask_arr = _mask(template)
+        else:
+            mask_arr = _mask
         clf = PcaClassifier(
-            stack,
-            model.mask,
+            # PCA requires aggregation along the first axis. Rechunk to improve
+            # performance.
+            stack.rechunk(("auto",) + shape),
+            mask_arr,
             n_components=n_components,
             n_clusters=n_clusters,
             seed=seed,
@@ -1094,6 +1007,120 @@ class LoaderBase(ABC):
                 raise TypeError("Cannot determine mask array without template.")
             return None, _mask
 
+    def _prep_align_tasks(
+        self,
+        model: BaseAlignmentModel,
+        max_shifts: nm | tuple[nm, nm, nm],
+        backend: Backend,
+    ) -> DaskTaskList[AlignmentResult]:
+        _max_shifts_px = tuple(np.asarray(max_shifts) / self.scale)
+        return self.construct_mapping_tasks(
+            model.align,
+            max_shifts=_max_shifts_px,
+            output_shape=model.input_shape,
+            backend=backend,
+            var_kwarg=dict(
+                quaternion=self.molecules.quaternion(),
+                pos=self.molecules.pos / self.scale,
+            ),
+        )
+
+    def _post_align(
+        self,
+        results: list[AlignmentResult],
+        shape: tuple[int, int, int],
+    ) -> Self:
+        local_shifts, local_rot, scores = _misc.allocate(len(results))
+        for i, result in enumerate(results):
+            _, loc_shift, local_rot[i], scores[i] = result
+            local_shifts[i] = loc_shift * self.scale
+
+        rotator = Rotation.from_quat(local_rot)
+        mole_aligned = self.molecules.linear_transform(local_shifts, rotator)
+
+        mole_aligned.features = self.molecules.features.with_columns(
+            _misc.get_feature_list(scores, local_shifts, rotator.as_rotvec()),
+        )
+
+        return self.replace(molecules=mole_aligned, output_shape=shape)
+
+    def _prep_align_multi_templates(
+        self,
+        model: BaseAlignmentModel,
+        max_shifts: nm | tuple[nm, nm, nm],
+        backend: Backend | None = None,
+    ) -> DaskTaskList[AlignmentResult]:
+        """Prepare the alignment tasks for multiple templates."""
+        _max_shifts_px = np.asarray(max_shifts) / self.scale
+        return self.construct_mapping_tasks(
+            model.align,
+            max_shifts=_max_shifts_px,
+            output_shape=model.input_shape,
+            backend=backend,
+            var_kwarg=dict(
+                quaternion=self.molecules.quaternion(),
+                pos=self.molecules.pos / self.scale,
+            ),
+        )
+
+    def _post_align_multi_templates(
+        self,
+        results: list[AlignmentResult],
+        shape: tuple[int, int, int],
+        remainder: int = -1,
+        label_name: str = "labels",
+    ):
+        local_shifts, local_rot, scores = _misc.allocate(len(results))
+        labels = np.zeros(len(results), dtype=np.uint32)
+        for i, result in enumerate(results):
+            labels[i], loc_shift, local_rot[i], scores[i] = result
+            local_shifts[i] = loc_shift * self.scale
+
+        rotator = Rotation.from_quat(local_rot)
+        mole_aligned = self.molecules.linear_transform(local_shifts, rotator)
+
+        if remainder > 1:
+            labels %= remainder  # type: ignore
+        labels = labels.astype(np.uint8)
+
+        feature_list = _misc.get_feature_list(scores, local_shifts, rotator.as_rotvec())
+        mole_aligned.features = self.molecules.features.with_columns(
+            feature_list + [pl.Series(label_name, labels)]
+        )
+
+        return self.replace(molecules=mole_aligned, output_shape=shape)
+
+    def _default_align_kwargs(self) -> dict[str, Any]:
+        """Return default keyword arguments for alignment."""
+        return {}
+
+    def _update_align_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Update default keyword arguments for alignment."""
+        align_kwargs = self._default_align_kwargs()
+        align_kwargs.update(kwargs)
+        return align_kwargs
+
+    def _prep_classify_stack(
+        self,
+        template: TemplateInputType,
+        mask: MaskInputType,
+        cutoff: float = 1.0,
+        shape: tuple[int, int, int] | None = None,
+    ):
+        model = ZNCCAlignment(template, mask, cutoff=cutoff)
+        return (
+            self.iter_mapping_tasks(
+                model.masked_difference,
+                output_shape=shape,
+                var_kwarg={
+                    "quaternion": self.molecules.quaternion(),
+                    "pos": self.molecules.pos / self.scale,
+                },
+            )
+            .tolist()
+            .tostack(shape=shape, dtype=np.float32)
+        )
+
 
 class ClassificationResult(NamedTuple):
     """Tuple of classification results."""
@@ -1114,9 +1141,8 @@ def check_input(
     order: int,
     output_shape: pixel | tuple[pixel, pixel, pixel] | Unset,
     scale: float,
-    corner_safe: bool,
     ndim: int,
-):
+) -> tuple[int, Unset | tuple[pixel, pixel, pixel], float]:
     # check interpolation order
     if order not in (0, 1, 3):
         raise ValueError(
@@ -1136,22 +1162,10 @@ def check_input(
     if _scale <= 0:
         raise ValueError("Negative scale is not allowed.")
 
-    _corner_safe = bool(corner_safe)
-    return order, _output_shape, _scale, _corner_safe
+    return order, _output_shape, _scale
 
 
 def _is_iterable_of_funcs(x: Any) -> TypeGuard[Iterable[AggFunction]]:
     if not hasattr(x, "__iter__"):
         return False
     return all(callable(f) for f in x)
-
-
-def _normalize_max_shifts(x: nm | tuple[nm, nm, nm]) -> tuple[nm, nm, nm]:
-    if hasattr(x, "__iter__"):
-        tup = tuple(float(x0) for x0 in x)  # type: ignore
-        if len(tup) != 3:
-            raise ValueError(
-                "max_shifts must be a 3-tuple if multiple values are given."
-            )
-        return tup
-    return (float(x),) * 3  # type: ignore
