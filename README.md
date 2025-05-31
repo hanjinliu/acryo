@@ -46,6 +46,7 @@ from acryo.pipe import soft_otsu  # data input pipelines
 loader = SubtomogramLoader.imread(
     "path/to/tomogram.mrc",
     molecules=Molecules.from_csv("path/to/molecules.csv"),
+    tilt=single_axis((-45, 45), axis="y"),  # range of tilt series degrees.
 )
 
 # filter out bad alignment in polars way
@@ -58,7 +59,6 @@ avg = loader_filt.average(output_shape=(48, 48, 48))
 aligned_loader = loader.align(
     template=avg,                           # use the average as template
     mask=soft_otsu(sigma=2, radius=2),      # apply soft-Otsu to template to make the mask
-    tilt=single_axis((-45, 45), axis="y"),  # range of tilt series degrees.
     cutoff=0.5,                             # lowpass filtering cutoff
     max_shifts=(4, 4, 4),                   # search space limits
 )

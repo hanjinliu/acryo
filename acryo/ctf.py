@@ -1,49 +1,10 @@
 from __future__ import annotations
-from abc import ABC, abstractmethod
 
 import numpy as np
 from numpy.typing import NDArray
 from dataclasses import dataclass
 from acryo._typed_scipy import fftn, ifftn
 from acryo._types import nm
-
-
-class BaseCTFModel(ABC):
-    @abstractmethod
-    def simulate(self, freq):
-        """Simulate the CTF for the given frequency."""
-
-
-class NoCTF(BaseCTFModel):
-    """A no-op CTF model that returns 1 for all frequencies."""
-
-    def simulate(self, freq):
-        """Return 1 for all frequencies."""
-        return np.ones_like(freq, dtype=np.float32)
-
-    def simulate_image(
-        self,
-        shape: tuple[int, int],
-        scale: nm,
-    ) -> NDArray[np.floating]:
-        """Return an array of ones with the given shape."""
-        return np.ones(shape, dtype=np.float32)
-
-    def apply_ctf(
-        self,
-        img: NDArray[np.floating],
-        scale: nm,
-    ) -> NDArray[np.floating]:
-        """Return the image as is, since there is no CTF to apply."""
-        return img
-
-    def phase_flip(
-        self,
-        img: NDArray[np.floating],
-        scale: nm,
-    ) -> NDArray[np.floating]:
-        """Return the image as is, since there is no CTF to apply."""
-        return img
 
 
 @dataclass
