@@ -338,7 +338,7 @@ class TomogramSimulator:
             coords = np.stack((ycoords, xcoords), axis=1)
             glob_rotator = axes_to_rotator(cross(ex, ey), ey)
             for i, yx in enumerate(coords):
-                pool.add_task(yx, shape, img, mol.rotator[i], glob_rotator)
+                pool.add_task(yx, shape, img, mol.rotator[i], glob_rotator, self.order)
 
         results = pool.compute()
         for sl, img_fragment in results:
@@ -581,7 +581,7 @@ def _simulate_projection_one(
     image: NDArray[np.float32],
     rotator: Rotation,
     glob_rotator: Rotation,
-    order: int,
+    order: int = 3,
 ) -> tuple[tuple[slice, slice], NDArray[np.float32] | None]:
     proj_shape = np.array(image.shape[1:], dtype=np.int32)
     min_ = yx - proj_shape.astype(np.float32) / 2 + 0.5
