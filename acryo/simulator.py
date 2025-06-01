@@ -20,7 +20,7 @@ from acryo import _utils
 from acryo.molecules import Molecules, axes_to_rotator
 from acryo.pipe._classes import ImageProvider
 from acryo._types import nm, pixel
-from acryo._dask import DaskTaskPool
+from acryo._dask import DaskTaskPool, NestedDaskTaskList
 from acryo._typed_scipy import spline_filter, affine_transform
 
 if TYPE_CHECKING:
@@ -374,24 +374,27 @@ class TomogramSimulator:
         ntilt = len(rads)
         ey = np.array([0, 1, 0], dtype=np.float32)
         rc = (np.array(shape, dtype=np.float32) / 2 - 0.5) * self.scale
-        tilt_series = np.zeros((ntilt, shape[1], shape[2]), dtype=np.float32)
-        pool = DaskTaskPool.from_func(_simulate_projection_one_labeled)
-        for i, rad in enumerate(rads):
-            ex = np.array([np.sin(rad), 0, np.cos(rad)], dtype=np.float32)
-            for mol, image in self._components.values():
-                img = self._get_image(image)
-                pos_scaled = (mol.pos - rc) / self.scale
+        pools = [DaskTaskPool.from_func(_simulate_projection_one) for _ in range(ntilt)]
+        for mol, image in self._components.values():
+            img = self._get_image(image)
+            pos_scaled = (mol.pos - rc) / self.scale
+            ycoords = pos_scaled.dot(ey) + (shape[1] - 1) / 2
+            for i, rad in enumerate(rads):
+                ex = np.array([np.sin(rad), 0, np.cos(rad)], dtype=np.float32)
                 xcoords = pos_scaled.dot(ex) + (shape[2] - 1) / 2
-                ycoords = pos_scaled.dot(ey) + (shape[1] - 1) / 2
                 coords = np.stack((ycoords, xcoords), axis=1)
                 glob_rotator = axes_to_rotator(cross(ex, ey), ey)
                 for ci, yx in enumerate(coords):
-                    pool.add_task(yx, shape[1:], img, mol.rotator[ci], glob_rotator, i)
+                    pools[i].add_task(
+                        yx, shape[1:], img, mol.rotator[ci], glob_rotator, self.order
+                    )
 
-        results = pool.compute()
-        for sl, img_fragment in results:
-            if img_fragment is not None:
-                tilt_series[sl] += img_fragment
+        results_list = NestedDaskTaskList(pools).compute()
+        tilt_series = np.zeros((ntilt, shape[1], shape[2]), dtype=np.float32)
+        for i, results in enumerate(results_list):
+            for sl, img_fragment in results:
+                if img_fragment is not None:
+                    tilt_series[i, sl[0], sl[1]] += img_fragment
 
         return tilt_series
 
@@ -481,6 +484,8 @@ def _prep_slices(
             sl_dst_list.append(_sl)
             if _out_of_bound:
                 s0, s1 = _pads
+                if s0 == tsize - s1:
+                    return (slice(None),), None
                 sl_src_list.append(slice(s0, tsize - s1))
             else:
                 sl_src_list.append(slice(None))
@@ -576,6 +581,7 @@ def _simulate_projection_one(
     image: NDArray[np.float32],
     rotator: Rotation,
     glob_rotator: Rotation,
+    order: int,
 ) -> tuple[tuple[slice, slice], NDArray[np.float32] | None]:
     proj_shape = np.array(image.shape[1:], dtype=np.int32)
     min_ = yx - proj_shape.astype(np.float32) / 2 + 0.5
@@ -587,6 +593,21 @@ def _simulate_projection_one(
     if sl_dst is None:
         return (slice(None), slice(None)), None
 
+    proj = _project_template(
+        image, sl_src, min_, int_min_, rotator, glob_rotator, order=order
+    )
+    return sl_dst, proj
+
+
+def _project_template(
+    image: NDArray[np.float32],
+    sl_src: tuple[slice, slice],
+    min_,
+    int_min_: NDArray[np.int32],
+    rotator: Rotation,
+    glob_rotator: Rotation,
+    order: int = 3,
+):
     center = np.array(image.shape) / 2 - 0.5
     residue = np.array([0, *(min_ - int_min_)])
     mtx = _compose_affine_matrices(
@@ -594,22 +615,10 @@ def _simulate_projection_one(
     )[0]
 
     transformed = affine_transform(
-        image, mtx, mode="constant", cval=0.0, order=3, prefilter=False
+        image, mtx, mode="constant", cval=0.0, order=order, prefilter=False
     )
     projection: NDArray[np.float32] = np.sum(transformed, axis=0)
-    return sl_dst, projection[sl_src]
-
-
-def _simulate_projection_one_labeled(
-    yx: NDArray[np.float32],
-    shape: tuple[int, int],
-    image: NDArray[np.float32],
-    rotator: Rotation,
-    glob_rotator: Rotation,
-    idx: int,
-) -> tuple[tuple[int, slice, slice], NDArray[np.float32] | None]:
-    sl, img = _simulate_projection_one(yx, shape, image, rotator, glob_rotator)
-    return (idx,) + sl, img
+    return projection[sl_src]
 
 
 def cross(x: np.ndarray, y: np.ndarray, axis=None) -> np.ndarray:
