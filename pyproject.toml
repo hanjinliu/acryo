@@ -20,7 +20,7 @@ authors = [
     { name = "Hanjin Liu", email = "liuhanjin-sc@g.ecc.u-tokyo.ac.jp" },
 ]
 dependencies = [
-    "dask>=2021.6.0",
+    "dask>=2021.6.0,<2025.0.0",  # >=2025 is very slow for some reason
     "numpy>=1.21",
     "polars>=0.19.19,!=0.20.23",
     "scipy>=1.11.1",
