@@ -5,6 +5,7 @@ from numpy.typing import NDArray
 from dataclasses import dataclass
 from acryo._typed_scipy import fftn, ifftn
 from acryo._types import nm
+from acryo.deconv import wiener_deconv
 
 
 @dataclass
@@ -83,6 +84,26 @@ class CTFModel:
         lmd = self.wave_length / 10
         wave_aberration = np.pi * lmd * defocus * f2 - np.pi / 2 * cs * lmd**3 * f2**2
         return np.sin(wave_aberration) * np.exp(-self.bfactor * f2 / 4)
+
+    def deconvolve(
+        self,
+        img: NDArray[np.float32],
+        scale: float,
+        snr_falloff: float = 1.0,
+        deconv_strength: float = 1.0,
+        highpass_nyquist: float = 0.02,
+        phaseflipped: bool = False,
+    ) -> NDArray[np.float32]:
+        """Deconvolve the image using Wiener deconvolution."""
+        return wiener_deconv(
+            img,
+            scale,
+            ctf_model=self,
+            snr_falloff=snr_falloff,
+            deconv_strength=deconv_strength,
+            highpass_nyquist=highpass_nyquist,
+            phaseflipped=phaseflipped,
+        )
 
 
 def _voltage_to_wave_length(kv: float) -> float:
