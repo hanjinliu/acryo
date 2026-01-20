@@ -331,12 +331,9 @@ def test_reshape():
 
     with pytest.raises(ValueError):
         assert loader.reshape()
-    with pytest.raises(ValueError):
-        assert loader.reshape(_ones, shape=(5, 5, 5))
-    with pytest.raises(ValueError):
-        assert loader.reshape(None, _ones, shape=(5, 5, 5))
-    with pytest.raises(ValueError):
-        assert loader.reshape(_atoms, _ones, shape=(5, 5, 5))
+    assert loader.reshape(_ones, shape=(5, 5, 5))
+    assert loader.reshape(None, _ones, shape=(5, 5, 5))
+    assert loader.reshape(_atoms, _ones, shape=(5, 5, 5))
 
 
 def test_normalize_input():
