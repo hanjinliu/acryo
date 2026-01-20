@@ -1,15 +1,14 @@
 # pyright: reportPrivateImportUsage=false
 from __future__ import annotations
 
-import warnings
-from typing import Callable, Sequence, TYPE_CHECKING, TypeVar
-from functools import lru_cache, reduce, wraps
+from typing import Sequence, TYPE_CHECKING
+from functools import lru_cache, reduce
 
 import numpy as np
 from numpy.typing import NDArray
 from dask import array as da
 from scipy.spatial.transform import Rotation
-from acryo._typed_scipy import fftn, rfftn, irfftn, sum_labels
+from acryo._typed_scipy import fftn, rfftn, irfftn, sum_labels, map_coordinates
 
 if TYPE_CHECKING:
     from acryo._types import degree
@@ -384,21 +383,18 @@ def nd_butterworth_weight(
     return wfilt
 
 
-_F = TypeVar("_F", bound=Callable)
-
-
-def deprecated_kwarg(old: str, new: str) -> Callable[[_F], _F]:
-    def _inner(f):
-        @wraps(f)
-        def _func(*args, **kwargs):
-            if old in kwargs:
-                warnings.warn(
-                    f"`{old}` is deprecated, use `{new}` instead",
-                    DeprecationWarning,
-                )
-                kwargs[new] = kwargs.pop(old)
-            return f(*args, **kwargs)
-
-        return _func
-
-    return _inner  # type: ignore
+def reshape_image(
+    img: NDArray[np.float32], new_shape: tuple[int, int, int]
+) -> NDArray[np.float32]:
+    """Reshape an image to a new shape by cropping or padding with zeros."""
+    old_shape = img.shape
+    old_center = np.array(old_shape) / 2 - 0.5
+    new_center = np.array(new_shape) / 2 - 0.5
+    center_shift = new_center - old_center
+    zz, yy, xx = np.indices(new_shape, dtype=np.float32)
+    zz = zz - center_shift[0]
+    yy = yy - center_shift[1]
+    xx = xx - center_shift[2]
+    coords = np.stack([zz, yy, xx], axis=0)
+    reshaped = map_coordinates(img, coords, order=1, mode="constant", cval=0.0)
+    return reshaped

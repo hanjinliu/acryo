@@ -6,6 +6,7 @@ from typing_extensions import Self
 import numpy as np
 from numpy.typing import NDArray
 from acryo._types import nm
+from acryo._utils import reshape_image
 
 _R = TypeVar("_R", np.ndarray, "list[np.ndarray]")
 
@@ -145,12 +146,10 @@ class ImageConverter(_Pipeline):
         return self.convert(image, scale)
 
     @overload
-    def compose(self, other: ImageProvider) -> ImageProvider:
-        ...
+    def compose(self, other: ImageProvider) -> ImageProvider: ...
 
     @overload
-    def compose(self, other: ImageConverter) -> ImageConverter:
-        ...
+    def compose(self, other: ImageConverter) -> ImageConverter: ...
 
     def compose(self, other):
         """Function composition"""
@@ -165,12 +164,15 @@ class ImageConverter(_Pipeline):
     __matmul__ = compose
 
     def with_scale(
-        self, scale: nm
+        self, scale: nm, *, reshape_to: tuple[int, int, int] | None = None
     ) -> Callable[[NDArray[np.float32]], NDArray[np.float32]]:
         """Partialize converter with a given scale."""
 
         def fn(img: NDArray[np.float32]) -> NDArray[np.float32]:
-            return self(img, scale)
+            arr = self(img, scale)
+            if reshape_to is not None:
+                arr = reshape_image(arr, reshape_to)
+            return arr
 
         fn.__name__ = self._func.__name__
         return fn
