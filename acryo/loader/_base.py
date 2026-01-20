@@ -387,9 +387,11 @@ class LoaderBase(ABC):
         subtomogram loader object
             A loader instance of the same type with updated molecules.
         """
+        template_ = self.normalize_template(template, allow_multiple=True)
+        shape = template_[0].shape if isinstance(template_, list) else template_.shape
         model = alignment_model(
-            self.normalize_template(template, allow_multiple=True),
-            self.normalize_mask(mask),
+            template_,
+            self.normalize_mask(mask, reshape_to=shape),
             **self._update_align_kwargs(align_kwargs),
         )
         if model.has_hetero_templates:
@@ -535,9 +537,11 @@ class LoaderBase(ABC):
         max_shifts = _misc.normalize_max_shifts(max_shifts)
         _max_shifts_px = tuple(np.asarray(max_shifts) / self.scale)
 
+        template_ = self.normalize_template(template, allow_multiple=True)
+        shape = template_[0].shape if isinstance(template_, list) else template_.shape
         model = alignment_model(
             self.normalize_template(template, allow_multiple=True),
-            self.normalize_mask(mask),
+            self.normalize_mask(mask, reshape_to=shape),
             **self._update_align_kwargs(align_kwargs),
         )
 
@@ -594,9 +598,10 @@ class LoaderBase(ABC):
         """
         tasks: list[DaskTaskList[float]] = []
         for template in templates:
+            template_ = self.normalize_template(template)
             model = alignment_model(
                 self.normalize_template(template),
-                self.normalize_mask(mask),
+                self.normalize_mask(mask, reshape_to=template_.shape),
                 **self._update_align_kwargs(align_kwargs),
             )
             task = self.construct_mapping_tasks(
@@ -744,17 +749,20 @@ class LoaderBase(ABC):
         --------
         fsc
         """
+        output_shape = self.output_shape
         if mask is None or isinstance(mask, ImageConverter):
             _mask = 1.0
-            output_shape = self.output_shape
             if isinstance(output_shape, Unset):
                 raise TypeError("Output shape is unknown.")
-        elif isinstance(mask, ImageProvider):
-            _mask = mask(self.scale)
-            output_shape = _mask.shape
         else:
-            _mask = mask
-            output_shape = mask.shape
+            if isinstance(mask, ImageProvider):
+                _mask = mask(self.scale)
+            else:
+                _mask = mask
+            if isinstance(output_shape, Unset):
+                output_shape = _mask.shape
+            else:
+                _mask = _utils.reshape_image(_mask, output_shape)
 
         if n_set <= 0:
             raise ValueError("'n_set' must be positive.")
@@ -830,20 +838,17 @@ class LoaderBase(ABC):
         """
         from acryo.classification import PcaClassifier
 
-        if template is not None:
-            template = self.normalize_template(template)
-        _mask = self.normalize_mask(mask)
-        if isinstance(_mask, np.ndarray):
-            shape = _mask.shape
-        elif isinstance(template, np.ndarray):
-            shape = template.shape
-        elif isinstance(self.output_shape, Unset):
-            raise ValueError("Cannot determine output shape.")
-        else:
-            shape = self.output_shape
-
         if template is None:
+            if isinstance(mask, np.ndarray):
+                shape = mask.shape
+            elif isinstance(shape := self.output_shape, Unset):
+                raise ValueError("Cannot determine output shape.")
             template = self.average(shape)
+        else:
+            template = self.normalize_template(template)
+            shape = template.shape
+
+        _mask = self.normalize_mask(mask, reshape_to=shape)
         stack = self._prep_classify_stack(template, mask, cutoff, shape)
 
         if callable(_mask):
@@ -871,23 +876,25 @@ class LoaderBase(ABC):
         template: TemplateInputType | None = None,
         mask: MaskInputType = None,
         shape: tuple[int, int, int] | None = None,
+        *,
+        priority: tuple[int, int, int] = (1, 0, 2),
     ) -> Self:
         """Return a new loader with appropriate output shape."""
-        shapes: set[tuple[int, ...]] = set()
+        shapes: list[tuple[int, tuple[int, ...]]] = []
+        pt, pm, pi = priority
         if template is not None:
-            shapes.add(self.normalize_template(template).shape)
+            shapes.append((pt, self.normalize_template(template).shape))
         if mask is not None:
             if isinstance(mask, np.ndarray):
-                shapes.add(mask.shape)
+                shapes.append((pm, mask.shape))
             elif isinstance(mask, ImageProvider):
-                shapes.add(mask(self.scale).shape)
+                shapes.append((pm, mask(self.scale).shape))
         if shape is not None:
-            shapes.add(shape)
+            shapes.append((pi, shape))
         if len(shapes) == 0:
             raise ValueError("Cannot infer shape from the input.")
-        elif len(shapes) > 1:
-            raise ValueError("Inconsistent shapes.")
-        return self.replace(output_shape=shapes.pop())  # type: ignore
+        shapes.sort(key=lambda x: x[0])  # sort by priority
+        return self.replace(output_shape=shapes[-1][1])  # type: ignore
 
     def head(self, n: int = 10) -> Self:
         """Return a new loader with the first n molecules."""
@@ -968,16 +975,31 @@ class LoaderBase(ABC):
             return [self.normalize_template(t, allow_multiple=False) for t in template]
         raise TypeError(f"Invalid template type: {type(template)}")
 
-    def normalize_mask(self, mask: MaskInputType) -> MaskType:
-        """Resolve any mask input type to a 3D array."""
-        if isinstance(mask, np.ndarray) or mask is None:
+    def normalize_mask(
+        self,
+        mask: MaskInputType,
+        reshape_to: tuple[pixel, pixel, pixel] | None = None,
+    ) -> MaskType:
+        """Resolve any mask input type to a 3D array.
+
+        If `reshape_to` is given, the resulting mask array will be cropped or padded
+        to match the given shape.
+        """
+        if mask is None:
             return mask
+        if isinstance(mask, np.ndarray):
+            mask_arr = mask
+            if reshape_to:
+                mask_arr = _utils.reshape_image(mask_arr, reshape_to)
         elif isinstance(mask, ImageProvider):
-            out = mask(self.scale)
-            return np.asarray(out, dtype=np.float32)
+            mask_arr = np.asarray(mask(self.scale), dtype=np.float32)
+            if reshape_to:
+                mask_arr = _utils.reshape_image(mask_arr, reshape_to)
         elif isinstance(mask, ImageConverter):
-            return mask.with_scale(self.scale)
-        raise TypeError(f"Invalid mask type: {type(mask)}")
+            mask_arr = mask.with_scale(self.scale, reshape_to=reshape_to)
+        else:
+            raise TypeError(f"Invalid mask type: {type(mask)}")
+        return mask_arr
 
     @overload
     def normalize_input(
@@ -997,7 +1019,7 @@ class LoaderBase(ABC):
         """Resolve any template and mask input types to 3D arrays."""
         if template is not None:
             _template = self.normalize_template(template)
-            _mask = self.normalize_mask(mask)
+            _mask = self.normalize_mask(mask, reshape_to=_template.shape)
             if callable(_mask):
                 _mask = _mask(_template)
             return _template, _mask

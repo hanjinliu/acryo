@@ -70,13 +70,41 @@ class BatchLoader(LoaderBase):
 
     @property
     def loaders(self) -> LoaderAccessor:
-        """Interface to access the subtomogram loaders."""
+        """Interface to access the subtomogram loaders.
+
+        Examples
+        --------
+        1. Get the loader for image ID 1
+
+            ```python
+            batch_loader.loaders[1]
+            ```
+
+        2. Iterate over all loaders
+
+            ```python
+            for loader in batch_loader.loaders:
+                ...  # do something with loader
+            ```
+
+        3. Iterate over all loaders with image IDs
+
+            ```python
+            for img_id, loader in batch_loader.iter_loaders():
+                ...  # do something with loader
+            ```
+        """
         return LoaderAccessor(self)
 
     @property
     def images(self) -> MappingProxyType:
         """All the images in the collection."""
         return MappingProxyType(self._images)
+
+    @property
+    def tilt_models(self) -> MappingProxyType[Hashable, TomographyInput]:
+        """All the tilt series models in the collection."""
+        return MappingProxyType(self._tilt_models)
 
     def add_tomogram(
         self,
@@ -137,7 +165,12 @@ class BatchLoader(LoaderBase):
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
         corner_safe: bool = False,
     ) -> Self:
-        """Construct a loader from a list of loaders."""
+        """Construct a loader from a list of loaders.
+
+        This method is not safe to use if a `BatchLoader` is split into multiple
+        `SubtomogramLoader`s and then re-constructed using this method, as the image IDs
+        may conflict.
+        """
         self = cls(
             order=order,
             scale=scale,
@@ -366,8 +399,13 @@ class LoaderAccessor:
         return loader
 
     def __iter__(self) -> Iterator[SubtomogramLoader]:
+        for _, loader in self.iter_loaders():
+            yield loader
+
+    def iter_loaders(self) -> Iterator[tuple[Hashable, SubtomogramLoader]]:
+        """Iterate over all loaders with its image ID."""
         ldr = self._get_loader()
-        for key, group in ldr.molecules.groupby(IMAGE_ID_LABEL):
+        for key, group in ldr.molecules.group_by(IMAGE_ID_LABEL):
             image = ldr._images[key]
             tilt_model = ldr._tilt_models.get(key, None)
             loader = SubtomogramLoader(
@@ -379,7 +417,7 @@ class LoaderAccessor:
                 tilt_model=tilt_model,
                 corner_safe=ldr.corner_safe,
             )
-            yield loader
+            yield key, loader
 
     def __len__(self) -> int:
         """Number of loaders."""

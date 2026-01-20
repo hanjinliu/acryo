@@ -987,17 +987,17 @@ class Molecules:
         return self.__class__(pos, Rotation.from_quat(rot), features=feat)
 
     @overload
-    def group_by(self, by: IntoExpr) -> MoleculeGroup[str]: ...
+    def group_by(self, by: IntoExpr) -> MoleculeGroup[Any]: ...
 
     @overload
     def group_by(
         self, by: Sequence[IntoExpr] | tuple[IntoExpr, ...]
-    ) -> MoleculeGroup[tuple[str, ...]]: ...
+    ) -> MoleculeGroup[tuple[Any, ...]]: ...
 
     @overload
     def group_by(
         self, by: IntoExpr, *more_by: IntoExpr
-    ) -> MoleculeGroup[tuple[str, ...]]: ...
+    ) -> MoleculeGroup[tuple[Any, ...]]: ...
 
     def group_by(self, by, *more_by):
         """Group molecules into sub-groups."""

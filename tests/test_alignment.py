@@ -341,7 +341,7 @@ def test_reshape():
 
 def test_normalize_input():
     loader = SubtomogramLoader(tomo, mole, scale=scale)
-    _ones = np.ones((4, 4, 4))
+    _ones = np.ones((4, 4, 4), dtype=np.float32)
     _atoms = pipe.from_atoms(np.array([[0, 0, 1], [1, 0, 0]]))
     _otsu = pipe.soft_otsu()
     loader.normalize_input(_ones, _otsu)
@@ -349,3 +349,18 @@ def test_normalize_input():
     loader.normalize_input(_atoms, None)
     with pytest.raises(TypeError):
         loader.normalize_input(mask=_otsu)
+
+    # unmatched shape
+    t, m = loader.normalize_input(_ones, np.ones((2, 2, 2), dtype=np.float32))
+    assert t.shape == (4, 4, 4)
+    assert m.shape == (4, 4, 4)
+    mask_ans = np.zeros((4, 4, 4), dtype=np.float32)
+    mask_ans[1:3, 1:3, 1:3] = 1
+    assert_allclose(m, mask_ans)
+    t, m = loader.normalize_input(_ones, np.ones((2, 3, 2), dtype=np.float32))
+    assert t.shape == (4, 4, 4)
+    assert m.shape == (4, 4, 4)
+    assert m[0, :, :].sum() == 0
+    assert m[-1, :, :].sum() == 0
+    assert m[:, :, 0].sum() == 0
+    assert m[:, :, -1].sum() == 0
