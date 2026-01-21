@@ -22,6 +22,7 @@ from numpy.typing import NDArray
 from dask import array as da
 from dask.delayed import delayed
 from scipy.spatial.transform import Rotation
+
 import polars as pl
 
 from acryo.alignment import (
@@ -299,6 +300,7 @@ class LoaderBase(ABC):
     def average_split(
         self,
         n_set: int = 1,
+        n_split: int = 2,
         seed: int | None = 0,
         squeeze: bool = True,
         output_shape: _ShapeType = None,
@@ -335,12 +337,9 @@ class LoaderBase(ABC):
         nmole = dsk.shape[0]
         chunksize = ("auto",) + output_shape
         for _ in range(n_set):
-            ind0, ind1 = _misc.random_splitter(rng, nmole)
+            inds = _misc.random_splitter(rng, nmole, n_split)
             _stack = da.stack(
-                [
-                    dsk[ind0].rechunk(chunksize).mean(axis=0),  # type: ignore
-                    dsk[ind1].rechunk(chunksize).mean(axis=0),  # type: ignore
-                ],
+                [dsk[ind].rechunk(chunksize).mean(axis=0) for ind in inds],
                 axis=0,
             )
             tasks.append(_stack)
@@ -409,53 +408,6 @@ class LoaderBase(ABC):
         tasks = self._prep_align_tasks(model, max_shifts, _backend)
         all_results = tasks.compute()
         return self._post_align(all_results, model.input_shape)
-
-    def align_no_template(
-        self,
-        *,
-        mask: MaskInputType = None,
-        max_shifts: nm | tuple[nm, nm, nm] = 1.0,
-        output_shape: _ShapeType = None,
-        alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
-        **align_kwargs,
-    ) -> Self:
-        """Align subtomograms without template image.
-
-        A template-free version of :func:`align`. This method first
-        calculates averaged image and uses it for the alignment template. To
-        avoid loading same subtomograms twice, a memory-mapped array is created
-        internally (so the second subtomogram loading is faster).
-
-        Parameters
-        ----------
-        mask : 3D array, ImageProvider or ImageConverter, optional
-            Mask image. Must in the same shape as the template.
-        max_shifts : int or tuple of int, default is (1., 1., 1.)
-            Maximum shift between subtomograms and template.
-        alignment_model : subclass of BaseAlignmentModel, optional
-            Alignment model class used for subtomogram alignment. By default,
-            ``ZNCCAlignment`` will be used.
-        align_kwargs : optional keyword arguments
-            Additional keyword arguments passed to the input alignment model.
-
-        Returns
-        -------
-        subtomogram loader object
-            A loader instance of the same type with updated molecules.
-        """
-        if output_shape is None and isinstance(mask, np.ndarray):
-            output_shape = mask.shape
-        backend = Backend()
-        template = self.average(output_shape=output_shape, backend=backend)
-        out = self.align(
-            template,
-            mask=mask,
-            max_shifts=max_shifts,
-            alignment_model=alignment_model,
-            backend=backend,
-            **align_kwargs,
-        )
-        return out
 
     def align_multi_templates(
         self,
@@ -769,6 +721,7 @@ class LoaderBase(ABC):
         dfq = 1.5 / min(output_shape) if dfreq is None else dfreq
         halves = self.average_split(
             n_set=n_set,
+            n_split=2,
             seed=seed,
             squeeze=False,
             output_shape=output_shape,
@@ -804,7 +757,7 @@ class LoaderBase(ABC):
         n_clusters: int = 2,
         seed: int = 0,
         label_name: str = "cluster",
-    ) -> ClassificationResult:
+    ) -> PcaClassificationResult:
         """Classify 3D densities by PCA of wedge-masked differences.
 
         Parameters
@@ -869,7 +822,62 @@ class LoaderBase(ABC):
         mole = self.molecules.copy()
         mole.features = mole.features.with_columns(pl.Series(label_name, clf._labels))
         new = self.replace(molecules=mole)
-        return ClassificationResult(new, clf)
+        return PcaClassificationResult(new, clf)
+
+    def iter_classify_em(
+        self,
+        initial_templates: list[TemplateInputType],
+        mask: MaskInputType = None,
+        *,
+        softmax_temperature: float = 0.01,
+        max_niter: int = 20,
+        **align_kwargs,
+    ) -> Iterator[ClassificationResult]:
+        """Run expectation-maximization classification and yields intermediate results.
+
+        This method is a generator that iteratively soft-classifies subtomograms and
+        updates class templates.
+
+        Parameters
+        ----------
+        initial_templates : list of 3D arrays or ImageProvider
+            Initial class template images. If no a-priori template is available, use
+            methods such as `average_split` to generate initial templates.
+        mask : 3D array or ImageProvider, optional
+            Mask image used for scoring.
+        softmax_temperature : float, default is 100.0
+            Temperature parameter for softmax function. Higher values lead to softer
+            classification, which means more uniform weights across classes.
+        max_niter : int, default is 20
+            Maximum number of iterations.
+        """
+        if softmax_temperature <= 0:
+            raise ValueError("softmax_temperature must be positive.")
+        class_templates_ = [self.normalize_template(t) for t in initial_templates]
+        result = ClassificationResult(0, class_templates_)  # initialize
+        task_shape = (len(class_templates_),) + result.input_shape
+        _, mask_ = self.normalize_input(result.concensus_template(), mask)
+        align_kwargs = self._update_align_kwargs(align_kwargs)
+
+        for i in range(max_niter):
+            models = [
+                ZNCCAlignment(template, mask_, **align_kwargs)
+                for template in result.class_templates
+            ]
+            softmax_split = _make_softmax_splitter(models, softmax_temperature)
+            tasks = self.construct_mapping_tasks(
+                softmax_split,
+                output_shape=result.input_shape,
+                var_kwarg=dict(
+                    quaternion=self.molecules.quaternion(),
+                    pos=self.molecules.pos / self.scale,
+                ),
+            )
+            class_templates_ = da.mean(
+                tasks.tostack(task_shape, dtype=np.float32), axis=0
+            ).compute()  # shape: (num_classes, Z, Y, X)
+            result = ClassificationResult(i + 1, list(class_templates_))
+            yield result
 
     def reshape(
         self,
@@ -1144,11 +1152,27 @@ class LoaderBase(ABC):
         )
 
 
-class ClassificationResult(NamedTuple):
-    """Tuple of classification results."""
+class PcaClassificationResult(NamedTuple):
+    """Tuple of PCA classification results."""
 
     loader: LoaderBase
     classifier: PcaClassifier
+
+
+class ClassificationResult(NamedTuple):
+    """Tuple of classification results."""
+
+    num_iter: int
+    class_templates: list[NDArray[np.float32]]
+
+    def concensus_template(self) -> NDArray[np.float32]:
+        """Return the concensus template."""
+        return np.mean(self.class_templates, axis=0)
+
+    @property
+    def input_shape(self) -> tuple[int, int, int]:
+        """Return the input shape of the templates."""
+        return self.class_templates[0].shape
 
 
 class FscTuple(NamedTuple):
@@ -1191,3 +1215,37 @@ def _is_iterable_of_funcs(x: Any) -> TypeGuard[Iterable[AggFunction]]:
     if not hasattr(x, "__iter__"):
         return False
     return all(callable(f) for f in x)
+
+
+def _make_softmax_splitter(models: list[ZNCCAlignment], temp: float = 0.01):
+    def softmax_split(
+        subvolume: NDArray[np.float32],
+        quaternion,
+        pos,
+    ) -> NDArray[np.float32]:
+        # (Z, Y, X) -> (num_classes, Z, Y, X)
+        scores = [model.score(subvolume, quaternion, pos) for model in models]
+        scores_array = np.array(scores)  # shape: (num_classes, )
+        scores_array -= scores_array.mean()
+        probs = 1 / (1 + np.exp(-scores_array / temp))  # sigmoid
+        probs /= probs.sum()  # normalize
+        return np.stack([subvolume * p for p in probs], axis=0)
+
+    return softmax_split
+
+
+def _make_softmax_splitter(models: list[ZNCCAlignment], temp: float = 0.01):
+    def softmax_split(
+        subvolume: NDArray[np.float32],
+        quaternion,
+        pos,
+    ) -> NDArray[np.float32]:
+        # (Z, Y, X) -> (num_classes, Z, Y, X)
+        scores = [model.score(subvolume, quaternion, pos) for model in models]
+        scores_array = np.array(scores)  # shape: (num_classes, )
+        scores_array -= scores_array.mean()
+        probs = 1 / (1 + np.exp(-scores_array / temp))  # sigmoid
+        probs /= probs.sum()  # normalize
+        return np.stack([subvolume * p for p in probs], axis=0)
+
+    return softmax_split

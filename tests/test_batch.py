@@ -106,12 +106,6 @@ def test_construct_landscape():
     assert land.shape == (6, 3, 3, 3)
 
 
-def test_align_no_template():
-    loader = _get_batch_loader()
-    out = loader.replace(output_shape=(3, 3, 3)).align_no_template()
-    assert len(out.molecules) == 6
-
-
 def test_binning():
     loader = _get_batch_loader()
     loader.binning(2)
