@@ -64,8 +64,10 @@ class DaskTaskList(_DaskComputable[_R]):
     def asarrays(self, shape: tuple[int, ...], dtype: type[_D]) -> DaskArrayList[_D]:
         from dask import array as da
 
+        self_id = id(self)
         return DaskArrayList(
-            da.from_delayed(task, shape=shape, dtype=dtype) for task in self._tasks
+            da.from_delayed(task, shape=shape, dtype=dtype, name=f"{self_id}-{i}")
+            for i, task in enumerate(self._tasks)
         )
 
     def tostack(self, shape: tuple[int, ...], dtype: Any, axis: int = 0) -> da.Array:

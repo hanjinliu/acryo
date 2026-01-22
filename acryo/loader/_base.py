@@ -72,13 +72,11 @@ class LoaderBase(ABC):
         order: int = 3,
         scale: nm = 1.0,
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
-        corner_safe: bool = False,
     ) -> None:
         ndim = 3
         self._order, self._output_shape, self._scale = check_input(
             order, output_shape, scale, ndim
         )
-        self._corner_safe = corner_safe
 
     @property
     @abstractmethod
@@ -105,11 +103,6 @@ class LoaderBase(ABC):
     def order(self) -> int:
         """Return the interpolation order."""
         return self._order
-
-    @property
-    def corner_safe(self) -> bool:
-        """Return whether the loader is corner-safe."""
-        return self._corner_safe
 
     @abstractmethod
     def construct_loading_tasks(
@@ -279,7 +272,11 @@ class LoaderBase(ABC):
             yield task.compute()
 
     def average(
-        self, output_shape: _ShapeType = None, *, backend: Backend | None = None
+        self,
+        output_shape: _ShapeType = None,
+        *,
+        chunksize: int | Literal["auto"] = "auto",
+        backend: Backend | None = None,
     ) -> NDArray[np.float32]:
         """Calculate the average of subtomograms.
 
@@ -294,7 +291,7 @@ class LoaderBase(ABC):
         xp = backend or Backend()
         output_shape = self._get_output_shape(output_shape)
         dsk = self.construct_dask(output_shape=output_shape, backend=xp)
-        dsk = dsk.rechunk(("auto",) + output_shape)  # type: ignore
+        dsk = dsk.rechunk((chunksize,) + output_shape)  # type: ignore
         return xp.asnumpy(dsk.mean(axis=0).compute())
 
     def average_split(
@@ -304,6 +301,8 @@ class LoaderBase(ABC):
         seed: int | None = 0,
         squeeze: bool = True,
         output_shape: _ShapeType = None,
+        *,
+        chunksize: int | Literal["auto"] = "auto",
     ) -> NDArray[np.float32]:
         """Split subtomograms into two set and average separately.
 
@@ -335,16 +334,15 @@ class LoaderBase(ABC):
         tasks: list[da.Array] = []
         dsk = self.construct_dask(output_shape=output_shape)
         nmole = dsk.shape[0]
-        chunksize = ("auto",) + output_shape
         for _ in range(n_set):
             inds = _misc.random_splitter(rng, nmole, n_split)
             _stack = da.stack(
-                [dsk[ind].rechunk(chunksize).mean(axis=0) for ind in inds],
+                [dsk[ind].mean(axis=0) for ind in inds],
                 axis=0,
             )
-            tasks.append(_stack)
+            tasks.append(_stack.rechunk((chunksize,) + output_shape))
 
-        out = da.compute(tasks)[0]
+        out = da.compute(*tasks)
         stack = np.stack([backend.asnumpy(a) for a in out], axis=0)
         if squeeze and n_set == 1:
             stack: NDArray[np.float32] = stack[0]
@@ -518,6 +516,10 @@ class LoaderBase(ABC):
             .asarrays(shape=task_shape, dtype=np.float32)
         )
         return da.stack(task_arrays, axis=0)
+
+    def extract_subtomograms(self, save_path) -> LoaderBase:
+        """Create a new loader that directly loads extracted subtomograms."""
+        raise NotImplementedError("Not implemented for this loader type.")
 
     def score(
         self,
@@ -829,7 +831,7 @@ class LoaderBase(ABC):
         initial_templates: list[TemplateInputType],
         mask: MaskInputType = None,
         *,
-        softmax_temperature: float = 0.01,
+        inverse_temperature: float = 100.0,
         max_niter: int = 20,
         **align_kwargs,
     ) -> Iterator[ClassificationResult]:
@@ -845,38 +847,52 @@ class LoaderBase(ABC):
             methods such as `average_split` to generate initial templates.
         mask : 3D array or ImageProvider, optional
             Mask image used for scoring.
-        softmax_temperature : float, default is 100.0
+        inverse_temperature : float, default is 100.0
             Temperature parameter for softmax function. Higher values lead to softer
             classification, which means more uniform weights across classes.
         max_niter : int, default is 20
             Maximum number of iterations.
         """
-        if softmax_temperature <= 0:
-            raise ValueError("softmax_temperature must be positive.")
+        if inverse_temperature <= 0:
+            raise ValueError("inverse_temperature must be positive.")
         class_templates_ = [self.normalize_template(t) for t in initial_templates]
-        result = ClassificationResult(0, class_templates_)  # initialize
-        task_shape = (len(class_templates_),) + result.input_shape
+        result = ClassificationResult(0, class_templates_, None)  # initialize
         _, mask_ = self.normalize_input(result.concensus_template(), mask)
         align_kwargs = self._update_align_kwargs(align_kwargs)
 
+        num_classes = len(class_templates_)
+        quats = self.molecules.quaternion()
+        pos = self.molecules.pos / self.scale
+        subvolumes = self.construct_dask(output_shape=result.input_shape)
         for i in range(max_niter):
             models = [
                 ZNCCAlignment(template, mask_, **align_kwargs)
                 for template in result.class_templates
             ]
-            softmax_split = _make_softmax_splitter(models, softmax_temperature)
-            tasks = self.construct_mapping_tasks(
-                softmax_split,
-                output_shape=result.input_shape,
-                var_kwarg=dict(
-                    quaternion=self.molecules.quaternion(),
-                    pos=self.molecules.pos / self.scale,
-                ),
+            probs_dsk = subvolumes.map_blocks(
+                subvolume_to_probs,
+                models,
+                quats,
+                pos,
+                dtype=np.float32,
+                drop_axis=(1, 2, 3),
+                new_axis=1,
+                chunks=(subvolumes.chunks[0], num_classes),
+                inv_temp=inverse_temperature,
+                name=f"{subvolumes.name}-classify-{i}",
             )
-            class_templates_ = da.mean(
-                tasks.tostack(task_shape, dtype=np.float32), axis=0
-            ).compute()  # shape: (num_classes, Z, Y, X)
-            result = ClassificationResult(i + 1, list(class_templates_))
+            # class_templates_dsk = da.tensordot(probs_dsk, subvolumes, axes=([0], [0])) / num_subtomo
+            probs_ = probs_dsk.compute()
+            class_templates_ = subvolumes.map_blocks(
+                make_class_templates,
+                probs_,
+                drop_axis=0,
+                new_axis=0,
+                dtype=np.float32,
+                name=f"{subvolumes.name}-make-templates-{i}",
+                chunks=(num_classes,) + subvolumes.shape[1:],
+            ).compute()
+            result = ClassificationResult(i + 1, list(class_templates_), probs_)
             yield result
 
     def reshape(
@@ -1164,6 +1180,7 @@ class ClassificationResult(NamedTuple):
 
     num_iter: int
     class_templates: list[NDArray[np.float32]]
+    probs: NDArray[np.float32]
 
     def concensus_template(self) -> NDArray[np.float32]:
         """Return the concensus template."""
@@ -1234,18 +1251,52 @@ def _make_softmax_splitter(models: list[ZNCCAlignment], temp: float = 0.01):
     return softmax_split
 
 
-def _make_softmax_splitter(models: list[ZNCCAlignment], temp: float = 0.01):
-    def softmax_split(
-        subvolume: NDArray[np.float32],
-        quaternion,
-        pos,
-    ) -> NDArray[np.float32]:
-        # (Z, Y, X) -> (num_classes, Z, Y, X)
-        scores = [model.score(subvolume, quaternion, pos) for model in models]
+def subvolume_to_probs(
+    subvolume,
+    models: list[ZNCCAlignment],
+    quaternion,
+    pos,
+    inv_temp: float = 100,
+    block_info: dict | None = None,
+) -> NDArray[np.float32]:
+    if block_info is None:
+        return np.zeros(
+            (
+                1,
+                len(models),
+            ),
+            dtype=np.float32,
+        )
+
+    istart, iend = block_info[0]["array-location"][0]
+    all_probs = []
+    for ith in range(subvolume.shape[0]):
+        _quat = quaternion[istart + ith]
+        _pos = pos[istart + ith]
+        _sub = subvolume[ith]
+        scores = [model.score(_sub, _quat, _pos) for model in models]
         scores_array = np.array(scores)  # shape: (num_classes, )
         scores_array -= scores_array.mean()
-        probs = 1 / (1 + np.exp(-scores_array / temp))  # sigmoid
+        probs = 1 / (1 + np.exp(-scores_array * inv_temp))  # sigmoid
         probs /= probs.sum()  # normalize
-        return np.stack([subvolume * p for p in probs], axis=0)
+        all_probs.append(probs)
+    all_probs = np.stack(all_probs, axis=0)
+    return all_probs
 
-    return softmax_split
+
+def make_class_templates(
+    subvolume,
+    probs: NDArray[np.float32],  # list of (num_classes,) arrays
+    block_info: dict | None = None,
+) -> NDArray[np.float32]:
+    if block_info is None:
+        return np.zeros((1,) + subvolume.shape[1:], dtype=np.float32)
+    istart, iend = block_info[0]["array-location"][0]
+    all_class_templates = []
+    for ith in range(subvolume.shape[0]):
+        _subvolume = subvolume[ith]
+        _probs = probs[istart + ith]
+        class_templates = [_subvolume * p for p in _probs]
+        all_class_templates.append(np.stack(class_templates, axis=0))
+    all_class_templates = np.stack(all_class_templates, axis=0).sum(axis=0)
+    return all_class_templates
