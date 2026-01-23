@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable, Any, Sequence
+from typing import Iterable, Any, Sequence, SupportsInt
 import numpy as np
 from numpy.typing import NDArray
 import polars as pl
@@ -71,10 +71,10 @@ def random_splitter(
 
 
 def normalize_shape(a: int | Sequence[int], ndim: int):
-    if isinstance(a, int):
-        _output_shape = (a,) * ndim
+    if isinstance(a, SupportsInt):
+        _output_shape = (int(a),) * ndim
     else:
-        _output_shape = tuple(a)
+        _output_shape = tuple(int(each) for each in a)
     return _output_shape
 
 
