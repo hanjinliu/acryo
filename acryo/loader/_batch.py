@@ -409,7 +409,6 @@ class LoaderAccessor:
                 ldr.scale,
                 ldr.output_shape,
                 tilt_model=tilt_model,
-                corner_safe=ldr.corner_safe,
             )
             yield key, loader
 

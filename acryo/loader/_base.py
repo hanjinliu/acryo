@@ -833,8 +833,11 @@ class LoaderBase(ABC):
                 name=f"{task_name}-make-templates-{i}",
                 chunks=(num_classes,) + subvolumes_this_iter.shape[1:],
             ).compute()
-            ratio = subvolumes_this_iter.shape[0] / num_vols
-            ratio = 1 - (1 - ratio) ** subset_bias
+            # NOTE: following code is cleaner but much slower because the reduction
+            # uses two orthogonal chunking.
+            # cls_dsk = da.tensordot(probs_dsk, subvolumes_this_iter, axes=([0], [0])) / num_vols
+            # probs_, class_templates_ = da.compute(probs_dsk, cls_dsk)
+            ratio = 1 - (1 - subvolumes_this_iter.shape[0] / num_vols) ** subset_bias
             class_templates_weighted = [
                 new * ratio + old * (1 - ratio)
                 for new, old in zip(list(class_templates_), result.class_templates)
@@ -1183,13 +1186,7 @@ def subvolume_to_probs(
     block_info: dict | None = None,
 ) -> NDArray[np.float32]:
     if block_info is None:
-        return np.zeros(
-            (
-                1,
-                len(models),
-            ),
-            dtype=np.float32,
-        )
+        return np.zeros((1, len(models)), dtype=np.float32)
 
     istart, iend = block_info[0]["array-location"][0]
     all_probs = []

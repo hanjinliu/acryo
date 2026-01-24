@@ -53,26 +53,31 @@ class AlignmentResult(NamedTuple):
 
 
 class TemplateMaskCache:
-    _dict: dict[Backend, tuple[_Template, _Mask]]
-
     def __init__(self):
-        self._dict = {}
+        self._dict: dict[Backend, tuple[_Template, _Mask]] = {}
 
     def get(self, backend: Backend) -> tuple[_Template, _Mask] | None:
         if out := self._dict.get(backend):
             return out
-        if val := next(iter(self._dict.values()), None):
+        # NOTE: self._dict will be updated in this if clause. When this method is called
+        # from different threads, self._dict may be updated during iteration over
+        # self._dict, which raises RuntimeError.
+        try:
+            vals = list(self._dict.values())
+        except RuntimeError:
+            # dictionary size changed during iteration
+            return self.get(backend)  # retry
+        if len(vals) > 0:
+            val = vals[0]
             self._dict[backend] = out = backend.asarray(val[0]), backend.asarray(val[1])
             return out
-        return None
 
     def set(self, backend: Backend, template: _Template, mask: _Mask):
         self._dict[backend] = template, mask
 
 
 class BaseAlignmentModel(ABC):
-    """
-    The base class to implement alignment method.
+    """The base class to implement alignment method.
 
     This class supports subvolume masking, pre-transformation of subvolumes and
     template, optimization of spatial transformation.

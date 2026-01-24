@@ -27,17 +27,9 @@ def dict_iterrows(d: dict[str, Iterable[Any]]):
 
     will yield {'a': 1, 'b': 4}, {'a': 2, 'b': 5}, {'a': 3, 'b': 6}.
     """
-    keys = d.keys()
-    value_iters = [iter(v) for v in d.values()]
-
-    dict_out = dict.fromkeys(keys, None)
-    while True:
-        try:
-            for k, viter in zip(keys, value_iters):
-                dict_out[k] = next(viter)
-            yield dict_out
-        except StopIteration:
-            break
+    keys = list(d.keys())
+    for values in zip(*d.values()):
+        yield dict(zip(keys, values))
 
 
 def allocate(
