@@ -9,17 +9,10 @@ from dask import array as da, delayed
 
 from acryo._types import nm, pixel
 from acryo._reader import imread
-from acryo.alignment._concrete import ZNCCAlignment
 from acryo.molecules import Molecules
 from acryo.backend import Backend
 from acryo import _utils
-from acryo.loader._base import (
-    LoaderBase,
-    MaskInputType,
-    TemplateInputType,
-    Unset,
-    _ShapeType,
-)
+from acryo.loader._base import LoaderBase, Unset, _ShapeType, INDEX_OPT
 from acryo.loader._extracted import ExtractedSubvolumeLoader, SUBVOLUME_INDEX
 from acryo.tilt import TiltSeriesModel, NoWedge
 from acryo._dask import DaskTaskPool, DaskArrayList
@@ -179,6 +172,33 @@ class SubtomogramLoader(LoaderBase):
             tilt_model=self.tilt_model,
         )
 
+    def order_optimize(self) -> Self:
+        """Sort molecules by their positions.
+
+        When the tomogram is chunked, nearby molecules should be loaded in the same
+        timing, otherwise the disk access will be extremely slow. This method sorts
+        the molecules by their (z, y, x) positions to optimize the loading speed.
+        To restore the original order, use `order_restore` method later.
+        """
+        img = self.image
+        if isinstance(img, np.ndarray):
+            return self  # no need to optimize for numpy array
+        zchunks, ychunks, xchunks = img.chunks
+        zcum = np.cumsum([0] + list(zchunks))
+        ycum = np.cumsum([0] + list(ychunks))
+        xcum = np.cumsum([0] + list(xchunks))
+        df = (
+            self.molecules.to_dataframe()
+            .with_columns(pl.arange(pl.len()).alias(INDEX_OPT))
+            .sort(
+                pl.col("y").truediv(self.scale).cut(ycum),
+                pl.col("x").truediv(self.scale).cut(xcum),
+                pl.col("z").truediv(self.scale).cut(zcum),
+            )
+        )
+        mole = Molecules.from_dataframe(df)
+        return self.replace(molecules=mole)
+
     def binning(self, binsize: pixel = 2, *, compute: bool = True) -> Self:
         """Return a new instance with binned image.
 
@@ -289,27 +309,6 @@ class SubtomogramLoader(LoaderBase):
         """Return default keyword arguments for alignment."""
         return {"tilt": self.tilt_model}
 
-    def _prep_classify_stack(
-        self,
-        template: TemplateInputType,
-        mask: MaskInputType,
-        cutoff: float = 1.0,
-        shape: tuple[int, int, int] | None = None,
-    ):
-        model = ZNCCAlignment(template, mask, cutoff=cutoff, tilt=self.tilt_model)
-        return (
-            self.iter_mapping_tasks(
-                model.masked_difference,
-                output_shape=shape,
-                var_kwarg={
-                    "quaternion": self.molecules.quaternion(),
-                    "pos": self.molecules.pos / self.scale,
-                },
-            )
-            .tolist()
-            .tostack(shape=shape, dtype=np.float32)
-        )
-
 
 class ArrayStoreInterface:
     def __init__(self, save_dir):
@@ -332,7 +331,10 @@ class ArrayStoreInterface:
             )
             for i in range(num)
         ]
-        return da.stack(arrays, axis=0).rechunk((chunksize, *shape))
+        out = da.stack(arrays, axis=0)
+        if chunksize > 1:
+            out = out.rechunk((chunksize, *shape))
+        return out
 
     @delayed
     def load_array(self, i: int) -> NDArray[np.float32]:

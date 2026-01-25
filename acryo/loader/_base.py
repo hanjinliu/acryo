@@ -53,6 +53,7 @@ MaskInputType = Union[
 ]
 AggFunction = Callable[[NDArray[np.float32]], _R]
 IntoExpr = Union[str, pl.Expr]
+INDEX_OPT = ".index.optimize"
 
 
 class Unset:
@@ -269,6 +270,35 @@ class LoaderBase(ABC):
         tasks = self.construct_loading_tasks(output_shape=output_shape)
         for task in tasks:
             yield task.compute()
+
+    def order_optimize(self) -> Self:
+        """Sort molecules by their positions.
+
+        When the tomogram is chunked, nearby molecules should be loaded at the same
+        timing, otherwise the disk access will be extremely slow. This method sorts
+        the molecules by their (z, y, x) positions to optimize the loading speed.
+        To restore the original order, use `order_restore` method later.
+        """
+        return self  # implement in subclass
+
+    def order_restore(self, missing_ok: bool = True) -> Self:
+        """Restore the original order of molecules."""
+        if INDEX_OPT not in self.molecules.features.columns:
+            if missing_ok:
+                return self
+            else:
+                raise ValueError(
+                    "Cannot restore order because the molecule object has no "
+                    "'.index' feature."
+                )
+        mole = self.molecules.sort(INDEX_OPT).drop_features(INDEX_OPT)
+        return self.replace(molecules=mole)
+
+    def order_argsort(self) -> NDArray[np.int_] | None:
+        """Return the indices to restore the original order."""
+        if INDEX_OPT not in self.molecules.features.columns:
+            return None
+        return np.argsort(self.molecules.features[INDEX_OPT])
 
     def average(
         self,
@@ -793,7 +823,7 @@ class LoaderBase(ABC):
             raise ValueError("subset_bias must be at least 1.0.")
         class_templates_ = [self.normalize_template(t) for t in initial_templates]
         result = ClassificationResult(0, class_templates_, None)  # initialize
-        _, mask_ = self.normalize_input(result.concensus_template(), mask)
+        _, mask_ = self.normalize_input(result.consensus_template(), mask)
         align_kwargs = self._update_align_kwargs(align_kwargs)
 
         num_classes = len(class_templates_)
@@ -1096,27 +1126,6 @@ class LoaderBase(ABC):
         align_kwargs.update(kwargs)
         return align_kwargs
 
-    def _prep_classify_stack(
-        self,
-        template: TemplateInputType,
-        mask: MaskInputType,
-        cutoff: float = 1.0,
-        shape: tuple[int, int, int] | None = None,
-    ):
-        model = ZNCCAlignment(template, mask, cutoff=cutoff)
-        return (
-            self.iter_mapping_tasks(
-                model.masked_difference,
-                output_shape=shape,
-                var_kwarg={
-                    "quaternion": self.molecules.quaternion(),
-                    "pos": self.molecules.pos / self.scale,
-                },
-            )
-            .tolist()
-            .tostack(shape=shape, dtype=np.float32)
-        )
-
 
 class ClassificationResult(NamedTuple):
     """Tuple of classification results."""
@@ -1125,7 +1134,7 @@ class ClassificationResult(NamedTuple):
     class_templates: list[NDArray[np.float32]]
     probs: NDArray[np.float32]
 
-    def concensus_template(self) -> NDArray[np.float32]:
+    def consensus_template(self) -> NDArray[np.float32]:
         """Return the concensus template."""
         return np.mean(self.class_templates, axis=0)
 
@@ -1179,7 +1188,7 @@ def _is_iterable_of_funcs(x: Any) -> TypeGuard[Iterable[AggFunction]]:
 
 def subvolume_to_probs(
     subvolume,
-    models: list[ZNCCAlignment],
+    models: list[BaseAlignmentModel],
     quaternion,
     pos,
     inv_temp: float = 100,

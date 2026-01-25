@@ -17,7 +17,7 @@ from acryo.backend import Backend
 from acryo._types import nm, pixel
 from acryo._dask import DaskArrayList, DaskTaskList
 from acryo.loader import _misc
-from acryo.loader._base import LoaderBase, MaskInputType, TemplateInputType
+from acryo.loader._base import LoaderBase, MaskInputType, TemplateInputType, INDEX_OPT
 from acryo.loader._loader import SubtomogramLoader, Unset
 
 from acryo.alignment import BaseAlignmentModel, ZNCCAlignment, AlignmentFactory
@@ -214,6 +214,38 @@ class BatchLoader(LoaderBase):
                     out._images.pop(k)
         return out
 
+    def order_optimize(self) -> Self:
+        """Sort molecules by their positions.
+
+        When the tomogram is chunked, nearby molecules should be loaded in the same
+        timing, otherwise the disk access will be extremely slow. This method sorts
+        the molecules by their (z, y, x) positions to optimize the loading speed.
+        To restore the original order, use `order_restore` method later.
+        """
+        df = self.molecules.to_dataframe().with_columns(
+            pl.arange(pl.len()).alias(INDEX_OPT)
+        )
+        df_sorted = []
+        for sl, sub in df.group_by(IMAGE_ID_LABEL):
+            # sl is something like (1,)
+            img = self._images[sl[0]]
+            if isinstance(img, np.ndarray):
+                df_sorted.append(sub)
+            else:
+                zchunks, ychunks, xchunks = img.chunks
+                zcum = np.cumsum([0] + list(zchunks))
+                ycum = np.cumsum([0] + list(ychunks))
+                xcum = np.cumsum([0] + list(xchunks))
+                df_sub = sub.sort(
+                    pl.col("y").truediv(self.scale).cut(ycum),
+                    pl.col("x").truediv(self.scale).cut(xcum),
+                    pl.col("z").truediv(self.scale).cut(zcum),
+                )
+                df_sorted.append(df_sub)
+        df = pl.concat(df_sorted)
+        mole = Molecules.from_dataframe(df)
+        return self.replace(molecules=mole)
+
     def binning(self, binsize: int, *, compute: bool = False) -> Self:
         """Return a new instance with binned images."""
         if binsize == 1:
@@ -356,18 +388,6 @@ class BatchLoader(LoaderBase):
                 )
             )
         return np.concatenate(scores, axis=1)
-
-    def _prep_classify_stack(
-        self,
-        template: TemplateInputType,
-        mask: MaskInputType,
-        cutoff: float = 1.0,
-        shape: tuple[int, int, int] | None = None,
-    ):
-        stacks = []
-        for each in self.loaders:
-            stacks.append(each._prep_classify_stack(template, mask, cutoff, shape))
-        return da.concatenate(stacks, axis=0)
 
 
 class LoaderAccessor:
