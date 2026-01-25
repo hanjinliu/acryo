@@ -17,7 +17,7 @@ from acryo.backend import Backend
 from acryo._types import nm, pixel
 from acryo._dask import DaskArrayList, DaskTaskList
 from acryo.loader import _misc
-from acryo.loader._base import LoaderBase, MaskInputType, TemplateInputType
+from acryo.loader._base import LoaderBase, MaskInputType, TemplateInputType, INDEX_OPT
 from acryo.loader._loader import SubtomogramLoader, Unset
 
 from acryo.alignment import BaseAlignmentModel, ZNCCAlignment, AlignmentFactory
@@ -45,9 +45,8 @@ class BatchLoader(LoaderBase):
         order: int = 3,
         scale: nm = 1.0,
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
-        corner_safe: bool = False,
     ) -> None:
-        super().__init__(order, scale, output_shape, corner_safe)
+        super().__init__(order, scale, output_shape)
         self._images: dict[Hashable, NDArray[np.float32] | da.Array] = {}
         self._molecules: Molecules = Molecules.empty([IMAGE_ID_LABEL])
         self._tilt_models: dict[Hashable, TomographyInput] = {}
@@ -163,7 +162,6 @@ class BatchLoader(LoaderBase):
         order: int = 3,
         scale: nm = 1.0,
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
-        corner_safe: bool = False,
     ) -> Self:
         """Construct a loader from a list of loaders.
 
@@ -175,7 +173,6 @@ class BatchLoader(LoaderBase):
             order=order,
             scale=scale,
             output_shape=output_shape,
-            corner_safe=corner_safe,
         )
         for loader in loaders:
             self.add_loader(loader)
@@ -192,7 +189,6 @@ class BatchLoader(LoaderBase):
         output_shape: _ShapeType | Unset = None,
         order: int | None = None,
         scale: float | None = None,
-        corner_safe: bool | None = None,
     ) -> Self:
         """Return a new instance with different parameter(s)."""
         if output_shape is None:
@@ -201,8 +197,6 @@ class BatchLoader(LoaderBase):
             order = self.order
         if scale is None:
             scale = self.scale
-        if corner_safe is None:
-            corner_safe = self.corner_safe
         out = type(self)(
             order=order,
             scale=scale,
@@ -219,6 +213,38 @@ class BatchLoader(LoaderBase):
                 if k not in _id_exists:
                     out._images.pop(k)
         return out
+
+    def order_optimize(self) -> Self:
+        """Sort molecules by their positions.
+
+        When the tomogram is chunked, nearby molecules should be loaded in the same
+        timing, otherwise the disk access will be extremely slow. This method sorts
+        the molecules by their (z, y, x) positions to optimize the loading speed.
+        To restore the original order, use `order_restore` method later.
+        """
+        df = self.molecules.to_dataframe().with_columns(
+            pl.arange(pl.len()).alias(INDEX_OPT)
+        )
+        df_sorted = []
+        for sl, sub in df.group_by(IMAGE_ID_LABEL):
+            # sl is something like (1,)
+            img = self._images[sl[0]]
+            if isinstance(img, np.ndarray):
+                df_sorted.append(sub)
+            else:
+                zchunks, ychunks, xchunks = img.chunks
+                zcum = np.cumsum([0] + list(zchunks))
+                ycum = np.cumsum([0] + list(ychunks))
+                xcum = np.cumsum([0] + list(xchunks))
+                df_sub = sub.sort(
+                    pl.col("y").truediv(self.scale).cut(ycum),
+                    pl.col("x").truediv(self.scale).cut(xcum),
+                    pl.col("z").truediv(self.scale).cut(zcum),
+                )
+                df_sorted.append(df_sub)
+        df = pl.concat(df_sorted)
+        mole = Molecules.from_dataframe(df)
+        return self.replace(molecules=mole)
 
     def binning(self, binsize: int, *, compute: bool = False) -> Self:
         """Return a new instance with binned images."""
@@ -363,18 +389,6 @@ class BatchLoader(LoaderBase):
             )
         return np.concatenate(scores, axis=1)
 
-    def _prep_classify_stack(
-        self,
-        template: TemplateInputType,
-        mask: MaskInputType,
-        cutoff: float = 1.0,
-        shape: tuple[int, int, int] | None = None,
-    ):
-        stacks = []
-        for each in self.loaders:
-            stacks.append(each._prep_classify_stack(template, mask, cutoff, shape))
-        return da.concatenate(stacks, axis=0)
-
 
 class LoaderAccessor:
     """The interface to access subtomogram loaders in a BatchLoader."""
@@ -415,7 +429,6 @@ class LoaderAccessor:
                 ldr.scale,
                 ldr.output_shape,
                 tilt_model=tilt_model,
-                corner_safe=ldr.corner_safe,
             )
             yield key, loader
 

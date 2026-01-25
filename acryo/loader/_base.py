@@ -22,6 +22,7 @@ from numpy.typing import NDArray
 from dask import array as da
 from dask.delayed import delayed
 from scipy.spatial.transform import Rotation
+
 import polars as pl
 
 from acryo.alignment import (
@@ -41,7 +42,6 @@ from acryo.pipe._classes import ImageProvider, ImageConverter
 
 if TYPE_CHECKING:
     from typing_extensions import Self
-    from acryo.classification import PcaClassifier
     from acryo.alignment._base import MaskType
 
 _R = TypeVar("_R")
@@ -53,6 +53,7 @@ MaskInputType = Union[
 ]
 AggFunction = Callable[[NDArray[np.float32]], _R]
 IntoExpr = Union[str, pl.Expr]
+INDEX_OPT = ".index.optimize"
 
 
 class Unset:
@@ -71,13 +72,11 @@ class LoaderBase(ABC):
         order: int = 3,
         scale: nm = 1.0,
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
-        corner_safe: bool = False,
     ) -> None:
         ndim = 3
         self._order, self._output_shape, self._scale = check_input(
             order, output_shape, scale, ndim
         )
-        self._corner_safe = corner_safe
 
     @property
     @abstractmethod
@@ -104,11 +103,6 @@ class LoaderBase(ABC):
     def order(self) -> int:
         """Return the interpolation order."""
         return self._order
-
-    @property
-    def corner_safe(self) -> bool:
-        """Return whether the loader is corner-safe."""
-        return self._corner_safe
 
     @abstractmethod
     def construct_loading_tasks(
@@ -277,8 +271,41 @@ class LoaderBase(ABC):
         for task in tasks:
             yield task.compute()
 
+    def order_optimize(self) -> Self:
+        """Sort molecules by their positions.
+
+        When the tomogram is chunked, nearby molecules should be loaded at the same
+        timing, otherwise the disk access will be extremely slow. This method sorts
+        the molecules by their (z, y, x) positions to optimize the loading speed.
+        To restore the original order, use `order_restore` method later.
+        """
+        return self  # implement in subclass
+
+    def order_restore(self, missing_ok: bool = True) -> Self:
+        """Restore the original order of molecules."""
+        if INDEX_OPT not in self.molecules.features.columns:
+            if missing_ok:
+                return self
+            else:
+                raise ValueError(
+                    "Cannot restore order because the molecule object has no "
+                    "'.index' feature."
+                )
+        mole = self.molecules.sort(INDEX_OPT).drop_features(INDEX_OPT)
+        return self.replace(molecules=mole)
+
+    def order_argsort(self) -> NDArray[np.int_] | None:
+        """Return the indices to restore the original order."""
+        if INDEX_OPT not in self.molecules.features.columns:
+            return None
+        return np.argsort(self.molecules.features[INDEX_OPT])
+
     def average(
-        self, output_shape: _ShapeType = None, *, backend: Backend | None = None
+        self,
+        output_shape: _ShapeType = None,
+        *,
+        chunksize: int | Literal["auto"] = "auto",
+        backend: Backend | None = None,
     ) -> NDArray[np.float32]:
         """Calculate the average of subtomograms.
 
@@ -293,15 +320,18 @@ class LoaderBase(ABC):
         xp = backend or Backend()
         output_shape = self._get_output_shape(output_shape)
         dsk = self.construct_dask(output_shape=output_shape, backend=xp)
-        dsk = dsk.rechunk(("auto",) + output_shape)  # type: ignore
+        dsk = dsk.rechunk((chunksize,) + output_shape)  # type: ignore
         return xp.asnumpy(dsk.mean(axis=0).compute())
 
     def average_split(
         self,
         n_set: int = 1,
-        seed: int | None = 0,
+        n_split: int = 2,
+        seed: int | np.random.Generator | None = 0,
         squeeze: bool = True,
         output_shape: _ShapeType = None,
+        *,
+        chunksize: int | Literal["auto"] = "auto",
     ) -> NDArray[np.float32]:
         """Split subtomograms into two set and average separately.
 
@@ -328,24 +358,21 @@ class LoaderBase(ABC):
         """
         backend = Backend()
         output_shape = self._get_output_shape(output_shape)
-        rng = np.random.default_rng(seed=seed)
+
+        rng = _get_rng(seed)
 
         tasks: list[da.Array] = []
         dsk = self.construct_dask(output_shape=output_shape)
         nmole = dsk.shape[0]
-        chunksize = ("auto",) + output_shape
         for _ in range(n_set):
-            ind0, ind1 = _misc.random_splitter(rng, nmole)
+            inds = _misc.random_splitter(rng, nmole, n_split)
             _stack = da.stack(
-                [
-                    dsk[ind0].rechunk(chunksize).mean(axis=0),  # type: ignore
-                    dsk[ind1].rechunk(chunksize).mean(axis=0),  # type: ignore
-                ],
+                [dsk[ind].mean(axis=0) for ind in inds],
                 axis=0,
             )
-            tasks.append(_stack)
+            tasks.append(_stack.rechunk((chunksize,) + output_shape))
 
-        out = da.compute(tasks)[0]
+        out = da.compute(*tasks)
         stack = np.stack([backend.asnumpy(a) for a in out], axis=0)
         if squeeze and n_set == 1:
             stack: NDArray[np.float32] = stack[0]
@@ -409,53 +436,6 @@ class LoaderBase(ABC):
         tasks = self._prep_align_tasks(model, max_shifts, _backend)
         all_results = tasks.compute()
         return self._post_align(all_results, model.input_shape)
-
-    def align_no_template(
-        self,
-        *,
-        mask: MaskInputType = None,
-        max_shifts: nm | tuple[nm, nm, nm] = 1.0,
-        output_shape: _ShapeType = None,
-        alignment_model: type[BaseAlignmentModel] = ZNCCAlignment,
-        **align_kwargs,
-    ) -> Self:
-        """Align subtomograms without template image.
-
-        A template-free version of :func:`align`. This method first
-        calculates averaged image and uses it for the alignment template. To
-        avoid loading same subtomograms twice, a memory-mapped array is created
-        internally (so the second subtomogram loading is faster).
-
-        Parameters
-        ----------
-        mask : 3D array, ImageProvider or ImageConverter, optional
-            Mask image. Must in the same shape as the template.
-        max_shifts : int or tuple of int, default is (1., 1., 1.)
-            Maximum shift between subtomograms and template.
-        alignment_model : subclass of BaseAlignmentModel, optional
-            Alignment model class used for subtomogram alignment. By default,
-            ``ZNCCAlignment`` will be used.
-        align_kwargs : optional keyword arguments
-            Additional keyword arguments passed to the input alignment model.
-
-        Returns
-        -------
-        subtomogram loader object
-            A loader instance of the same type with updated molecules.
-        """
-        if output_shape is None and isinstance(mask, np.ndarray):
-            output_shape = mask.shape
-        backend = Backend()
-        template = self.average(output_shape=output_shape, backend=backend)
-        out = self.align(
-            template,
-            mask=mask,
-            max_shifts=max_shifts,
-            alignment_model=alignment_model,
-            backend=backend,
-            **align_kwargs,
-        )
-        return out
 
     def align_multi_templates(
         self,
@@ -566,6 +546,10 @@ class LoaderBase(ABC):
             .asarrays(shape=task_shape, dtype=np.float32)
         )
         return da.stack(task_arrays, axis=0)
+
+    def extract_subtomograms(self, save_path) -> LoaderBase:
+        """Create a new loader that directly loads extracted subtomograms."""
+        raise NotImplementedError("Not implemented for this loader type.")
 
     def score(
         self,
@@ -769,6 +753,7 @@ class LoaderBase(ABC):
         dfq = 1.5 / min(output_shape) if dfreq is None else dfreq
         halves = self.average_split(
             n_set=n_set,
+            n_split=2,
             seed=seed,
             squeeze=False,
             output_shape=output_shape,
@@ -794,82 +779,101 @@ class LoaderBase(ABC):
         else:
             return FscTuple(pl.DataFrame(out), (halves[:, 0], halves[:, 1]), _mask)
 
-    def classify(
+    def iter_classify_em(
         self,
-        template: TemplateInputType | None = None,
+        initial_templates: list[TemplateInputType],
         mask: MaskInputType = None,
         *,
-        cutoff: float = 0.5,
-        n_components: int = 2,
-        n_clusters: int = 2,
-        seed: int = 0,
-        label_name: str = "cluster",
-    ) -> ClassificationResult:
-        """Classify 3D densities by PCA of wedge-masked differences.
+        inverse_temperature: float = 100.0,
+        max_niter: int = 20,
+        subset_picker: Callable[[int, int], list[int]] | None = None,
+        subset_bias: float = 1.5,
+        **align_kwargs,
+    ) -> Iterator[ClassificationResult]:
+        """Run expectation-maximization classification and yields intermediate results.
+
+        This method is a generator that iteratively soft-classifies subtomograms and
+        updates class templates.
 
         Parameters
         ----------
-        template : 3D array, optional
-            Template image to calculate the difference. If not given, average image will
-            be used.
-        mask : 3D array, optional
-            Soft mask of the same shape as the template or the output_shape parameter.
-        n_components : int, default is 2
-            Number of PCA components.
-        n_clusters : int, default is 2
-            Number of classes.
-        tilt_range : (float, float), optional
-            Tilt range in degree.
-        seed : int, default is 0
-            Random seed used for K-means clustering.
-        label_name : str, default is "cluster"
-            Column name used for the output classes.
-
-        Returns
-        -------
-        ClassificationResult
-            Tuple of SubtomogramLoader and PCA classifier object.
-
-        References
-        ----------
-        - Heumann, J. M., Hoenger, A., & Mastronarde, D. N. (2011). Clustering and
-          variance maps for cryo-electron tomography using wedge-masked differences.
-          Journal of structural biology, 175(3), 288-299.
+        initial_templates : list of 3D arrays or ImageProvider
+            Initial class template images. If no a-priori template is available, use
+            methods such as `average_split` to generate initial templates.
+        mask : 3D array or ImageProvider, optional
+            Mask image used for scoring.
+        inverse_temperature : float, default is 100.0
+            Temperature parameter for softmax function. Higher values lead to softer
+            classification, which means more uniform weights across classes.
+        max_niter : int, default is 20
+            Maximum number of iterations.
+        subset_picker : callable, optional
+            A function that takes the current iteration index and total number of
+            subtomograms, and returns a list of subtomogram indices to be used in the
+            current iteration. If None, all subtomograms will be used in every
+            iteration.
+        subset_bias : float, default is 1.5
+            Bias factor for subset picking. Value higher than 1.0 increases the weight
+            of the selected subset in template update. This parameter takes no effect
+            if `subset_picker` is not given.
         """
-        from acryo.classification import PcaClassifier
+        if inverse_temperature <= 0:
+            raise ValueError("inverse_temperature must be positive.")
+        if subset_bias < 1.0:
+            raise ValueError("subset_bias must be at least 1.0.")
+        class_templates_ = [self.normalize_template(t) for t in initial_templates]
+        result = ClassificationResult(0, class_templates_, None)  # initialize
+        _, mask_ = self.normalize_input(result.consensus_template(), mask)
+        align_kwargs = self._update_align_kwargs(align_kwargs)
 
-        if template is None:
-            if isinstance(mask, np.ndarray):
-                shape = mask.shape
-            elif isinstance(shape := self.output_shape, Unset):
-                raise ValueError("Cannot determine output shape.")
-            template = self.average(shape)
-        else:
-            template = self.normalize_template(template)
-            shape = template.shape
-
-        _mask = self.normalize_mask(mask, reshape_to=shape)
-        stack = self._prep_classify_stack(template, mask, cutoff, shape)
-
-        if callable(_mask):
-            mask_arr = _mask(template)
-        else:
-            mask_arr = _mask
-        clf = PcaClassifier(
-            # PCA requires aggregation along the first axis. Rechunk to improve
-            # performance.
-            stack.rechunk(("auto",) + shape),
-            mask_arr,
-            n_components=n_components,
-            n_clusters=n_clusters,
-            seed=seed,
-        )
-        clf.run()
-
-        mole = self.molecules.copy()
-        mole.features = mole.features.with_columns(pl.Series(label_name, clf._labels))
-        new = self.replace(molecules=mole)
-        return ClassificationResult(new, clf)
+        num_classes = len(class_templates_)
+        num_vols = self.molecules.count()
+        quats = self.molecules.quaternion()
+        pos = self.molecules.pos / self.scale
+        subvolumes = self.construct_dask(output_shape=result.input_shape)
+        task_name = subvolumes.name
+        for i in range(max_niter):
+            models = [
+                ZNCCAlignment(template, mask_, **align_kwargs)
+                for template in result.class_templates
+            ]
+            if subset_picker and (sl := subset_picker(i, num_vols)) is not None:
+                subvolumes_this_iter = subvolumes[sl]
+            else:
+                subvolumes_this_iter = subvolumes
+            probs_dsk = subvolumes_this_iter.map_blocks(
+                subvolume_to_probs,
+                models,
+                quats,
+                pos,
+                dtype=np.float32,
+                drop_axis=(1, 2, 3),
+                new_axis=1,
+                chunks=(subvolumes_this_iter.chunks[0], num_classes),
+                inv_temp=inverse_temperature,
+                name=f"{task_name}-classify-{i}",
+            )
+            probs_ = probs_dsk.compute()
+            class_templates_ = subvolumes_this_iter.map_blocks(
+                make_class_templates,
+                probs_,
+                drop_axis=0,
+                new_axis=0,
+                dtype=np.float32,
+                name=f"{task_name}-make-templates-{i}",
+                chunks=(num_classes,) + subvolumes_this_iter.shape[1:],
+            ).compute()
+            # NOTE: following code is cleaner but much slower because the reduction
+            # uses two orthogonal chunking.
+            # cls_dsk = da.tensordot(probs_dsk, subvolumes_this_iter, axes=([0], [0])) / num_vols
+            # probs_, class_templates_ = da.compute(probs_dsk, cls_dsk)
+            ratio = 1 - (1 - subvolumes_this_iter.shape[0] / num_vols) ** subset_bias
+            class_templates_weighted = [
+                new * ratio + old * (1 - ratio)
+                for new, old in zip(list(class_templates_), result.class_templates)
+            ]
+            result = ClassificationResult(i + 1, class_templates_weighted, probs_)
+            yield result
 
     def reshape(
         self,
@@ -1122,33 +1126,22 @@ class LoaderBase(ABC):
         align_kwargs.update(kwargs)
         return align_kwargs
 
-    def _prep_classify_stack(
-        self,
-        template: TemplateInputType,
-        mask: MaskInputType,
-        cutoff: float = 1.0,
-        shape: tuple[int, int, int] | None = None,
-    ):
-        model = ZNCCAlignment(template, mask, cutoff=cutoff)
-        return (
-            self.iter_mapping_tasks(
-                model.masked_difference,
-                output_shape=shape,
-                var_kwarg={
-                    "quaternion": self.molecules.quaternion(),
-                    "pos": self.molecules.pos / self.scale,
-                },
-            )
-            .tolist()
-            .tostack(shape=shape, dtype=np.float32)
-        )
-
 
 class ClassificationResult(NamedTuple):
     """Tuple of classification results."""
 
-    loader: LoaderBase
-    classifier: PcaClassifier
+    num_iter: int
+    class_templates: list[NDArray[np.float32]]
+    probs: NDArray[np.float32]
+
+    def consensus_template(self) -> NDArray[np.float32]:
+        """Return the concensus template."""
+        return np.mean(self.class_templates, axis=0)
+
+    @property
+    def input_shape(self) -> tuple[int, int, int]:
+        """Return the input shape of the templates."""
+        return self.class_templates[0].shape
 
 
 class FscTuple(NamedTuple):
@@ -1191,3 +1184,54 @@ def _is_iterable_of_funcs(x: Any) -> TypeGuard[Iterable[AggFunction]]:
     if not hasattr(x, "__iter__"):
         return False
     return all(callable(f) for f in x)
+
+
+def subvolume_to_probs(
+    subvolume,
+    models: list[BaseAlignmentModel],
+    quaternion,
+    pos,
+    inv_temp: float = 100,
+    block_info: dict | None = None,
+) -> NDArray[np.float32]:
+    if block_info is None:
+        return np.zeros((1, len(models)), dtype=np.float32)
+
+    istart, iend = block_info[0]["array-location"][0]
+    all_probs = []
+    for ith in range(subvolume.shape[0]):
+        _quat = quaternion[istart + ith]
+        _pos = pos[istart + ith]
+        _sub = subvolume[ith]
+        scores = [model.score(_sub, _quat, _pos) for model in models]
+        scores_array = np.array(scores)  # shape: (num_classes, )
+        scores_array -= scores_array.mean()
+        probs = 1 / (1 + np.exp(-scores_array * inv_temp))  # sigmoid
+        probs /= probs.sum()  # normalize
+        all_probs.append(probs)
+    all_probs = np.stack(all_probs, axis=0)
+    return all_probs
+
+
+def make_class_templates(
+    subvolume,
+    probs: NDArray[np.float32],  # list of (num_classes,) arrays
+    block_info: dict | None = None,
+) -> NDArray[np.float32]:
+    if block_info is None:
+        return np.zeros((1,) + subvolume.shape[1:], dtype=np.float32)
+    istart, iend = block_info[0]["array-location"][0]
+    all_class_templates = []
+    for ith in range(subvolume.shape[0]):
+        _subvolume = subvolume[ith]
+        _probs = probs[istart + ith]
+        class_templates = [_subvolume * p for p in _probs]
+        all_class_templates.append(np.stack(class_templates, axis=0))
+    all_class_templates = np.stack(all_class_templates, axis=0).sum(axis=0)
+    return all_class_templates
+
+
+def _get_rng(seed):
+    if isinstance(seed, np.random.Generator):
+        return seed
+    return np.random.default_rng(seed)

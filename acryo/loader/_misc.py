@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable, Any, Sequence
+from typing import Iterable, Any, Sequence, SupportsInt
 import numpy as np
 from numpy.typing import NDArray
 import polars as pl
@@ -27,17 +27,9 @@ def dict_iterrows(d: dict[str, Iterable[Any]]):
 
     will yield {'a': 1, 'b': 4}, {'a': 2, 'b': 5}, {'a': 3, 'b': 6}.
     """
-    keys = d.keys()
-    value_iters = [iter(v) for v in d.values()]
-
-    dict_out = dict.fromkeys(keys, None)
-    while True:
-        try:
-            for k, viter in zip(keys, value_iters):
-                dict_out[k] = next(viter)
-            yield dict_out
-        except StopIteration:
-            break
+    keys = list(d.keys())
+    for values in zip(*d.values()):
+        yield dict(zip(keys, values))
 
 
 def allocate(
@@ -59,20 +51,22 @@ def allocate(
 def random_splitter(
     rng: np.random.Generator,
     nmole: int,
-) -> tuple[NDArray[np.bool_], NDArray[np.bool_]]:
-    sl = rng.choice(np.arange(nmole), nmole // 2).tolist()
-    indices0 = np.zeros(nmole, dtype=np.bool_)
-    indices0[sl] = True
-    indices1 = np.ones(nmole, dtype=np.bool_)
-    indices1[sl] = False
-    return indices0, indices1
+    nsplit: int = 2,
+) -> list[NDArray[np.bool_]]:
+    indices = np.arange(nmole)
+    rng.shuffle(indices)
+    outs = []
+    for i in range(nsplit):
+        mask = indices % nsplit == i
+        outs.append(mask)
+    return outs
 
 
 def normalize_shape(a: int | Sequence[int], ndim: int):
-    if isinstance(a, int):
-        _output_shape = (a,) * ndim
+    if isinstance(a, SupportsInt):
+        _output_shape = (int(a),) * ndim
     else:
-        _output_shape = tuple(a)
+        _output_shape = tuple(int(each) for each in a)
     return _output_shape
 
 

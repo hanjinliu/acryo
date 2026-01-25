@@ -1,34 +1,25 @@
 # pyright: reportPrivateImportUsage=false
 
 from __future__ import annotations
-from typing import (
-    TYPE_CHECKING,
-    NamedTuple,
-    Any,
-)
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 import numpy as np
-from dask import array as da
+import polars as pl
+from dask import array as da, delayed
 
 from acryo._types import nm, pixel
 from acryo._reader import imread
-from acryo.alignment._concrete import ZNCCAlignment
 from acryo.molecules import Molecules
 from acryo.backend import Backend
 from acryo import _utils
-from acryo.loader._base import (
-    LoaderBase,
-    MaskInputType,
-    TemplateInputType,
-    Unset,
-    _ShapeType,
-)
+from acryo.loader._base import LoaderBase, Unset, _ShapeType, INDEX_OPT
+from acryo.loader._extracted import ExtractedSubvolumeLoader, SUBVOLUME_INDEX
 from acryo.tilt import TiltSeriesModel, NoWedge
 from acryo._dask import DaskTaskPool, DaskArrayList
 
 if TYPE_CHECKING:
     from typing_extensions import Self
     from numpy.typing import NDArray
-    from acryo.classification import PcaClassifier
 
 
 class SubtomogramLoader(LoaderBase):
@@ -95,9 +86,8 @@ class SubtomogramLoader(LoaderBase):
             )
         self._molecules = molecules
         self._tilt_model = tilt_model or NoWedge()
-        super().__init__(
-            order=order, scale=scale, output_shape=output_shape, corner_safe=corner_safe
-        )
+        self._corner_safe = corner_safe
+        super().__init__(order=order, scale=scale, output_shape=output_shape)
 
     def __repr__(self) -> str:
         shape = self.image.shape
@@ -144,6 +134,11 @@ class SubtomogramLoader(LoaderBase):
         return self._molecules
 
     @property
+    def corner_safe(self) -> bool:
+        """Return whether the loader is corner-safe."""
+        return self._corner_safe
+
+    @property
     def tilt_model(self) -> TiltSeriesModel:
         """Return the tilt model of the subtomogram loader."""
         return self._tilt_model
@@ -158,7 +153,6 @@ class SubtomogramLoader(LoaderBase):
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset | None = None,
         order: int | None = None,
         scale: float | None = None,
-        corner_safe: bool | None = None,
     ) -> Self:
         """Return a new instance with different parameter(s)."""
         if molecules is None:
@@ -169,8 +163,6 @@ class SubtomogramLoader(LoaderBase):
             order = self.order
         if scale is None:
             scale = self.scale
-        if corner_safe is None:
-            corner_safe = self.corner_safe
         return self.__class__(
             self.image,
             molecules=molecules,
@@ -179,6 +171,33 @@ class SubtomogramLoader(LoaderBase):
             scale=scale,
             tilt_model=self.tilt_model,
         )
+
+    def order_optimize(self) -> Self:
+        """Sort molecules by their positions.
+
+        When the tomogram is chunked, nearby molecules should be loaded in the same
+        timing, otherwise the disk access will be extremely slow. This method sorts
+        the molecules by their (z, y, x) positions to optimize the loading speed.
+        To restore the original order, use `order_restore` method later.
+        """
+        img = self.image
+        if isinstance(img, np.ndarray):
+            return self  # no need to optimize for numpy array
+        zchunks, ychunks, xchunks = img.chunks
+        zcum = np.cumsum([0] + list(zchunks))
+        ycum = np.cumsum([0] + list(ychunks))
+        xcum = np.cumsum([0] + list(xchunks))
+        df = (
+            self.molecules.to_dataframe()
+            .with_columns(pl.arange(pl.len()).alias(INDEX_OPT))
+            .sort(
+                pl.col("y").truediv(self.scale).cut(ycum),
+                pl.col("x").truediv(self.scale).cut(xcum),
+                pl.col("z").truediv(self.scale).cut(zcum),
+            )
+        )
+        mole = Molecules.from_dataframe(df)
+        return self.replace(molecules=mole)
 
     def binning(self, binsize: pixel = 2, *, compute: bool = True) -> Self:
         """Return a new instance with binned image.
@@ -261,34 +280,62 @@ class SubtomogramLoader(LoaderBase):
 
         return pool.asarrays(shape=output_shape, dtype=np.float32)
 
+    def extract_subtomograms(
+        self, save_path, chunksize: int = 1
+    ) -> ExtractedSubvolumeLoader:
+        store_target = ArrayStoreInterface(save_path)
+        num_mole = self.molecules.count()
+        tasks = self.construct_mapping_tasks(
+            store_target.save,
+            output_shape=self.output_shape,
+            var_kwarg={"i": np.arange(num_mole)},
+        )
+        tasks.compute()
+        dsk_round = store_target.to_dask(
+            num=num_mole,
+            shape=self.output_shape,
+            chunksize=chunksize,
+        )
+        index = pl.arange(num_mole).alias(SUBVOLUME_INDEX)
+        return ExtractedSubvolumeLoader(
+            dsk_round,
+            molecules=self.molecules.with_features(index),
+            order=self.order,
+            scale=self.scale,
+            tilt_model=self.tilt_model,
+        )
+
     def _default_align_kwargs(self) -> dict[str, Any]:
         """Return default keyword arguments for alignment."""
         return {"tilt": self.tilt_model}
 
-    def _prep_classify_stack(
-        self,
-        template: TemplateInputType,
-        mask: MaskInputType,
-        cutoff: float = 1.0,
-        shape: tuple[int, int, int] | None = None,
-    ):
-        model = ZNCCAlignment(template, mask, cutoff=cutoff, tilt=self.tilt_model)
-        return (
-            self.iter_mapping_tasks(
-                model.masked_difference,
-                output_shape=shape,
-                var_kwarg={
-                    "quaternion": self.molecules.quaternion(),
-                    "pos": self.molecules.pos / self.scale,
-                },
+
+class ArrayStoreInterface:
+    def __init__(self, save_dir):
+        self._save_dir = Path(save_dir)
+        self._save_dir.mkdir()
+
+    def path_i(self, i: int) -> Path:
+        return self._save_dir / f"{i:08d}.npy"
+
+    def save(self, array: NDArray[np.float32], i: int) -> None:
+        np.save(self.path_i(i), array)
+
+    def to_dask(self, num: int, shape, chunksize: int = 50) -> da.Array:
+        arrays = [
+            da.from_delayed(
+                self.load_array(i),
+                shape=shape,
+                dtype=np.float32,
+                name=f"load-{id(self)}-{i}",
             )
-            .tolist()
-            .tostack(shape=shape, dtype=np.float32)
-        )
+            for i in range(num)
+        ]
+        out = da.stack(arrays, axis=0)
+        if chunksize > 1:
+            out = out.rechunk((chunksize, *shape))
+        return out
 
-
-class ClassificationResult(NamedTuple):
-    """Tuple of classification results."""
-
-    loader: SubtomogramLoader
-    classifier: PcaClassifier
+    @delayed
+    def load_array(self, i: int) -> NDArray[np.float32]:
+        return np.load(self.path_i(i))

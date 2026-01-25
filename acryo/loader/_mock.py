@@ -57,11 +57,10 @@ class MockLoader(LoaderBase):
         central_axis: tuple[float, float, float] = (0.0, 1.0, 0.0),
         order: int = 3,
         scale: nm = 1.0,
-        corner_safe: bool = False,
     ) -> None:
         if noise < 0:
             raise ValueError("Noise must be non-negative.")
-        super().__init__(order, scale, corner_safe=corner_safe)
+        super().__init__(order, scale)
         self._template = template
         self._noise = noise
         if degrees is None:
@@ -144,7 +143,6 @@ class MockLoader(LoaderBase):
         output_shape: None = None,  # just for compatibility
         order: int | None = None,
         scale: float | None = None,
-        corner_safe: bool = None,
     ) -> Self:
         if molecules is None:
             molecules = self.molecules
@@ -152,8 +150,6 @@ class MockLoader(LoaderBase):
             order = self.order
         if scale is None:
             scale = self.scale
-        if corner_safe is None:
-            corner_safe = self.corner_safe
         return self.__class__(
             self._template,
             molecules=molecules,
@@ -161,7 +157,6 @@ class MockLoader(LoaderBase):
             degrees=self._degrees,
             order=order,
             scale=scale,
-            corner_safe=corner_safe,
         )
 
 
