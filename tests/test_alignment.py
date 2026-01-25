@@ -187,16 +187,15 @@ def test_landscape_in_loader_with_rotation(upsample):
     )
 
 
-def test_pca_classify():
+def test_em_classification():
     loader = SubtomogramLoader(
         tomo, mole, order=0, scale=scale, output_shape=temp_shape
     )
     mask = temp > np.mean(temp)
-    result = loader.classify(mask.astype(np.float32))
-    result.classifier.pca
-    result.classifier.kmeans
-    result.classifier.predict(temp[np.newaxis])
-    result.classifier.split_clusters()
+    avgs = loader.average_split(n_split=2)
+    for result in loader.iter_classify_em(avgs, mask.astype(np.float32), max_niter=2):
+        assert len(result.class_templates) == 2
+        assert result.probs.shape == (len(mole), 2)
 
 
 def test_load_functions():
