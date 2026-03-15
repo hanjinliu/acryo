@@ -1104,7 +1104,12 @@ class Molecules:
         self._features = feat
         return self
 
-    def symmetry_expand(self, symmetry: str, sym_axis: str = "z") -> Molecules:
+    def symmetry_expand(
+        self,
+        symmetry: str,
+        sym_axis: Literal["z", "y", "x"] = "z",
+    ) -> Molecules:
+        """Symmetry-expand molecules."""
         axis = "xyz"["zyx".index(sym_axis.lower())]  # zyx to xyz
         rots = Rotation.create_group(symmetry, axis=axis)
         rotvecs = rots.as_rotvec()
