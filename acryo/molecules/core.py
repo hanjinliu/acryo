@@ -34,8 +34,7 @@ _Array2D = Union[NDArray[np.number], Sequence[Sequence[Any]]]
 
 
 class Molecules:
-    """
-    Object that represents position- and orientation-defined molecules.
+    """Object that represents position- and orientation-defined molecules.
 
     Positions are represented by a (N, 3) ``np.ndarray`` and orientations
     are represented by a ``scipy.spatial.transform.Rotation`` object.
@@ -317,8 +316,7 @@ class Molecules:
         return df
 
     def to_csv(self, save_path: PathLike, float_precision: int | None = 4) -> None:
-        """
-        Save molecules as a csv file.
+        """Save molecules as a csv file.
 
         Parameters
         ----------
@@ -339,8 +337,7 @@ class Molecules:
         compression: ParquetCompression = "zstd",
         compression_level: int | None = 10,
     ) -> None:
-        """
-        Save molecules as a parquet file.
+        """Save molecules as a parquet file.
 
         Parameters
         ----------
@@ -436,8 +433,7 @@ class Molecules:
         self,
         spec: int | slice | list[int] | NDArray[np.bool_] | NDArray[np.integer],
     ) -> Self:
-        """
-        Create a subset of molecules by slicing.
+        """Create a subset of molecules by slicing.
 
         Any slicing supported in ``numpy.ndarray``, except for integer, can be
         used here. Molecule positions and angles are sliced at the same time.
@@ -476,8 +472,7 @@ class Molecules:
     def affine_matrix(
         self, src: np.ndarray, dst: np.ndarray | None = None, inverse: bool = False
     ) -> NDArray[np.float32]:
-        """
-        Construct affine matrices using positions and angles of molecules.
+        """Construct affine matrices using positions and angles of molecules.
 
         Parameters
         ----------
@@ -522,8 +517,7 @@ class Molecules:
         *,
         squeeze: bool = True,
     ) -> NDArray[np.float32]:
-        """
-        Generate local coordinates at the neighborhood of each molecule.
+        """Generate local coordinates at the neighborhood of each molecule.
 
         Parameters
         ----------
@@ -571,8 +565,7 @@ class Molecules:
             return np.stack(coords_list, axis=0)
 
     def matrix(self) -> NDArray[np.float64]:
-        """
-        Calculate rotation matrices that align molecules in such orientations
+        """Calculate rotation matrices that align molecules in such orientations
         that ``vec`` belong to the object.
 
         Returns
@@ -588,8 +581,7 @@ class Molecules:
     def euler_angle(
         self, seq: str = "ZXZ", degrees: bool = False
     ) -> NDArray[np.float64]:
-        """
-        Calculate Euler angles that transforms a source vector to vectors that
+        """Calculate Euler angles that transforms a source vector to vectors that
         belong to the object.
 
         Parameters
@@ -615,8 +607,7 @@ class Molecules:
         return self._rotator.as_euler(seq, degrees=degrees)[..., ::-1]
 
     def quaternion(self, canonical: bool = False) -> NDArray[np.float64]:
-        """
-        Calculate quaternions that transforms a source vector to vectors that
+        """Calculate quaternions that transforms a source vector to vectors that
         belong to the object.
 
         Returns
@@ -643,8 +634,7 @@ class Molecules:
         return self._rotator.as_rotvec()
 
     def translate(self, shifts: _Array1D | _Array2D, copy: bool = True) -> Self:
-        """
-        Translate molecule positions by ``shifts``.
+        """Translate molecule positions by ``shifts``.
 
         Shifts are applied in world coordinates, not internal coordinates of
         every molecules. If molecules should be translated in their own
@@ -682,8 +672,7 @@ class Molecules:
         *,
         copy: bool = True,
     ) -> Self:
-        """
-        Translate molecule positions internally by ``shifts``.
+        """Translate molecule positions internally by ``shifts``.
 
         Shifts are applied in the coordinates of each molecule. If molecules
         should be translated in world coordinates use ``translate`` instead.
@@ -711,8 +700,7 @@ class Molecules:
         seed: int | None = None,
         copy: bool = True,
     ) -> Self:
-        """
-        Apply random translation to each molecule.
+        """Apply random translation to each molecule.
 
         Translation range is restricted by a maximum distance and translation
         values are uniformly distributed in this region. Different translations
@@ -755,8 +743,7 @@ class Molecules:
         *,
         copy: bool = True,
     ) -> Self:
-        """
-        Rotate molecules using internal rotation vector.
+        """Rotate molecules using internal rotation vector.
 
         Vector components are calculated in the molecule-coordinate.
 
@@ -789,17 +776,14 @@ class Molecules:
         *,
         copy: bool = True,
     ) -> Self:
-        """
-        Rotate molecules using rotation matrices, **with their position unchanged**.
+        """Rotate molecules using rotation matrices, **with their position unchanged**.
 
         Parameters
         ----------
         matrix : ArrayLike
-            Rotation matrices, whose length must be same as the number of
-            molecules.
+            Rotation matrices, whose length must be same as the number of molecules.
         copy : bool, default is True
-            If true, create a new instance, otherwise overwrite the existing
-            instance.
+            If true, create a new instance, otherwise overwrite the existing instance.
 
         Returns
         -------
@@ -815,16 +799,14 @@ class Molecules:
         *,
         copy: bool = True,
     ) -> Self:
-        """
-        Rotate molecules using quaternions, **with their position unchanged**.
+        """Rotate molecules using quaternions, **with their position unchanged**.
 
         Parameters
         ----------
         quat : ArrayLike
             Rotation quaternion.
         copy : bool, default is True
-            If true, create a new instance, otherwise overwrite the existing
-            instance.
+            If true, create a new instance, otherwise overwrite the existing instance.
 
         Returns
         -------
@@ -842,16 +824,14 @@ class Molecules:
         order: Literal["xyz", "zyx"] = "xyz",
         copy: bool = True,
     ) -> Self:
-        """
-        Rotate molecules using Euler angles, **with their position unchanged**.
+        """Rotate molecules using Euler angles, **with their position unchanged**.
 
         Parameters
         ----------
         angles: array-like
             Euler angles of rotation.
         copy : bool, default is True
-            If true, create a new instance, otherwise overwrite the existing
-            instance.
+            If true, create a new instance, otherwise overwrite the existing instance.
 
         Returns
         -------
@@ -867,16 +847,14 @@ class Molecules:
         return self.rotate_by(rotator, copy=copy)
 
     def rotate_by_rotvec(self, vector: _Array2D, *, copy: bool = True) -> Self:
-        """
-        Rotate molecules using rotation vectors, **with their position unchanged**.
+        """Rotate molecules using rotation vectors, **with their position unchanged**.
 
         Parameters
         ----------
         vector: array-like
             Rotation vectors.
         copy : bool, default is True
-            If true, create a new instance, otherwise overwrite the existing
-            instance.
+            If true, create a new instance, otherwise overwrite the existing instance.
 
         Returns
         -------
@@ -887,8 +865,7 @@ class Molecules:
         return self.rotate_by(rotator, copy=copy)
 
     def rotate_by(self, rotator: Rotation, *, copy: bool = True) -> Self:
-        """
-        Rotate molecule with a ``Rotation`` object.
+        """Rotate molecule with a ``Rotation`` object.
 
         Note that ``Rotation`` object satisfies following equation.
 
@@ -918,8 +895,7 @@ class Molecules:
         return out
 
     def rotate_random(self, copy: bool = True, seed: int | None = None) -> Self:
-        """
-        Rotate molecules randomly.
+        """Rotate molecules randomly.
 
         Parameters
         ----------
@@ -961,8 +937,7 @@ class Molecules:
         /,
         nullable: bool = True,
     ) -> Self:
-        """
-        Concatenate the molecules with the others.
+        """Concatenate the molecules with the others.
 
         Parameters
         ----------
@@ -1058,8 +1033,7 @@ class Molecules:
         *more_by: IntoExpr,
         descending: bool = False,
     ) -> Self:
-        """
-        Return a new instance with sorted molecules and features.
+        """Return a new instance with sorted molecules and features.
 
         Parameters
         ----------
@@ -1095,8 +1069,7 @@ class Molecules:
         )
 
     def append(self, other: Molecules) -> Self:
-        """
-        Mutably append molecules.
+        """Mutably append molecules.
 
         Parameters
         ----------
@@ -1130,6 +1103,18 @@ class Molecules:
         self._rotator = Rotation.from_quat(rot)
         self._features = feat
         return self
+
+    def symmetry_expand(
+        self,
+        symmetry: str,
+        sym_axis: Literal["z", "y", "x"] = "z",
+    ) -> Molecules:
+        """Symmetry-expand molecules."""
+        axis = "xyz"["zyx".index(sym_axis.lower())]  # zyx to xyz
+        rots = Rotation.create_group(symmetry, axis=axis)
+        rotvecs = rots.as_rotvec()
+        all_molecules = [self.rotate_by_rotvec_internal(vec) for vec in rotvecs]
+        return Molecules.concat(all_molecules, concat_features=True)
 
 
 def _is_boolean_array(a: Any) -> TypeGuard[NDArray[np.bool_]]:

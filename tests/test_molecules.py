@@ -326,3 +326,9 @@ def test_concat_molecules():
     assert mole.count() == 6
     assert_allclose(mole.pos, np.vstack([np.zeros((4, 3)), np.ones((2, 3))]))
     assert mole.features["A"].to_list() == [1, 2, 3, 4, 5, 6]
+
+
+def test_symmetry_expansion():
+    mole0 = Molecules(np.zeros((4, 3)), features={"A": [1, 2, 3, 4]})
+    mole1 = mole0.symmetry_expand("C4", sym_axis="z")
+    assert mole1.count() == 16
