@@ -311,6 +311,8 @@ class SubtomogramLoader(LoaderBase):
 
 
 class ArrayStoreInterface:
+    """Class for saving extracted subtomograms."""
+
     def __init__(self, save_dir):
         self._save_dir = Path(save_dir)
         self._save_dir.mkdir()
@@ -327,7 +329,6 @@ class ArrayStoreInterface:
                 self.load_array(i),
                 shape=shape,
                 dtype=np.float32,
-                name=f"load-{id(self)}-{i}",
             )
             for i in range(num)
         ]
