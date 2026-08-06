@@ -452,12 +452,12 @@ class Molecules:
         Molecules
             Molecule subset.
         """
-        if isinstance(spec, int):
+        if isinstance(spec, (int, np.integer)):
             if spec < 0:
                 raise IndexError("Negative indexing is not supported.")
             if spec >= len(self):
                 raise IndexError("Index out of range.")
-            _spec = slice(spec, spec + 1)
+            _spec = slice(int(spec), int(spec) + 1)
         else:
             _spec = spec
         pos = self.pos[_spec]
@@ -1005,11 +1005,11 @@ class Molecules:
 
     def filter(
         self,
-        predicate: pl.Expr | str | pl.Series | list[bool] | np.ndarray,
+        *predicates: pl.Expr | str | pl.Series | list[bool] | np.ndarray,
     ) -> Self:
         """Filter molecules by its features."""
         df = self.to_dataframe()
-        df_filt = df.filter(predicate)
+        df_filt = df.filter(*predicates)
         return self.__class__.from_dataframe(df_filt)
 
     def head(self, n: int = 10) -> Self:
