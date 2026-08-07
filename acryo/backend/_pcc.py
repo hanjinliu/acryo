@@ -42,18 +42,18 @@ def subpixel_pcc(
 
     maxima = backend.unravel_index(backend.argmax(power), power.shape)
     midpoints = np.array(
-        [np.fix(axis_size / 2) for axis_size in power.shape], dtype=np.float32
+        [np.trunc(axis_size / 2) for axis_size in power.shape], dtype=np.float32
     )
 
     shifts = backend.asnumpy(maxima).astype(np.float32)
     sl = shifts > midpoints
     shifts[sl] -= np.array(power.shape, dtype=np.float32)[sl]
     # Initial shift estimate in upsampled grid
-    shifts = np.fix(shifts * upsample_factor) / upsample_factor
+    shifts = np.trunc(shifts * upsample_factor) / upsample_factor
     if upsample_factor > 1:
         upsampled_region_size = math.ceil(upsample_factor * 1.5)
         # Center of output array at dftshift + 1
-        dftshift = float(np.fix(upsampled_region_size / 2.0))
+        dftshift = float(np.trunc(upsampled_region_size / 2.0))
         # Matrix multiply DFT around the current shift estimate
         sample_region_offset = dftshift - shifts * upsample_factor
         # Locate maximum and map back to original pixel grid

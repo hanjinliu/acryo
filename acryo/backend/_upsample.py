@@ -30,7 +30,7 @@ def upsample(
         backend.unravel_index(backend.argmax(local_response), local_response.shape)
     )
     corr = backend.asnumpy(local_response[tuple(local_maxima)])
-    loc_shift = local_maxima / UPSAMPLE + local_offset
+    loc_shift = local_maxima / UPSAMPLE + backend.asnumpy(local_offset)
     shifts = maxima - midpoints + loc_shift
     return shifts, corr  # type: ignore
 
