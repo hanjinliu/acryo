@@ -5,7 +5,7 @@ from ._base import LoaderBase
 from typing import TYPE_CHECKING, Iterable, Sequence
 import numpy as np
 from numpy.typing import NDArray
-from dask import array as da, delayed
+from dask import array as da
 from scipy import ndimage as ndi
 from scipy.spatial.transform import Rotation
 
@@ -168,32 +168,40 @@ def simulate_noise(
     seed: int,
 ) -> da.Array:
     # img: spline filtered
+    # NOTE: all the projections are calculated in a single task. Passing a dask array
+    # to many delayed functions duplicates the upstream tasks in dask>=2025.
+    img = da.asarray(img).rechunk(img.shape)
+    return img.map_blocks(
+        _simulate_noise,
+        central_axis,
+        degrees,
+        noise,
+        seed,
+        meta=np.empty((0, 0, 0), dtype=np.float32),
+    )
+
+
+def _simulate_noise(
+    img: NDArray[np.float32],
+    central_axis,
+    degrees: NDArray[np.float32],
+    noise: float,
+    seed: int,
+) -> NDArray[np.float32]:
     matrices, output_shape = normalize_radon_input(img.shape, central_axis, degrees)
-    sino: da.Array = da.stack(
+    sino = np.stack(
         [
-            da.from_delayed(
-                radon_single(img, mtx, order=3, output_shape=output_shape),
-                shape=output_shape[1:],
-                dtype=np.float32,
-            )
+            radon_single(img, mtx, order=3, output_shape=output_shape)
             for mtx in matrices
         ],
         axis=0,
     )
     rng = np.random.default_rng(seed=seed)
     sino += rng.normal(0, noise, sino.shape).astype(np.float32)
-    out = da.stack(
-        [
-            da.from_delayed(
-                iradon(sino[:, i].T, degrees, img.shape[:2]),
-                shape=img.shape[:2],
-                dtype=np.float32,
-            )
-            for i in range(img.shape[2])
-        ],
+    return np.stack(
+        [iradon(sino[:, i].T, degrees, img.shape[:2]) for i in range(img.shape[2])],
         axis=1,
     )
-    return out
 
 
 # Radon transform
@@ -222,7 +230,6 @@ def normalize_radon_input(
     return params, output_shape
 
 
-@delayed
 def radon_single(img: np.ndarray, mtx: np.ndarray, order: int = 3, output_shape=None):
     """Radon transform of 2D image."""
     img_rot = ndi.affine_transform(
@@ -246,7 +253,6 @@ def _get_rotation_matrices_for_radon_3d(
 # This function is mostly ported from `skimage.transform`.
 # The most important difference is that this implementation support arbitrary
 # output shape.
-@delayed
 def iradon(
     img: np.ndarray,
     degrees: np.ndarray,

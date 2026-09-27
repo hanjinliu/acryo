@@ -20,7 +20,6 @@ from typing_extensions import TypeGuard
 import numpy as np
 from numpy.typing import NDArray
 from dask import array as da
-from dask.delayed import delayed
 from scipy.spatial.transform import Rotation
 
 import polars as pl
@@ -34,7 +33,14 @@ from acryo.alignment import (
 from acryo import _utils
 from acryo._types import nm, pixel
 from acryo.backend import Backend
-from acryo._dask import DaskArrayList, DaskTaskList, DaskTaskIterator, compute
+from acryo._dask import (
+    DaskArrayList,
+    DaskTaskList,
+    DaskTaskIterator,
+    compute,
+    map_subvolumes,
+    map_subvolumes_to_array,
+)
 from acryo.molecules import Molecules
 from acryo.loader import _misc
 from acryo.loader._group import LoaderGroup
@@ -175,16 +181,11 @@ class LoaderBase(ABC):
             Delayed tasks that are ready for ``da.compute``.
         """
         output_shape = self._get_output_shape(output_shape)
-        dask_array = self.construct_loading_tasks(output_shape=output_shape)
-        delayed_f = delayed(func)
-        if var_kwarg is None:
-            it = (delayed_f(ar, *const_args, **const_kwargs) for ar in dask_array)
-        else:
-            it = (
-                delayed_f(ar, *const_args, **const_kwargs, **kw)
-                for ar, kw in zip(dask_array, _misc.dict_iterrows(var_kwarg))
-            )
-        return DaskTaskIterator(it)
+        stack = self.construct_dask(output_shape=output_shape)
+        tasks = map_subvolumes(
+            stack, func, *const_args, var_kwarg=var_kwarg, **const_kwargs
+        )
+        return DaskTaskIterator(tasks)
 
     def construct_mapping_tasks(
         self,
@@ -242,13 +243,13 @@ class LoaderBase(ABC):
         3D array or 4D array
             Subtomogram(s) of given index.
         """
-        tasks = self.construct_loading_tasks(output_shape=output_shape)
+        stack = self.construct_dask(output_shape=output_shape)
         if isinstance(idx, SupportsIndex):
-            return tasks[idx].compute()
+            return stack[idx.__index__()].compute()
         elif isinstance(idx, slice):
-            return da.stack(tasks[idx], axis=0).compute()
+            return stack[idx].compute()
         elif hasattr(idx, "__iter__"):
-            return da.stack([tasks[i] for i in idx], axis=0).compute()
+            return stack[[i.__index__() for i in idx]].compute()
         else:
             raise TypeError(f"Invalid index type: {type(idx)}")
 
@@ -304,13 +305,21 @@ class LoaderBase(ABC):
         self,
         output_shape: _ShapeType = None,
         *,
-        chunksize: int | Literal["auto"] = "auto",
+        chunksize: int | Literal["auto"] = 64,
         backend: Backend | None = None,
     ) -> NDArray[np.float32]:
         """Calculate the average of subtomograms.
 
         This function execute so-called "subtomogram averaging". The size of
         subtomograms is determined by the ``self.output_shape`` attribute.
+
+        Parameters
+        ----------
+        output_shape : int or tuple of int, optional
+            Shape of the subtomograms. If not given, the default output shape of the
+            loader object will be used.
+        chunksize : int or "auto", default is 64
+            Number of subtomograms summed up in a task. Larger value uses more memory.
 
         Returns
         -------
@@ -531,21 +540,18 @@ class LoaderBase(ABC):
             )
         else:
             task_shape = tuple(2 * np.ceil(_max_shifts_px).astype(np.int32) + 1)
-        task_arrays = (
-            self.replace(output_shape=model.input_shape)
-            .iter_mapping_tasks(
-                model.landscape,
-                max_shifts=_max_shifts_px,
-                upsample=upsample,
-                var_kwarg=dict(
-                    quaternion=self.molecules.quaternion(),
-                    pos=self.molecules.pos / self.scale,
-                ),
-            )
-            .tolist()
-            .asarrays(shape=task_shape, dtype=np.float32)
+        return map_subvolumes_to_array(
+            self.construct_dask(output_shape=model.input_shape),
+            model.landscape,
+            task_shape,
+            np.float32,
+            max_shifts=_max_shifts_px,
+            upsample=upsample,
+            var_kwarg=dict(
+                quaternion=self.molecules.quaternion(),
+                pos=self.molecules.pos / self.scale,
+            ),
         )
-        return da.stack(task_arrays, axis=0)
 
     def extract_subtomograms(self, save_path) -> LoaderBase:
         """Create a new loader that directly loads extracted subtomograms."""

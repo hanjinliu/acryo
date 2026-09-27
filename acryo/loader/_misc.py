@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable, Any, Sequence, SupportsInt
+from typing import Sequence, SupportsInt
 import numpy as np
 from numpy.typing import NDArray
 import polars as pl
@@ -18,18 +18,6 @@ def get_feature_list(corr_max, local_shifts, rotvec) -> list[pl.Series]:
         pl.Series("align-dxrot", np.round(rotvec[:, 2], 5)),
     ]
     return features
-
-
-def dict_iterrows(d: dict[str, Iterable[Any]]):
-    """Generater similar to pl.DataFrame.iterrows().
-
-    >>> dict_iterrows({'a': [1, 2, 3], 'b': [4, 5, 6]})
-
-    will yield {'a': 1, 'b': 4}, {'a': 2, 'b': 5}, {'a': 3, 'b': 6}.
-    """
-    keys = list(d.keys())
-    for values in zip(*d.values()):
-        yield dict(zip(keys, values))
 
 
 def allocate(
