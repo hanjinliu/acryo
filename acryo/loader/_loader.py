@@ -5,7 +5,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 import numpy as np
 import polars as pl
-from dask import array as da, delayed
+from dask import array as da
+from dask.array.core import normalize_chunks
+from dask.base import tokenize
+from dask.highlevelgraph import HighLevelGraph
 
 from acryo._types import nm, pixel
 from acryo._reader import imread
@@ -15,7 +18,7 @@ from acryo import _utils
 from acryo.loader._base import LoaderBase, Unset, _ShapeType, INDEX_OPT
 from acryo.loader._extracted import ExtractedSubvolumeLoader, SUBVOLUME_INDEX
 from acryo.tilt import TiltSeriesModel, NoWedge
-from acryo._dask import DaskTaskPool, DaskArrayList
+from acryo._dask import DaskArrayList, subvolume_array_list, subvolume_stack
 
 if TYPE_CHECKING:
     from typing_extensions import Self
@@ -238,47 +241,73 @@ class SubtomogramLoader(LoaderBase):
     ) -> DaskArrayList:
         """Construct a list of subtomogram lazy loader.
 
+        To process many subtomograms at once, ``construct_dask`` is more efficient.
+
         Returns
         -------
-        list of Delayed object
-            Each object returns a subtomogram on execution by ``da.compute``.
+        DaskArrayList
+            Each dask array returns a subtomogram on computation.
         """
         output_shape = self._get_output_shape(output_shape)
-        xp = backend or Backend()
+        return subvolume_array_list(
+            *self._prep_subvolumes(output_shape),
+            output_shape=output_shape,
+            order=self.order,
+            backend=backend or Backend(),
+        )
 
+    def construct_dask(
+        self,
+        output_shape: pixel | tuple[pixel, ...] | None = None,
+        backend: Backend | None = None,
+    ) -> da.Array:
+        """Construct a dask array of subtomograms.
+
+        This function is always needed before parallel processing. Each subtomogram
+        is a chunk of the returned array. The tomogram chunks are shared, that is,
+        each tomogram chunk is loaded only once and all the subtomograms in it are
+        cropped from it.
+
+        Returns
+        -------
+        da.Array
+            An 4-D array which ``arr[i]`` corresponds to the ``i``-th subtomogram.
+        """
+        output_shape = self._get_output_shape(output_shape)
+        return subvolume_stack(
+            *self._prep_subvolumes(output_shape),
+            output_shape=output_shape,
+            order=self.order,
+            backend=backend or Backend(),
+        )
+
+    def _prep_subvolumes(
+        self, output_shape: tuple[pixel, pixel, pixel]
+    ) -> tuple[da.Array, NDArray[np.intp], NDArray[np.intp], NDArray[np.float32]]:
         image = self.image
-        scale = self.scale
         if isinstance(image, np.ndarray):
-            image = da.from_array(image, asarray=xp.asarray)
-
-        if self.corner_safe:
-            _prep = _utils.prepare_affine_cornersafe
-        else:
-            _prep = _utils.prepare_affine
-        pool = DaskTaskPool.from_func(xp.rotated_crop)
-        for i in range(self.molecules.count()):
-            try:
-                subvol, mtx = _prep(
-                    image,
-                    center=self.molecules.pos[i] / scale,
-                    output_shape=output_shape,
-                    rot=self.molecules.rotator[i],
-                    order=self.order,
-                )
-            except _utils.SubvolumeOutOfBoundError as err:
-                raise err.with_msg(
-                    f"The {i}-th molecule at {tuple(self.molecules.pos[i])} is "
-                    f"out of bound. {err.msg}"
-                )
-            pool.add_task(
-                subvol,
-                mtx,
-                shape=output_shape,
+            # a single chunk is enough because slicing a numpy array is cheap
+            image = da.from_array(image, chunks=image.shape, name=False)
+        mole = self.molecules
+        if mole.count() == 0:
+            empty = np.zeros((0, 3), dtype=np.intp)
+            return image, empty, empty, np.zeros((0, 4, 4), dtype=np.float32)
+        try:
+            starts, stops, matrices = _utils.prepare_affine_regions(
+                mole.pos / self.scale,
+                mole.rotator,
+                img_shape=image.shape,
+                output_shape=output_shape,
                 order=self.order,
-                cval=xp.mean,
+                corner_safe=self.corner_safe,
             )
-
-        return pool.asarrays(shape=output_shape, dtype=np.float32)
+        except _utils.SubvolumeOutOfBoundError as err:
+            i = err.index
+            raise err.with_msg(
+                f"The {i}-th molecule at {tuple(mole.pos[i])} is out of bound. "
+                f"{err.msg}"
+            )
+        return image, starts, stops, matrices
 
     def extract_subtomograms(
         self, save_path, chunksize: int = 1
@@ -324,19 +353,18 @@ class ArrayStoreInterface:
         np.save(self.path_i(i), array)
 
     def to_dask(self, num: int, shape, chunksize: int = 50) -> da.Array:
-        arrays = [
-            da.from_delayed(
-                self.load_array(i),
-                shape=shape,
-                dtype=np.float32,
-            )
-            for i in range(num)
-        ]
-        out = da.stack(arrays, axis=0)
-        if chunksize > 1:
-            out = out.rechunk((chunksize, *shape))
-        return out
+        if num == 0:
+            return da.zeros((0, *shape), dtype=np.float32)
+        chunks = normalize_chunks((max(chunksize, 1), *shape), (num, *shape))
+        name = "load-subvolumes-" + tokenize(str(self._save_dir), num, chunks)
+        zeros = (0,) * len(shape)
+        layer = {}
+        start = 0
+        for ib, size in enumerate(chunks[0]):
+            layer[(name, ib, *zeros)] = (self.load_arrays, start, start + size)
+            start += size
+        graph = HighLevelGraph.from_collections(name, layer, dependencies=[])
+        return da.Array(graph, name, chunks, dtype=np.float32)
 
-    @delayed
-    def load_array(self, i: int) -> NDArray[np.float32]:
-        return np.load(self.path_i(i))
+    def load_arrays(self, start: int, stop: int) -> NDArray[np.float32]:
+        return np.stack([np.load(self.path_i(i)) for i in range(start, stop)], axis=0)

@@ -17,7 +17,13 @@ if TYPE_CHECKING:
 class SubvolumeOutOfBoundError(ValueError):
     """Raised when a subvolume is out of bound."""
 
-    def __init__(self, sl: slice, size: int, msg: str | None = None):
+    def __init__(
+        self,
+        sl: slice,
+        size: int,
+        msg: str | None = None,
+        index: int | None = None,
+    ):
         if msg is None:
             msg = (
                 f"Cannot slice by {sl.start}:{sl.stop} in the axis " f"of size {size}."
@@ -25,6 +31,7 @@ class SubvolumeOutOfBoundError(ValueError):
         super().__init__(msg)
         self._slice = sl
         self._size = size
+        self._index = index
 
     @property
     def slice(self) -> slice:
@@ -35,11 +42,16 @@ class SubvolumeOutOfBoundError(ValueError):
         return self._size
 
     @property
+    def index(self) -> int | None:
+        """Index of the subvolume that caused the error, if available."""
+        return self._index
+
+    @property
     def msg(self) -> str:
         return self.args[0]
 
     def with_msg(self, msg: str) -> SubvolumeOutOfBoundError:
-        return SubvolumeOutOfBoundError(self.slice, self.size, msg)
+        return SubvolumeOutOfBoundError(self.slice, self.size, msg, index=self.index)
 
 
 def make_slice_and_pad(
@@ -175,66 +187,73 @@ def bin_image(img: np.ndarray | da.Array, binsize: int):
     return img_reshaped.sum(axis=axis)
 
 
-def prepare_affine(
-    img: da.Array,
-    center: Sequence[float],
+def prepare_affine_regions(
+    centers: NDArray[np.floating],
+    rotator: Rotation,
+    img_shape: Sequence[int],
     output_shape: Sequence[int],
-    rot: Rotation,
     order: int = 3,
-) -> tuple[da.Array, NDArray[np.float32]]:
-    output_center = np.array(output_shape) / 2 - 0.5
-    slices: list[slice] = []
-    pads: list[tuple[int, ...]] = []
-    new_center: list[float] = []
-    need_pad = False
-    for c, s, s0 in zip(center, output_shape, img.shape):
-        x0 = int(c - s / 2 - order)
-        x1 = int(x0 + s + 2 * order + 1)
-        _sl, _pad, _need_pad = make_slice_and_pad(x0, x1, s0)
-        slices.append(_sl)
-        pads.append(_pad)
-        new_center.append(c - x0)
-        need_pad = need_pad or _need_pad
+    corner_safe: bool = False,
+) -> tuple[NDArray[np.intp], NDArray[np.intp], NDArray[np.float32]]:
+    """Calculate the image regions and the affine matrices for subvolume cropping.
 
-    img0 = img[tuple(slices)]
-    if need_pad:
-        input = da.pad(img0, pads, mode="mean")
+    All the molecules are processed at once. The float arithmetic is the same as
+    cropping the molecules one by one, so that the results are identical.
+
+    Parameters
+    ----------
+    centers : (N, 3) array
+        Centers of subvolumes in pixel.
+    rotator : Rotation
+        Rotations of the N subvolumes.
+    img_shape : tuple of int
+        Shape of the image to be cropped.
+    output_shape : tuple of int
+        Shape of the output subvolumes.
+    order : int, default is 3
+        Interpolation order, which determines the margin of the regions.
+    corner_safe : bool, default is False
+        If true, the regions are large enough to contain the corners of rotated
+        subvolumes.
+
+    Returns
+    -------
+    (N, 3) int array, (N, 3) int array and (N, 4, 4) float32 array
+        Start and stop indices of the regions (they may be out of the image, which
+        means padding is needed) and the affine matrices that map the output
+        coordinates to the coordinates of the cropped (and padded) regions.
+    """
+    dtype = centers.dtype
+    shape = np.asarray(output_shape, dtype=np.intp)
+    if corner_safe:
+        max_len = np.sqrt(np.sum(np.asarray(output_shape, dtype=np.float32) ** 2))
+        half_len = max_len / 2
+        starts = np.trunc(centers - half_len - dtype.type(order)).astype(np.intp)
+        stops = np.trunc(
+            starts.astype(np.float32) + max_len + np.float32(2 * order) + np.float32(1)
+        ).astype(np.intp)
     else:
-        input = img0
-    mtx = compose_matrices(new_center, [rot], output_center=output_center)[0]
-    return input, mtx
+        half = (shape / 2).astype(dtype)
+        starts = np.trunc(centers - half - dtype.type(order)).astype(np.intp)
+        stops = starts + shape + (2 * order + 1)
 
+    for starts_i, stops_i, size in zip(starts.T, stops.T, img_shape):
+        if (bad := (starts_i >= size) | (stops_i <= 0)).any():
+            i = int(np.argmax(bad))
+            raise SubvolumeOutOfBoundError(
+                slice(int(starts_i[i]), int(stops_i[i])), size, index=i
+            )
 
-def prepare_affine_cornersafe(
-    img: da.Array,
-    center: Sequence[float],
-    output_shape: Sequence[int],
-    rot: Rotation,
-    order: int = 3,
-) -> tuple[da.Array, NDArray[np.float32]]:
-    max_len = np.sqrt(np.sum(np.asarray(output_shape, dtype=np.float32) ** 2))
+    nmole = centers.shape[0]
     output_center = np.array(output_shape) / 2 - 0.5
-    half_len = max_len / 2
-    slices: list[slice] = []
-    pads: list[tuple[int, ...]] = []
-    new_center: list[float] = []
-    need_pad = False
-    for c, s0 in zip(center, img.shape):
-        x0 = int(c - half_len - order)
-        x1 = int(x0 + max_len + 2 * order + 1)
-        _sl, _pad, _need_pad = make_slice_and_pad(x0, x1, s0)
-        slices.append(_sl)
-        pads.append(_pad)
-        new_center.append(c - x0)
-        need_pad = need_pad or _need_pad
-
-    img0 = img[tuple(slices)]
-    if need_pad:
-        input = da.pad(img0, pads, mode="mean")
-    else:
-        input = img0
-    mtx = compose_matrices(new_center, [rot], output_center=output_center)[0]
-    return input, mtx
+    translation_0 = np.tile(np.eye(4, dtype=np.float32), (nmole, 1, 1))
+    translation_0[:, :3, 3] = centers - starts.astype(dtype)
+    rot_mat = np.tile(np.eye(4, dtype=np.float32), (nmole, 1, 1))
+    rot_mat[:, :3, :3] = rotator.as_matrix()
+    translation_1 = np.eye(4, dtype=np.float32)
+    translation_1[:3, 3] = -output_center
+    matrices = np.matmul(np.matmul(translation_0, rot_mat), translation_1)
+    return starts, stops, matrices
 
 
 def missing_wedge_mask(

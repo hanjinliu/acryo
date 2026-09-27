@@ -283,6 +283,21 @@ class BatchLoader(LoaderBase):
             for loader in self.loaders
         )
 
+    def construct_dask(
+        self,
+        output_shape: _ShapeType = None,
+        backend: Backend | None = None,
+    ) -> da.Array:
+        """Construct a dask array of subtomograms of all the tomograms."""
+        _backend = backend or Backend()
+        return da.concatenate(
+            [
+                loader.construct_dask(output_shape=output_shape, backend=_backend)
+                for loader in self.loaders
+            ],
+            axis=0,
+        )
+
     def align(
         self,
         template: TemplateInputType,
