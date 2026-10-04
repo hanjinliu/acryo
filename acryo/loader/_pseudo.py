@@ -106,12 +106,6 @@ class PseudoSubtomogramLoader(LoaderBase):
         chunk_size: nm = 100.0,
         tomo_hand: int = 1,
     ) -> None:
-        TiltSeries = _import_tilt_series_class()
-        if not isinstance(tilt_series, TiltSeries):
-            raise TypeError(
-                "The first argument 'tilt_series' must be a TiltSeries object, got "
-                f"{type(tilt_series)}."
-            )
         if tilt_series.image_path is None:
             raise ValueError("'image_path' of the tilt series is not set.")
         tilt_series.pixel_spacing  # raises if not set
@@ -677,15 +671,3 @@ def _even_crop_margin(
         stacklevel=3,
     )
     return blend_margin
-
-
-def _import_tilt_series_class() -> type[TiltSeries]:
-    try:
-        import torch_reconstruct_tomogram  # noqa: F401
-        from torch_tilt_series import TiltSeries
-    except ImportError as e:
-        raise ImportError(
-            "PseudoSubtomogramLoader requires torch-reconstruct-tomogram. Install it "
-            "by `pip install acryo[torch]`."
-        ) from e
-    return TiltSeries
