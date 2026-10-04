@@ -136,7 +136,7 @@ class LoaderGroup(Generic[_K, _L]):
             Output shape of the averaged image. If not given, the default output
             shape of the loader objects will be used.
         chunksize : int or "auto", default is 64
-            Number of subtomograms summed up in a task. Larger value uses more memory.
+            Number of subtomograms loaded in a task. Larger value uses more memory.
 
         Returns
         -------
@@ -151,15 +151,16 @@ class LoaderGroup(Generic[_K, _L]):
             output_shape = loader._get_output_shape(output_shape)
             dask_array = loader.construct_dask(output_shape=output_shape, backend=xp)
             nmole = dask_array.shape[0]
-            chunks = (chunksize,) + output_shape
+            # rechunk before indexing, otherwise each subtomogram is sliced and
+            # reduced in its own tasks.
+            dask_array = dask_array.rechunk((chunksize,) + output_shape)  # type: ignore
             tasks: list[da.Array] = []
             for _ in range(n_set):
                 ind0, ind1 = _misc.random_splitter(rng, nmole)
-                # rechunk before mean, otherwise mean reduces one subtomogram per task
                 _stack = da.stack(
                     [
-                        da.mean(dask_array[ind0].rechunk(chunks), axis=0),  # type: ignore
-                        da.mean(dask_array[ind1].rechunk(chunks), axis=0),  # type: ignore
+                        da.mean(dask_array[ind0], axis=0),
+                        da.mean(dask_array[ind1], axis=0),
                     ],
                     axis=0,
                 )

@@ -360,7 +360,7 @@ class LoaderBase(ABC):
             Output shape of the averaged image. If not given, the default output
             shape of the loader object will be used.
         chunksize : int or "auto", default is 64
-            Number of subtomograms summed up in a task. Larger value uses more memory.
+            Number of subtomograms loaded in a task. Larger value uses more memory.
 
         Returns
         -------
@@ -375,12 +375,13 @@ class LoaderBase(ABC):
         tasks: list[da.Array] = []
         dsk = self.construct_dask(output_shape=output_shape)
         nmole = dsk.shape[0]
-        chunks = (chunksize,) + output_shape
+        # rechunk before indexing, otherwise each subtomogram is sliced and reduced
+        # in its own tasks. The rechunked chunks are shared by all the splits.
+        dsk = dsk.rechunk((chunksize,) + output_shape)  # type: ignore
         for _ in range(n_set):
             inds = _misc.random_splitter(rng, nmole, n_split)
-            # rechunk before mean, otherwise mean reduces one subtomogram per task
             _stack = da.stack(
-                [dsk[ind].rechunk(chunks).mean(axis=0) for ind in inds],  # type: ignore
+                [dsk[ind].mean(axis=0) for ind in inds],
                 axis=0,
             )
             tasks.append(_stack)
