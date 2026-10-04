@@ -340,7 +340,7 @@ class LoaderBase(ABC):
         squeeze: bool = True,
         output_shape: _ShapeType = None,
         *,
-        chunksize: int | Literal["auto"] = "auto",
+        chunksize: int | Literal["auto"] = 64,
     ) -> NDArray[np.float32]:
         """Split subtomograms into two set and average separately.
 
@@ -359,6 +359,8 @@ class LoaderBase(ABC):
         output_shape : tuple of int, optional
             Output shape of the averaged image. If not given, the default output
             shape of the loader object will be used.
+        chunksize : int or "auto", default is 64
+            Number of subtomograms summed up in a task. Larger value uses more memory.
 
         Returns
         -------
@@ -373,13 +375,15 @@ class LoaderBase(ABC):
         tasks: list[da.Array] = []
         dsk = self.construct_dask(output_shape=output_shape)
         nmole = dsk.shape[0]
+        chunks = (chunksize,) + output_shape
         for _ in range(n_set):
             inds = _misc.random_splitter(rng, nmole, n_split)
+            # rechunk before mean, otherwise mean reduces one subtomogram per task
             _stack = da.stack(
-                [dsk[ind].mean(axis=0) for ind in inds],
+                [dsk[ind].rechunk(chunks).mean(axis=0) for ind in inds],  # type: ignore
                 axis=0,
             )
-            tasks.append(_stack.rechunk((chunksize,) + output_shape))
+            tasks.append(_stack)
 
         out = da.compute(*tasks)
         stack = np.stack([backend.asnumpy(a) for a in out], axis=0)
