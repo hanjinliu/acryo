@@ -12,16 +12,20 @@ from acryo.deconv import wiener_deconv
 class CTFModel:
     """A model for Contrast Transfer Function.
 
+    The sign of the CTF is chosen so that the first lobe is positive under the
+    standard (underfocus) imaging condition. Applying the CTF to an image therefore
+    preserves its contrast at low frequencies (bright density stays bright).
+
     Attributes
     ----------
     spherical_aberration : float or callable
         Spherical aberration in mm.
     defocus : float or callable
-        Defocus in μm.
+        Defocus in μm. Negative value means underfocus.
     wave_length : float or callable
         Wave length in angstrom.
     bfactor : float
-        B-factor.
+        B-factor in nm².
     """
 
     spherical_aberration: float
@@ -78,11 +82,15 @@ class CTFModel:
         return ifftn(_multiply_multi(np.sign(ctf), img_ft), axes=(-2, -1)).real
 
     def simulate(self, freq):
+        """Simulate the CTF at the given spatial frequencies (in 1/nm)."""
         f2 = freq**2
         cs = self.spherical_aberration * 1e6
-        defocus = self.defocus * 1e3
+        underfocus = -self.defocus * 1e3
         lmd = self.wave_length / 10
-        wave_aberration = np.pi * lmd * defocus * f2 - np.pi / 2 * cs * lmd**3 * f2**2
+        # defocus and spherical aberration terms have opposite signs in underfocus
+        wave_aberration = (
+            np.pi * lmd * underfocus * f2 - np.pi / 2 * cs * lmd**3 * f2**2
+        )
         return np.sin(wave_aberration) * np.exp(-self.bfactor * f2 / 4)
 
     def deconvolve(
