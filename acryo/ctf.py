@@ -26,12 +26,21 @@ class CTFModel:
         Wave length in angstrom.
     bfactor : float
         B-factor in nm².
+    amplitude : float
+        Fraction of amplitude contrast, between 0 and 1.
     """
 
     spherical_aberration: float
     wave_length: float
     defocus: float = -1.0
     bfactor: float = 0.0
+    amplitude: float = 0.07
+
+    def __post_init__(self):
+        if not 0.0 <= self.amplitude <= 1.0:
+            raise ValueError(
+                f"Amplitude contrast must be between 0 and 1, got {self.amplitude}."
+            )
 
     @classmethod
     def from_kv(
@@ -40,6 +49,7 @@ class CTFModel:
         spherical_aberration: float,
         defocus: float = -1.0,
         bfactor: float = 0.0,
+        amplitude: float = 0.07,
     ) -> CTFModel:
         wave_length = _voltage_to_wave_length(kv)
         return cls(
@@ -47,6 +57,7 @@ class CTFModel:
             wave_length=wave_length,
             defocus=defocus,
             bfactor=bfactor,
+            amplitude=amplitude,
         )
 
     def simulate_image(
@@ -84,14 +95,19 @@ class CTFModel:
     def simulate(self, freq):
         """Simulate the CTF at the given spatial frequencies (in 1/nm)."""
         f2 = freq**2
-        cs = self.spherical_aberration * 1e6
-        underfocus = -self.defocus * 1e3
-        lmd = self.wave_length / 10
-        # defocus and spherical aberration terms have opposite signs in underfocus
+        cs = self.spherical_aberration * 1e6  # mm -> nm
+        underfocus = -self.defocus * 1e3  # μm -> nm
+        lmd = self.wave_length / 10  # Å -> nm
+        # phase shift caused by the lens aberration. Defocus and spherical aberration
+        # terms have opposite signs in underfocus.
         wave_aberration = (
             np.pi * lmd * underfocus * f2 - np.pi / 2 * cs * lmd**3 * f2**2
         )
-        return np.sin(wave_aberration) * np.exp(-self.bfactor * f2 / 4)
+        # The CTF with amplitude contrast A is sqrt(1 - A²) * sin(χ) + A * cos(χ),
+        # which is identical to sin(χ + arcsin(A)).
+        amplitude_phase = np.arcsin(self.amplitude)
+        envelope = np.exp(-self.bfactor * f2 / 4)
+        return np.sin(wave_aberration + amplitude_phase) * envelope
 
     def deconvolve(
         self,

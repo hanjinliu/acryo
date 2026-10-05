@@ -30,6 +30,50 @@ def test_ctf_preserves_contrast(defocus: float):
     assert ctf.phase_flip(img, scale=1.0)[32, 32] > 0
 
 
+def _tom_ctf1d(pixelsize, voltage, cs, defocus, amplitude, length=2048):
+    # Reference implementation from IsoNet (MIT License), in SI units. Phase shift
+    # and B-factor are omitted.
+    # https://github.com/IsoNet-cryoET/IsoNet/blob/master/util/deconvolution.py
+    ny = 1 / pixelsize
+    lambda1 = 12.2643247 / np.sqrt(voltage * (1.0 + voltage * 0.978466e-6)) * 1e-10
+    lambda2 = lambda1 * 2
+    points = np.arange(0, length) / (2 * length) * ny
+    k2 = points**2
+    term1 = lambda1**3 * cs * k2**2
+    w = np.pi / 2 * (term1 + lambda2 * defocus * k2)
+    acurve = np.cos(w) * amplitude
+    pcurve = -np.sqrt(1 - amplitude**2) * np.sin(w)
+    return points, lambda1, pcurve + acurve
+
+
+@pytest.mark.parametrize("amplitude", [0.0, 0.07, 0.1, 1.0])
+@pytest.mark.parametrize("defocus", [-1.0, -3.0])
+def test_ctf_matches_isonet(amplitude: float, defocus: float):
+    scale = 0.5
+    # IsoNet takes positive values for underfocus and negates them before passing
+    # to `tom_ctf1d`, which is the same as our sign convention.
+    freq, wave_length, ctf_ref = _tom_ctf1d(
+        scale * 1e-9, 300e3, 2.7e-3, defocus * 1e-6, amplitude
+    )
+    ctf = CTFModel(
+        spherical_aberration=2.7,
+        wave_length=wave_length * 1e10,
+        defocus=defocus,
+        amplitude=amplitude,
+    )
+    np.testing.assert_allclose(ctf.simulate(freq * 1e-9), ctf_ref, atol=1e-8)
+
+
+def test_ctf_amplitude():
+    for amplitude in [0.0, 0.07, 0.5]:
+        ctf = CTFModel.from_kv(300, 2.7, defocus=-3.0, amplitude=amplitude)
+        assert ctf.simulate(0.0) == pytest.approx(amplitude)
+    with pytest.raises(ValueError):
+        CTFModel.from_kv(300, 2.7, amplitude=-0.1)
+    with pytest.raises(ValueError):
+        CTFModel.from_kv(300, 2.7, amplitude=1.1)
+
+
 def test_ctf_cs_term():
     # spherical aberration compensates the phase shift of underfocus
     freq = np.linspace(0.01, 3.0, 300)
