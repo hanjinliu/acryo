@@ -1,6 +1,11 @@
 __version__ = "0.7.1"
 
-from acryo.loader import SubtomogramLoader, BatchLoader, MockLoader
+from acryo.loader import (
+    SubtomogramLoader,
+    BatchLoader,
+    MockLoader,
+    PseudoSubtomogramLoader,
+)
 from acryo.molecules import Molecules
 from acryo.simulator import TomogramSimulator
 
@@ -11,6 +16,7 @@ __all__ = [
     "SubtomogramLoader",
     "BatchLoader",
     "MockLoader",
+    "PseudoSubtomogramLoader",
     "TomogramSimulator",
     "imread",
 ]
