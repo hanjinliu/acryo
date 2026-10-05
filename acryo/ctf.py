@@ -12,22 +12,35 @@ from acryo.deconv import wiener_deconv
 class CTFModel:
     """A model for Contrast Transfer Function.
 
+    The sign of the CTF is chosen so that the first lobe is positive under the
+    standard (underfocus) imaging condition. Applying the CTF to an image therefore
+    preserves its contrast at low frequencies (bright density stays bright).
+
     Attributes
     ----------
     spherical_aberration : float or callable
         Spherical aberration in mm.
     defocus : float or callable
-        Defocus in μm.
+        Defocus in μm. Negative value means underfocus.
     wave_length : float or callable
         Wave length in angstrom.
     bfactor : float
-        B-factor.
+        B-factor in nm².
+    amplitude : float
+        Fraction of amplitude contrast, between 0 and 1.
     """
 
     spherical_aberration: float
     wave_length: float
     defocus: float = -1.0
     bfactor: float = 0.0
+    amplitude: float = 0.07
+
+    def __post_init__(self):
+        if not 0.0 <= self.amplitude <= 1.0:
+            raise ValueError(
+                f"Amplitude contrast must be between 0 and 1, got {self.amplitude}."
+            )
 
     @classmethod
     def from_kv(
@@ -36,6 +49,7 @@ class CTFModel:
         spherical_aberration: float,
         defocus: float = -1.0,
         bfactor: float = 0.0,
+        amplitude: float = 0.07,
     ) -> CTFModel:
         wave_length = _voltage_to_wave_length(kv)
         return cls(
@@ -43,6 +57,7 @@ class CTFModel:
             wave_length=wave_length,
             defocus=defocus,
             bfactor=bfactor,
+            amplitude=amplitude,
         )
 
     def simulate_image(
@@ -78,12 +93,21 @@ class CTFModel:
         return ifftn(_multiply_multi(np.sign(ctf), img_ft), axes=(-2, -1)).real
 
     def simulate(self, freq):
+        """Simulate the CTF at the given spatial frequencies (in 1/nm)."""
         f2 = freq**2
-        cs = self.spherical_aberration * 1e6
-        defocus = self.defocus * 1e3
-        lmd = self.wave_length / 10
-        wave_aberration = np.pi * lmd * defocus * f2 - np.pi / 2 * cs * lmd**3 * f2**2
-        return np.sin(wave_aberration) * np.exp(-self.bfactor * f2 / 4)
+        cs = self.spherical_aberration * 1e6  # mm -> nm
+        underfocus = -self.defocus * 1e3  # μm -> nm
+        lmd = self.wave_length / 10  # Å -> nm
+        # phase shift caused by the lens aberration. Defocus and spherical aberration
+        # terms have opposite signs in underfocus.
+        wave_aberration = (
+            np.pi * lmd * underfocus * f2 - np.pi / 2 * cs * lmd**3 * f2**2
+        )
+        # The CTF with amplitude contrast A is sqrt(1 - A²) * sin(χ) + A * cos(χ),
+        # which is identical to sin(χ + arcsin(A)).
+        amplitude_phase = np.arcsin(self.amplitude)
+        envelope = np.exp(-self.bfactor * f2 / 4)
+        return np.sin(wave_aberration + amplitude_phase) * envelope
 
     def deconvolve(
         self,
