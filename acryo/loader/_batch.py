@@ -4,7 +4,7 @@ from __future__ import annotations
 from types import MappingProxyType
 
 import weakref
-from typing import Hashable, Iterable, Iterator, TYPE_CHECKING
+from typing import Hashable, Iterable, Iterator, TYPE_CHECKING, Sequence
 import numpy as np
 import polars as pl
 
@@ -29,6 +29,48 @@ if TYPE_CHECKING:
     from acryo.loader._base import _ShapeType
 
 IMAGE_ID_LABEL = "image-id"
+
+
+class ConcatenatedLoader(LoaderBase):
+    """A simple loader that concatenates the subtomograms of multiple loaders."""
+
+    def __init__(self, loaders: Sequence[LoaderBase]):
+        if len(loaders) == 0:
+            raise ValueError("At least one loader is required.")
+        first = loaders[0]
+        super().__init__(
+            order=first.order, scale=first.scale, output_shape=first.output_shape
+        )
+        self._loaders = list(loaders)
+
+    @property
+    def molecules(self) -> Molecules:
+        return Molecules.concat([loader.molecules for loader in self._loaders])
+
+    def construct_loading_tasks(self, output_shape=None, backend=None) -> DaskArrayList:
+        return DaskArrayList.concat(
+            loader.construct_loading_tasks(output_shape=output_shape, backend=backend)
+            for loader in self._loaders
+        )
+
+    def construct_dask(self, output_shape=None, backend=None) -> da.Array:
+        return da.concatenate(
+            [
+                loader.construct_dask(output_shape=output_shape, backend=backend)
+                for loader in self._loaders
+            ],
+            axis=0,
+        )
+
+    def replace(self, molecules=None, output_shape=None, order=None, scale=None):
+        if molecules is not None:
+            raise ValueError(f"Cannot replace molecules of {type(self).__name__}.")
+        return self.__class__(
+            [
+                loader.replace(output_shape=output_shape, order=order, scale=scale)
+                for loader in self._loaders
+            ]
+        )
 
 
 class BatchLoader(LoaderBase):

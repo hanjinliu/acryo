@@ -1060,12 +1060,17 @@ class Molecules:
             features=self.features.with_columns(exprs, *more_exprs, **named_exprs),
         )
 
-    def drop_features(self, columns: str | Sequence[str], *more_columns: str) -> Self:
+    def drop_features(
+        self,
+        columns: str | Sequence[str],
+        *more_columns: str,
+        strict: bool = True,
+    ) -> Self:
         """Return a new instance with updated features."""
         return self.__class__(
             self.pos,
             self.rotator,
-            features=self.features.drop(columns, *more_columns),
+            features=self.features.drop(columns, *more_columns, strict=strict),
         )
 
     def append(self, other: Molecules) -> Self:

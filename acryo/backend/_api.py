@@ -117,38 +117,34 @@ class Backend:
         return x.copy()  # type: ignore
 
     @overload
-    def array(self, x, dtype: type[_T] | np.dtype[_T]) -> AnyArray[_T]:
-        ...
+    def array(self, x, dtype: type[_T] | np.dtype[_T]) -> AnyArray[_T]: ...
 
     @overload
-    def array(self, x: AnyArray[_T] | NDArray[_T], dtype: None = None) -> AnyArray[_T]:
-        ...
+    def array(
+        self, x: AnyArray[_T] | NDArray[_T], dtype: None = None
+    ) -> AnyArray[_T]: ...
 
     def array(self, x, dtype=None):  # type: ignore
         """Convert to numpy array."""
         return self._xp_.array(x, dtype)  # type: ignore
 
     @overload
-    def asarray(self, x, dtype: type[_T] | np.dtype[_T]) -> AnyArray[_T]:
-        ...
+    def asarray(self, x, dtype: type[_T] | np.dtype[_T]) -> AnyArray[_T]: ...
 
     @overload
     def asarray(
         self, x: AnyArray[_T] | NDArray[_T], dtype: None = None
-    ) -> AnyArray[_T]:
-        ...
+    ) -> AnyArray[_T]: ...
 
     def asarray(self, x, dtype=None):  # type: ignore
         """Convert to numpy array."""
         return self._xp_.asarray(x, dtype)  # type: ignore
 
     @overload
-    def arange(self, *args, dtype: type[_T], **kwargs) -> AnyArray[_T]:
-        ...
+    def arange(self, *args, dtype: type[_T], **kwargs) -> AnyArray[_T]: ...
 
     @overload
-    def arange(self, *args, dtype: None = None, **kwargs) -> AnyArray:
-        ...
+    def arange(self, *args, dtype: None = None, **kwargs) -> AnyArray: ...
 
     def arange(self, *args, dtype=None, **kwargs):
         """Return evenly spaced values within a given interval."""
@@ -157,14 +153,12 @@ class Backend:
     @overload
     def linspace(
         self, start, stop, num: int, endpoint: bool, dtype: None = None
-    ) -> AnyArray:
-        ...
+    ) -> AnyArray: ...
 
     @overload
     def linspace(
         self, start, stop, num: int, endpoint: bool, dtype: type[_T]
-    ) -> AnyArray[_T]:
-        ...
+    ) -> AnyArray[_T]: ...
 
     def linspace(self, start, stop, num=50, endpoint=True, dtype=None):
         """Return evenly spaced numbers over a specified interval."""
@@ -186,24 +180,20 @@ class Backend:
         return self._xp_.full(shape, fill_value, dtype=dtype)  # type: ignore
 
     @overload
-    def sum(self, x: AnyArray[_T], axis: None = None) -> _T:
-        ...
+    def sum(self, x: AnyArray[_T], axis: None = None) -> _T: ...
 
     @overload
-    def sum(self, x: AnyArray[_T], axis: int | tuple[int, ...]) -> AnyArray[_T]:
-        ...
+    def sum(self, x: AnyArray[_T], axis: int | tuple[int, ...]) -> AnyArray[_T]: ...
 
     def sum(self, x, axis=None):
         """Return the sum of array elements over a given axis."""
         return self._xp_.sum(x, axis=axis)
 
     @overload
-    def mean(self, x: AnyArray[_T], axis: None = None) -> _T:
-        ...
+    def mean(self, x: AnyArray[_T], axis: None = None) -> _T: ...
 
     @overload
-    def mean(self, x: AnyArray[_T], axis: int | tuple[int, ...]) -> AnyArray[_T]:
-        ...
+    def mean(self, x: AnyArray[_T], axis: int | tuple[int, ...]) -> AnyArray[_T]: ...
 
     def mean(self, x, axis=None):
         """Return the mean of array elements over a given axis."""
@@ -237,61 +227,55 @@ class Backend:
         return self._xp_.tensordot(a, b, axes)  # type: ignore
 
     @overload
-    def max(self, x: AnyArray[_T], axis: None = None) -> _T:
-        ...
+    def max(self, x: AnyArray[_T], axis: None = None) -> _T: ...
 
     @overload
-    def max(self, x: AnyArray[_T], axis: int | tuple[int, ...]) -> AnyArray[_T]:
-        ...
+    def max(self, x: AnyArray[_T], axis: int | tuple[int, ...]) -> AnyArray[_T]: ...
 
     def max(self, x, axis=None):
         """Return the maximum of an array or maximum along an axis."""
         return self._xp_.max(x, axis=axis)
 
     @overload
-    def min(self, x: AnyArray[_T], axis: None = None) -> _T:
-        ...
+    def min(self, x: AnyArray[_T], axis: None = None) -> _T: ...
 
     @overload
-    def min(self, x: AnyArray[_T], axis: int | tuple[int, ...]) -> AnyArray[_T]:
-        ...
+    def min(self, x: AnyArray[_T], axis: int | tuple[int, ...]) -> AnyArray[_T]: ...
 
     def min(self, x, axis=None):
         """Return the minimum of an array or minimum along an axis."""
         return self._xp_.min(x, axis=axis)
 
     @overload
-    def percentile(self, x: AnyArray[_T], q: float, axis: None = None) -> _T:
-        ...
+    def percentile(self, x: AnyArray[_T], q: float, axis: None = None) -> _T: ...
 
     @overload
     def percentile(
         self, x: AnyArray[_T], q: float, axis: int | tuple[int, ...]
-    ) -> AnyArray[_T]:
-        ...
+    ) -> AnyArray[_T]: ...
 
     def percentile(self, x, q, axis=None):
         """Compute the q-th percentile of the data along the specified axis."""
         return self._xp_.percentile(x, q, axis=axis)
 
     @overload
-    def argmin(self, x: AnyArray[_T], axis: None = None) -> np.intp:
-        ...
+    def argmin(self, x: AnyArray[_T], axis: None = None) -> np.intp: ...
 
     @overload
-    def argmin(self, x: AnyArray[_T], axis: int | tuple[int, ...]) -> AnyArray[np.intp]:
-        ...
+    def argmin(
+        self, x: AnyArray[_T], axis: int | tuple[int, ...]
+    ) -> AnyArray[np.intp]: ...
 
     def argmin(self, x, axis=None):  # type: ignore
         return self._xp_.argmin(x, axis=axis)  # type: ignore
 
     @overload
-    def argmax(self, x: AnyArray[_T], axis: None = None) -> np.intp:
-        ...
+    def argmax(self, x: AnyArray[_T], axis: None = None) -> np.intp: ...
 
     @overload
-    def argmax(self, x: AnyArray[_T], axis: int | tuple[int, ...]) -> AnyArray[np.intp]:
-        ...
+    def argmax(
+        self, x: AnyArray[_T], axis: int | tuple[int, ...]
+    ) -> AnyArray[np.intp]: ...
 
     def argmax(self, x, axis=None):  # type: ignore
         return self._xp_.argmax(x, axis=axis)  # type: ignore
@@ -361,26 +345,22 @@ class Backend:
     @overload
     def indices(
         self, shape: tuple[int], dtype: type[_T] = np.int32
-    ) -> tuple[AnyArray[_T]]:
-        ...
+    ) -> tuple[AnyArray[_T]]: ...
 
     @overload
     def indices(
         self, shape: tuple[int, int], dtype: type[_T] = np.int32
-    ) -> tuple[AnyArray[_T], AnyArray[_T]]:
-        ...
+    ) -> tuple[AnyArray[_T], AnyArray[_T]]: ...
 
     @overload
     def indices(
         self, shape: tuple[int, int, int], dtype: type[_T] = np.int32
-    ) -> tuple[AnyArray[_T], AnyArray[_T], AnyArray[_T]]:
-        ...
+    ) -> tuple[AnyArray[_T], AnyArray[_T], AnyArray[_T]]: ...
 
     @overload
     def indices(
         self, shape: tuple[int, ...], dtype: type[_T] = np.int32
-    ) -> tuple[AnyArray[_T], ...]:
-        ...
+    ) -> tuple[AnyArray[_T], ...]: ...
 
     def indices(self, shape, dtype=np.int32):  # type: ignore
         """Return an array representing the indices of a grid."""
@@ -449,6 +429,28 @@ class Backend:
     ) -> AnyArray[np.uint16]:
         return self._ndi_.sum_labels(arr, labels=labels, index=index)  # type: ignore
 
+    def shift(
+        self,
+        subimg,
+        shift: NDArray[np.float32],
+        order: int,
+        cval: float | Callable[[AnyArray[np.float32]], Any],
+        prefilter: bool = True,
+    ) -> AnyArray[np.float32]:
+        if callable(cval):
+            _cval = cval(subimg)
+        else:
+            _cval = cval
+
+        return self._ndi_.shift(
+            self.asarray(subimg),
+            self.asarray(shift),
+            order=order,
+            mode="constant",
+            cval=float(_cval),
+            prefilter=prefilter,
+        )  # type: ignore
+
     def rotated_crop(
         self,
         subimg,
@@ -456,6 +458,7 @@ class Backend:
         shape: tuple[int, int, int],
         order: int,
         cval: float | Callable[[AnyArray[np.float32]], Any],
+        prefilter: bool | None = None,
     ) -> AnyArray[np.float32]:
         if callable(cval):
             _cval = cval(subimg)
@@ -467,7 +470,7 @@ class Backend:
             matrix=self.asarray(mtx),
             output_shape=shape,
             order=order,
-            prefilter=order > 1,
+            prefilter=prefilter if prefilter is not None else order > 1,
             mode="constant",
             cval=float(_cval),
         )
