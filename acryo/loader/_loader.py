@@ -16,6 +16,7 @@ from acryo._reader import imread
 from acryo.molecules import Molecules
 from acryo.backend import Backend
 from acryo import _utils
+from acryo._polars_compat import bin_index
 from acryo.loader._base import LoaderBase, Unset, _ShapeType, INDEX_OPT
 from acryo.loader._extracted import ExtractedSubvolumeLoader, SUBVOLUME_INDEX
 from acryo.tilt import TiltSeriesModel, NoWedge
@@ -201,9 +202,9 @@ class SubtomogramLoader(LoaderBase):
             self.molecules.to_dataframe()
             .with_columns(pl.arange(pl.len()).alias(INDEX_OPT))
             .sort(
-                pl.col("y").truediv(self.scale).cut(ycum),
-                pl.col("x").truediv(self.scale).cut(xcum),
-                pl.col("z").truediv(self.scale).cut(zcum),
+                bin_index(pl.col("y").truediv(self.scale), ycum),
+                bin_index(pl.col("x").truediv(self.scale), xcum),
+                bin_index(pl.col("z").truediv(self.scale), zcum),
             )
         )
         mole = Molecules.from_dataframe(df)

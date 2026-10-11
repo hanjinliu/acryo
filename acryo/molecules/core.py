@@ -14,6 +14,7 @@ from numpy.typing import ArrayLike, NDArray
 import polars as pl
 from scipy.spatial.transform import Rotation
 from acryo._types import nm
+from acryo._polars_compat import bin_index
 from acryo.molecules._group import MoleculeGroup
 from acryo.molecules._cut import MoleculeCutGroup
 from acryo.molecules._rotation import (
@@ -270,7 +271,12 @@ class Molecules:
         if self._features is None:
             import polars as pl
 
-            return pl.DataFrame(None)
+            # In polars>=2, the height of a DataFrame without columns must match the
+            # number of molecules, otherwise new columns cannot be added.
+            try:
+                return pl.DataFrame(height=self.pos.shape[0])
+            except TypeError:  # old polars does not support `height`
+                return pl.DataFrame(None)
         return self._features
 
     @features.setter
@@ -282,7 +288,7 @@ class Molecules:
                 df = pl.DataFrame(value, strict=False)
             else:
                 df = value
-            if df.shape == (0, 0):
+            if df.width == 0:
                 self._features = None
                 return None
             if len(df) != self.pos.shape[0]:
@@ -952,9 +958,10 @@ class Molecules:
             [self.quaternion(), other.quaternion()],
             axis=0,
         )
-        if len(self.features) == 0:
+        # NOTE: in polars>=2, DataFrame without columns may have non-zero height
+        if self._features is None or len(self._features) == 0:
             feat = other.features
-        elif len(other.features) == 0:
+        elif other._features is None or len(other._features) == 0:
             feat = self.features
         else:
             how = "diagonal" if nullable else "vertical"
@@ -997,10 +1004,10 @@ class Molecules:
         while cat_name in self.features.columns:
             cat_name = f".{cat_name}"
         feature = self.features[by]
-        cat = feature.cut(bins).alias(cat_name)  # type: ignore
+        cat = bin_index(feature, bins).alias(cat_name)
         df = self.to_dataframe().with_columns(cat)
         return MoleculeCutGroup(
-            df.group_by([cat_name], maintain_order=True), label=cat_name
+            df.group_by([cat_name], maintain_order=True), label=cat_name, bins=bins
         )
 
     def filter(

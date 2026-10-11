@@ -221,6 +221,25 @@ def test_extracted_subvolumes_pre_transform(tmp_path, apply_prefilter: bool):
     )
 
 
+def test_order_optimize():
+    img, mole = _random_image_and_molecules(n=40)
+    # more than 10 chunks along each axis, so that the chunk labels are not sorted
+    # lexicographically
+    img_dask = da.from_array(img, chunks=4)
+    loader = SubtomogramLoader(img_dask, mole, order=1, output_shape=OUTPUT_SHAPE)
+    batch = BatchLoader.from_loaders([loader], order=1, output_shape=OUTPUT_SHAPE)
+    for ldr in [loader, batch]:
+        optimized = ldr.order_optimize()
+        pos = optimized.molecules.pos
+        # index of the right-closed chunk interval in (y, x, z) order
+        keys = [
+            np.searchsorted(np.cumsum([0, *img_dask.chunks[i]]), pos[:, i], side="left")
+            for i in [1, 2, 0]
+        ]
+        assert (np.diff(np.lexsort(keys[::-1])) == 1).all()
+        assert_allclose(optimized.order_restore().molecules.pos, mole.pos, atol=1e-5)
+
+
 def test_batch_loader_construct_dask():
     img, mole = _random_image_and_molecules(n=12)
     loader0 = SubtomogramLoader(img, mole[:5], order=1, output_shape=OUTPUT_SHAPE)

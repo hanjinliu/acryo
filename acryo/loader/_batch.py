@@ -16,6 +16,7 @@ from acryo.molecules import Molecules
 from acryo.backend import Backend
 from acryo._types import nm, pixel
 from acryo._dask import DaskArrayList, DaskTaskList
+from acryo._polars_compat import bin_index
 from acryo.loader import _misc
 from acryo.loader._base import LoaderBase, MaskInputType, TemplateInputType, INDEX_OPT
 from acryo.loader._loader import SubtomogramLoader, Unset
@@ -279,9 +280,9 @@ class BatchLoader(LoaderBase):
                 ycum = np.cumsum([0] + list(ychunks))
                 xcum = np.cumsum([0] + list(xchunks))
                 df_sub = sub.sort(
-                    pl.col("y").truediv(self.scale).cut(ycum),
-                    pl.col("x").truediv(self.scale).cut(xcum),
-                    pl.col("z").truediv(self.scale).cut(zcum),
+                    bin_index(pl.col("y").truediv(self.scale), ycum),
+                    bin_index(pl.col("x").truediv(self.scale), xcum),
+                    bin_index(pl.col("z").truediv(self.scale), zcum),
                 )
                 df_sorted.append(df_sub)
         df = pl.concat(df_sorted)

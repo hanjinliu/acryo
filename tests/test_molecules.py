@@ -239,6 +239,15 @@ def test_cutby():
     assert len(grouped[1][1]) == 2
 
 
+def test_cutby_outside_bins():
+    mol = Molecules(np.zeros((4, 3)), features={"A": [5, -1, 1, 2]})
+    grouped = list(mol.cutby("A", bins=[0, 2]))
+    inf = float("inf")
+    assert [edges for edges, _ in grouped] == [(2.0, inf), (-inf, 0.0), (0.0, 2.0)]
+    assert [len(mole) for _, mole in grouped] == [1, 1, 2]
+    assert grouped[2][1].features["A"].to_list() == [1, 2]
+
+
 def test_append():
     mol = Molecules(np.zeros((2, 3)), features={"A": [0.1, 0.2], "B": [5, 3]})
     other = Molecules(np.zeros((2, 3)), features={"A": [0.3, 0.4], "B": [2, 1]})
