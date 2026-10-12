@@ -1,12 +1,13 @@
 from ._loader import SubtomogramLoader
 from ._base import LoaderBase
-from ._batch import BatchLoader
+from ._batch import ConcatenatedLoader, BatchLoader
 from ._mock import MockLoader
 from ._extracted import ExtractedSubvolumeLoader
 from ._pseudo import PseudoSubtomogramLoader
 
 __all__ = [
     "LoaderBase",
+    "ConcatenatedLoader",
     "BatchLoader",
     "SubtomogramLoader",
     "MockLoader",

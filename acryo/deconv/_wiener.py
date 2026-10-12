@@ -30,7 +30,8 @@ def wiener_deconv(
         + eps
     )
 
-    ctf = ctf_model.simulate(np.fft.fftfreq(2048, scale))
+    # `data` is the frequency normalized by the Nyquist frequency 1 / (2 * scale)
+    ctf = ctf_model.simulate(data / (2 * scale))
     if phaseflipped:
         ctf = np.abs(ctf)
 

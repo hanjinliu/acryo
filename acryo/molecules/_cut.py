@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, Iterator, NamedTuple
+from typing import TYPE_CHECKING, Iterator, NamedTuple, Sequence
 
 if TYPE_CHECKING:
     from polars.dataframe.group_by import GroupBy
@@ -7,20 +7,24 @@ if TYPE_CHECKING:
 
 
 class MoleculeCutGroup:
-    """A groupby-like object for molecules created by :meth:`cutby`."""
+    """A groupby-like object for molecules created by :meth:`cutby`.
 
-    def __init__(self, group: GroupBy, label: str):
+    Molecules must be grouped by the bin index, that is, the i-th group corresponds to
+    the right-closed interval ``(bins[i - 1], bins[i]]``.
+    """
+
+    def __init__(self, group: GroupBy, label: str, bins: Sequence[float]):
         self._group = group
         self._label = label
+        self._edges = [-float("inf"), *(float(b) for b in bins), float("inf")]
 
     def __iter__(self) -> Iterator[tuple[CutEdges, Molecules]]:
         from .core import Molecules
 
         for keys, df in self._group:
-            key: str = keys[0]  # type: ignore
-            gt, le = map(float, key[1:-1].split(", "))
+            i: int = keys[0]  # type: ignore
             mole = Molecules.from_dataframe(df.drop(self._label))
-            yield CutEdges(gt, le), mole
+            yield CutEdges(self._edges[i], self._edges[i + 1]), mole
 
 
 class CutEdges(NamedTuple):

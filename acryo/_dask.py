@@ -277,18 +277,8 @@ class _SubvolumeCropper:
         self.expand = expand
 
     def __call__(self, blocks: list[Any], region: SubvolumeRegion):
-        # only the small pieces of the blocks are copied
-        pieces = [block[src] for block, src in zip(blocks, region.src)]
-        for axis in reversed(range(len(region.grid))):
-            if (n := region.grid[axis]) > 1:
-                pieces = [
-                    np.concatenate(pieces[k : k + n], axis=axis)
-                    for k in range(0, len(pieces), n)
-                ]
         xp = self.backend
-        subimg = xp.asarray(pieces[0])
-        if region.pads is not None:
-            subimg = xp.pad(subimg, region.pads, mode="mean")
+        subimg = _assemble_region(blocks, region, xp)
         out = xp.rotated_crop(
             subimg,
             region.matrix,
@@ -299,6 +289,34 @@ class _SubvolumeCropper:
         if self.expand:
             return out[np.newaxis]
         return out
+
+
+class _RegionCropper:
+    """Assemble a subvolume region without any transformation."""
+
+    __slots__ = ("backend",)
+
+    def __init__(self, backend: Backend):
+        self.backend = backend
+
+    def __call__(self, blocks: list[Any], region: SubvolumeRegion):
+        return _assemble_region(blocks, region, self.backend)[np.newaxis]
+
+
+def _assemble_region(blocks: list[Any], region: SubvolumeRegion, xp: Backend):
+    """Assemble the region from the image blocks and pad it if needed."""
+    # only the small pieces of the blocks are copied
+    pieces = [block[src] for block, src in zip(blocks, region.src)]
+    for axis in reversed(range(len(region.grid))):
+        if (n := region.grid[axis]) > 1:
+            pieces = [
+                np.concatenate(pieces[k : k + n], axis=axis)
+                for k in range(0, len(pieces), n)
+            ]
+    subimg = xp.asarray(pieces[0])
+    if region.pads is not None:
+        subimg = xp.pad(subimg, region.pads, mode="mean")
+    return subimg
 
 
 def _iter_subvolume_regions(
@@ -383,6 +401,43 @@ def subvolume_stack(
     graph = HighLevelGraph.from_collections(name, layer, dependencies=[image])
     chunks = ((1,) * nvol,) + tuple((s,) for s in output_shape)
     meta = np.empty((0,) * (len(output_shape) + 1), dtype=np.float32)
+    return da.Array(graph, name, chunks, meta=meta)
+
+
+def region_stack(
+    image: da.Array,
+    starts: NDArray[np.intp],
+    stops: NDArray[np.intp],
+    backend: Backend,
+) -> da.Array:
+    """Construct a stack of the image regions without interpolation.
+
+    The i-th region is ``starts[i]:stops[i]`` of the image (padded if the region is
+    out of the image), which is the region that ``subvolume_stack`` transforms. All
+    the regions must have the same shape.
+    """
+    from dask import array as da
+    from dask.base import tokenize
+    from dask.highlevelgraph import HighLevelGraph
+
+    nvol = starts.shape[0]
+    sizes = np.unique(stops - starts, axis=0)
+    if sizes.shape[0] != 1:
+        raise ValueError(f"All the regions must have the same shape, got {sizes}.")
+    shape = tuple(int(s) for s in sizes[0])
+    name = "regions-" + tokenize(image.name, starts, stops, backend.name)
+    cropper = _RegionCropper(backend)
+    identity = np.broadcast_to(np.eye(4, dtype=np.float32), (nvol, 4, 4))
+    zeros = (0,) * len(shape)
+    layer = {}
+    for block_indices, region in _iter_subvolume_regions(
+        image, starts, stops, identity
+    ):
+        keys = [(image.name, *idx) for idx in block_indices]
+        layer[(name, region.index, *zeros)] = (cropper, keys, region)
+    graph = HighLevelGraph.from_collections(name, layer, dependencies=[image])
+    chunks = ((1,) * nvol,) + tuple((s,) for s in shape)
+    meta = np.empty((0,) * (len(shape) + 1), dtype=image.dtype)
     return da.Array(graph, name, chunks, meta=meta)
 
 

@@ -5,6 +5,7 @@ from typing import (
     Generic,
     Iterable,
     Iterator,
+    Literal,
     Mapping,
     Sequence,
     TypeVar,
@@ -92,9 +93,24 @@ class LoaderGroup(Generic[_K, _L]):
         self,
         output_shape: _ShapeType = None,
         *,
+        chunksize: int | Literal["auto"] = 64,
         backend: Backend | None = None,
     ) -> ArrayDict[_K]:
-        """Calculate average images."""
+        """Calculate average images.
+
+        Parameters
+        ----------
+        output_shape : int or tuple of int, optional
+            Shape of the subtomograms. If not given, the default output shape of the
+            loader objects will be used.
+        chunksize : int or "auto", default is 64
+            Number of subtomograms summed up in a task. Larger value uses more memory.
+
+        Returns
+        -------
+        dict of np.ndarray
+            Averaged images with keys of the group keys.
+        """
         xp = backend or Backend()
         tasks = []
         keys: list[_K] = []
@@ -102,6 +118,7 @@ class LoaderGroup(Generic[_K, _L]):
             keys.append(key)
             _output_shape = loader._get_output_shape(output_shape)
             dsk = loader.construct_dask(_output_shape, backend=xp)
+            dsk = dsk.rechunk((chunksize,) + _output_shape)  # type: ignore
             tasks.append(da.mean(dsk, axis=0))
 
         out: list[AnyArray[np.float32]] = da.compute(tasks)[0]
@@ -114,6 +131,7 @@ class LoaderGroup(Generic[_K, _L]):
         squeeze: bool = True,
         output_shape: _ShapeType = None,
         *,
+        chunksize: int | Literal["auto"] = 64,
         backend: Backend | None = None,
     ) -> ArrayDict[_K]:
         """Split subtomograms into two set and average separately.
@@ -133,6 +151,8 @@ class LoaderGroup(Generic[_K, _L]):
         output_shape : tuple of int, optional
             Output shape of the averaged image. If not given, the default output
             shape of the loader objects will be used.
+        chunksize : int or "auto", default is 64
+            Number of subtomograms loaded in a task. Larger value uses more memory.
 
         Returns
         -------
@@ -144,9 +164,12 @@ class LoaderGroup(Generic[_K, _L]):
 
         all_tasks: list[list[da.Array]] = []
         for key, loader in self:
-            output_shape = loader._get_output_shape(output_shape)
-            dask_array = loader.construct_dask(output_shape=output_shape, backend=xp)
+            _output_shape = loader._get_output_shape(output_shape)
+            dask_array = loader.construct_dask(_output_shape, backend=xp)
             nmole = dask_array.shape[0]
+            # rechunk before indexing, otherwise each subtomogram is sliced and
+            # reduced in its own tasks.
+            dask_array = dask_array.rechunk((chunksize,) + _output_shape)  # type: ignore
             tasks: list[da.Array] = []
             for _ in range(n_set):
                 ind0, ind1 = _misc.random_splitter(rng, nmole)
