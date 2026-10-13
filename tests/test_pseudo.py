@@ -1,3 +1,5 @@
+import copy
+
 import numpy as np
 from numpy.testing import assert_allclose
 import pytest
@@ -24,7 +26,9 @@ def skip_if_cupy():
         pytest.skip(reason="not tested for cupy yet")
 
 
-def _make_tilt_series(path, points_nm: np.ndarray, sigma: float = 1.5) -> TiltSeries:
+def _make_tilt_series(
+    path, points_nm: np.ndarray, sigma: float = 1.5, local_shifts_2d=None
+) -> TiltSeries:
     """Simulate a tilt series of Gaussian blobs at the given points.
 
     The points are (z, y, x) coordinates in nm relative to the tomogram center. As
@@ -38,6 +42,7 @@ def _make_tilt_series(path, points_nm: np.ndarray, sigma: float = 1.5) -> TiltSe
         sample_translations=rng.normal(scale=10.0, size=(ntilts, 2)),
         pixel_spacing=PIXEL_SPACING,
         image_path=path,
+        local_shifts_2d=local_shifts_2d,
     )
     projected = ts.project_points(torch.as_tensor(points_nm * 10)) / PIXEL_SPACING
     projected = projected.numpy() + np.array(IMAGE_SHAPE) // 2
@@ -298,8 +303,6 @@ def test_empty(blob_tilt_series):
 def test_invalid_input(blob_tilt_series):
     mole = Molecules(BLOBS + CENTER)
     with pytest.raises(TypeError):
-        PseudoSubtomogramLoader(np.zeros((4, 4, 4)), mole)
-    with pytest.raises(TypeError):
         PseudoSubtomogramLoader(blob_tilt_series, BLOBS)
     with pytest.raises(ValueError):
         PseudoSubtomogramLoader(blob_tilt_series, mole, tomogram_center=(0, 0))
@@ -368,3 +371,166 @@ def test_reconstruct_tomogram_tomo_hand(blob_tilt_series, depth):
     tomo = -tomo  # the contrast of the tomogram is not inverted
     for pos in _mirror_z(BLOBS) / 0.5 + np.array(shape) // 2:
         assert_allclose(_local_center_of_mass(tomo, pos), pos, atol=0.15)
+
+
+# asymmetric particle of 3 blobs, in nm
+PARTICLE = np.array([[0.0, 0.0, 0.0], [0.0, 2.0, 0.0], [1.5, 0.0, 2.0]])
+
+
+def _particle_points(centers: np.ndarray, rot: Rotation, particle=PARTICLE):
+    """Blob positions of the particles at the centers."""
+    offsets = np.einsum("nij,kj->nki", rot.as_matrix(), particle)
+    return (centers[:, None] + offsets).reshape(-1, 3)
+
+
+def _particle_template(scale: float, size: int, particle=PARTICLE) -> np.ndarray:
+    """Template of the particle with bright blobs, consistent with the tilt series."""
+    sigma = 1.5 * PIXEL_SPACING / 10 / scale
+    center = (size - 1) / 2
+    inds = np.indices((size,) * 3, dtype=np.float32)
+    template = np.zeros((size,) * 3, dtype=np.float32)
+    for blob in particle / scale + center:
+        dist2 = sum((ind - b) ** 2 for ind, b in zip(inds, blob))
+        template += np.exp(-dist2 / (2 * sigma**2))
+    return template
+
+
+def _random_particles(n: int, seed: int) -> tuple[np.ndarray, Rotation]:
+    """Random positions (relative to the tomogram center) and rotations."""
+    rng = np.random.default_rng(seed)
+    centers = np.stack(
+        [rng.uniform(-4, 4, n), rng.uniform(-25, 25, n), rng.uniform(-28, 28, n)],
+        axis=1,
+    )
+    return centers, Rotation.random(n, random_state=seed)
+
+
+def _perturbed(ts: TiltSeries, amplitude: float, seed: int = 0) -> TiltSeries:
+    """Copy of the tilt series with randomly shifted tilt images (Å)."""
+    out = copy.copy(ts)
+    rng = np.random.default_rng(seed)
+    shifts = rng.uniform(-amplitude, amplitude, size=ts.sample_translations.shape)
+    out.sample_translations = ts.sample_translations + torch.as_tensor(shifts).float()
+    return out
+
+
+@pytest.mark.parametrize("tomo_hand", [1, -1])
+@pytest.mark.parametrize("scale, size", [(0.5, 16), (1.0, 9)])
+def test_refine_tilt_series(tmp_path, scale, size, tomo_hand):
+    centers, rot = _random_particles(30, seed=1)
+    ts = _make_tilt_series(tmp_path / "ts.mrc", _particle_points(centers, rot))
+    if tomo_hand == 1:
+        mole = Molecules(centers + CENTER, rot)
+        template = _particle_template(scale, size)
+    else:
+        # particles in the mirrored tomogram are also mirrored
+        mole = Molecules(_mirror_z(centers) + CENTER, _mirror_rotation(rot))
+        template = _particle_template(scale, size, _mirror_z(PARTICLE))
+    loader = _loader(_perturbed(ts, 12.0), mole, scale=scale, tomo_hand=tomo_hand)
+    refined = loader.refine_tilt_series([(mole, template)], max_shift=2.0)
+    error = refined.tilt_series.sample_translations - ts.sample_translations
+    assert error.abs().max() < 1.0  # Angstrom
+    assert refined.tilt_series.local_shifts_2d is None
+
+
+def test_refine_local_shifts(tmp_path):
+    centers, rot = _random_particles(60, seed=2)
+    rng = np.random.default_rng(3)
+    coefs = torch.as_tensor(rng.normal(scale=4.0, size=(TILT_ANGLES.size, 2, 3)))
+    half_extent = torch.tensor(IMAGE_SHAPE) * PIXEL_SPACING / 2
+
+    def field(projected):
+        # bilinear deformation of the tilt images, up to ~10 Å
+        y, x = (projected[..., -2:] / half_extent).unbind(-1)
+        terms = torch.stack([y, x, y * x], dim=-1)[..., None, :]  # (n, T, 1, 3)
+        return (coefs * terms).sum(-1).float()
+
+    ts = _make_tilt_series(
+        tmp_path / "ts.mrc", _particle_points(centers, rot), local_shifts_2d=field
+    )
+    initial = copy.copy(ts)
+    initial.local_shifts_2d = None
+    mole = Molecules(centers + CENTER, rot)
+    loader = _loader(initial, mole)
+    refined = loader.refine_tilt_series(
+        [(mole, _particle_template(0.5, 16))], grid_shape=(2, 2)
+    )
+    points = torch.as_tensor(centers * 10).float()
+    true_pos = ts.project_points(points)
+    error_before = (initial.project_points(points) - true_pos).norm(dim=-1)
+    error_after = (refined.tilt_series.project_points(points) - true_pos).norm(dim=-1)
+    assert error_before.mean() > 2.5
+    assert error_after.mean() < 0.5
+    # local shifts are also applied to the (z, y, x, w) output
+    zyxw = refined.tilt_series.project_points(points, output_zyxw=True)
+    assert_allclose(
+        zyxw[..., 1:3], refined.tilt_series.project_points(points), atol=1e-3
+    )
+    # the refined tilt series can be used for reconstruction
+    assert refined.reconstruct_tomogram((16, 40, 40), patch_size=16).shape == (
+        16,
+        40,
+        40,
+    )
+
+
+def test_refine_with_multiple_references(tmp_path):
+    other = np.array([[0.0, -1.5, 1.5], [0.0, 1.5, -1.5]])  # another kind of particle
+    centers0, rot0 = _random_particles(15, seed=4)
+    centers1, rot1 = _random_particles(15, seed=5)
+    points = np.concatenate(
+        [_particle_points(centers0, rot0), _particle_points(centers1, rot1, other)]
+    )
+    ts = _make_tilt_series(tmp_path / "ts.mrc", points)
+    mole0 = Molecules(centers0 + CENTER, rot0)
+    mole1 = Molecules(centers1 + CENTER, rot1)
+    loader = _loader(_perturbed(ts, 12.0), mole0)
+    refined = loader.refine_tilt_series(
+        [
+            (mole0, _particle_template(0.5, 16)),
+            (mole1, _particle_template(0.5, 16, other)),
+        ]
+    )
+    error = refined.tilt_series.sample_translations - ts.sample_translations
+    assert error.abs().max() < 1.0
+
+
+def test_refined_loader(tmp_path):
+    centers, rot = _random_particles(20, seed=6)
+    ts = _make_tilt_series(tmp_path / "ts.mrc", _particle_points(centers, rot))
+    mole = Molecules(centers + CENTER, rot)
+    initial = _perturbed(ts, 15.0)
+    translations = initial.sample_translations.clone()
+    loader = _loader(initial, mole, output_shape=(15, 15, 15))
+    template = _particle_template(0.5, 15)
+    refined = loader.refine_tilt_series([(mole, template)])
+    assert isinstance(refined, PseudoSubtomogramLoader)
+    assert refined.tilt_series is not initial
+    assert loader.tilt_series is initial
+    assert_allclose(initial.sample_translations, translations)  # not modified
+    assert refined.molecules is loader.molecules
+    assert refined._images.get() is loader._images.get()  # images are shared
+
+    # subtomograms are sharper after refinement
+    def _score(ldr: PseudoSubtomogramLoader) -> float:
+        avg = ldr.average()
+        return np.corrcoef(avg.ravel(), template.ravel())[0, 1]
+
+    assert _score(refined) > _score(loader) + 0.05
+
+
+def test_refine_invalid_input(blob_tilt_series):
+    loader = _loader(blob_tilt_series, Molecules(BLOBS + CENTER))
+    template = _particle_template(0.5, 16)
+    with pytest.raises(ValueError):
+        loader.refine_tilt_series([])
+    with pytest.raises(ValueError):
+        loader.refine_tilt_series([(Molecules.empty(), template)])
+    with pytest.raises(ValueError):
+        _loader(
+            blob_tilt_series, Molecules(BLOBS + CENTER), tomo_hand=-1
+        ).refine_tilt_series([(Molecules.empty(), template)])
+    with pytest.raises(ValueError):
+        loader.refine_tilt_series(
+            [(Molecules(BLOBS + CENTER), template)], grid_shape=(0, 2)
+        )

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import math
 import threading
-from typing import TYPE_CHECKING, Any, Iterable, SupportsIndex
+from typing import TYPE_CHECKING, Any, Iterable, Sequence, SupportsIndex
 import warnings
 
 import numpy as np
@@ -14,7 +14,7 @@ from acryo._types import nm, pixel
 from acryo._dask import DaskArrayList, DaskTaskPool
 from acryo.backend import Backend
 from acryo.loader import _misc
-from acryo.loader._base import LoaderBase, Unset, _ShapeType
+from acryo.loader._base import LoaderBase, Unset, _ShapeType, TemplateInputType
 from acryo.molecules import Molecules
 from acryo.tilt import TiltSeriesModel, single_axis
 
@@ -382,13 +382,7 @@ class PseudoSubtomogramLoader(LoaderBase):
         input_spacing = self.tilt_series.pixel_spacing
         mole = self.molecules
         nmole = mole.count()
-        pos = mole.pos.astype(np.float64)
-        rotations = mole.rotator.as_matrix()
-        if self.tomo_hand == -1:
-            # The tomogram of the molecules is the true one mirrored along the z axis
-            # around the tomogram center. Convert the molecules to the true tomogram.
-            pos[:, 0] = 2 * self.tomogram_center[0] - pos[:, 0]
-            rotations[:, 0, :] *= -1
+        pos, rotations = self._to_tilt_series_frame(mole)
 
         # strategy 1: reconstruct a cube for each molecule
         sidelength, pixel_spacing = _cube_geometry(
@@ -445,6 +439,21 @@ class PseudoSubtomogramLoader(LoaderBase):
         translation_1[:3, 3] = -(np.array(output_shape) / 2 - 0.5)
         matrices = np.matmul(np.matmul(translation_0, rot_mat), translation_1)
         return cubes, cube_index, regions, matrices
+
+    def _to_tilt_series_frame(
+        self, mole: Molecules
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        """Positions (nm) and rotation matrices of molecules in the tilt series frame."""
+        pos = mole.pos.astype(np.float64)
+        if mole.count() == 0:
+            return pos, np.zeros((0, 3, 3))
+        rotations = mole.rotator.as_matrix()
+        if self.tomo_hand == -1:
+            # The tomogram of the molecules is the true one mirrored along the z axis
+            # around the tomogram center. Convert the molecules to the true tomogram.
+            pos[:, 0] = 2 * self.tomogram_center[0] - pos[:, 0]
+            rotations[:, 0, :] *= -1
+        return pos, rotations
 
     def _reconstruct_cubes(
         self,
@@ -558,6 +567,79 @@ class PseudoSubtomogramLoader(LoaderBase):
             tomogram = tomogram.flip(0)[:depth]
         return tomogram.cpu().numpy()
 
+    def refine_tilt_series(
+        self,
+        references: Sequence[tuple[Molecules, TemplateInputType]],
+        *,
+        max_shift: nm = 2.0,
+        grid_shape: tuple[int, int] = (1, 1),
+        smoothness: float = 0.01,
+        niter: int = 100,
+        batch_size: int = 16,
+    ) -> Self:
+        """Refine the alignment of the tilt series using particles and templates.
+
+        Similar to Bayesian polishing, the projections of the templates placed at the
+        particles are compared with the tilt images to refine the shifts of each tilt
+        image. If ``grid_shape`` is larger than ``(1, 1)``, the shifts are refined as
+        a smooth field over each tilt image (local alignment).
+
+        Parameters
+        ----------
+        references : sequence of (Molecules, template)
+            Particles and their templates. The templates must be in the pixel size of
+            ``scale`` and in the same contrast as the subtomograms of this loader.
+            Particles of different kinds can be given with different templates.
+        max_shift : float, default is 2.0
+            Maximum shift of the tilt images in nm.
+        grid_shape : (int, int), default is (1, 1)
+            Number of control points of the local shifts along y and x of the tilt
+            images. The control points are evenly placed from edge to edge of the
+            images. ``(1, 1)`` means a uniform shift for each tilt image.
+        smoothness : float, default is 0.01
+            Weight of the smoothness prior of the local shifts. The penalty is the sum
+            of squared differences (nm^2) between the shifts of neighboring control
+            points, compared with the sum of normalized cross correlation over
+            particles. Larger value is more robust against noise and fewer particles.
+        niter : int, default is 100
+            Number of iterations to optimize the local shifts.
+        batch_size : int, default is 16
+            Number of particles processed at once.
+
+        Returns
+        -------
+        PseudoSubtomogramLoader
+            A new loader with the refined tilt series. ``sample_translations`` of the
+            tilt series are updated, and the local shifts are set to
+            ``local_shifts_2d`` if ``grid_shape`` is larger than ``(1, 1)``.
+        """
+        from acryo.loader._tilt_refine import ParticleSet, refine_tilt_series
+
+        particle_sets: list[ParticleSet] = []
+        for mole, template in references:
+            pos, rotations = self._to_tilt_series_frame(mole)
+            points = ((pos - self.tomogram_center) * _ANGSTROM_PER_NM).astype(
+                np.float32
+            )
+            particle_sets.append(
+                ParticleSet(points, rotations, self.normalize_template(template))
+            )
+        images = self._images.get()
+        tilt_series = refine_tilt_series(
+            self.tilt_series,
+            images,
+            particle_sets,
+            pixel_spacing=self.scale * _ANGSTROM_PER_NM,
+            max_shift=max_shift * _ANGSTROM_PER_NM,
+            grid_shape=grid_shape,
+            smoothness=smoothness,
+            niter=niter,
+            batch_size=batch_size,
+        )
+        out = self.replace()
+        out._images = self._images.with_tilt_series(tilt_series)
+        return out
+
     def _default_align_kwargs(self) -> dict[str, Any]:
         """Return default keyword arguments for alignment."""
         return {"tilt": self.tilt_model}
@@ -585,6 +667,12 @@ class _TiltSeriesImages:
                 if self._images is None:
                     self._images = self._load()
         return self._images
+
+    def with_tilt_series(self, tilt_series: TiltSeries) -> _TiltSeriesImages:
+        """Return a new instance of another geometry for the same tilt images."""
+        out = _TiltSeriesImages(tilt_series, self.preprocess, self.preprocess_kwargs)
+        out._images = self._images
+        return out
 
     def _load(self) -> torch.Tensor:
         from torch_tilt_series import (

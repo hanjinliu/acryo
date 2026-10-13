@@ -360,3 +360,34 @@ used with :class:`SubtomogramLoader`.
 
     tomogram = loader.reconstruct_tomogram((D, H, W))
     SubtomogramLoader(tomogram, loader.molecules, scale=loader.scale)
+
+Refining the Alignment of a Tilt Series
+---------------------------------------
+
+Similar to Bayesian polishing, the alignment of the tilt series can be refined using particles
+and their templates. :meth:`PseudoSubtomogramLoader.refine_tilt_series` compares the
+projections of the templates placed at the particles with the tilt images, and returns a new
+loader with the refined tilt series. Particles of different kinds can be used together with
+their own templates. The templates must be in the pixel size of ``scale`` and in the same
+contrast as the subtomograms (such as the averages of this loader).
+
+.. code-block:: python
+
+    refined = loader.refine_tilt_series(
+        [(ribosomes, ribosome_template), (microtubules, microtubule_template)],
+        max_shift=2.0,  # nm
+    )
+
+By default, a uniform shift is refined for each tilt image (``sample_translations``). If
+``grid_shape`` is larger than ``(1, 1)``, the shifts are refined as a smooth field over each
+tilt image, interpolated from a grid of control points (``local_shifts_2d``). The control
+points are optimized to maximize the correlation of the particles with a smoothness prior
+weighted by ``smoothness``.
+
+.. code-block:: python
+
+    refined = loader.refine_tilt_series(
+        [(ribosomes, ribosome_template)],
+        grid_shape=(3, 3),
+        smoothness=0.01,
+    )
