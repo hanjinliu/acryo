@@ -500,9 +500,8 @@ class LoaderBase(ABC):
         )
         tasks = self._prep_align_multi_templates(model, max_shifts, backend)
         all_results = tasks.compute()
-        remainder = model.remainder()
         return self._post_align_multi_templates(
-            all_results, model.input_shape, remainder, label_name
+            all_results, model.input_shape, label_name
         )
 
     def construct_landscape(
@@ -526,7 +525,10 @@ class LoaderBase(ABC):
             If input alignment model has rotation or multiple templates, the output
             shape will be (P, M, Nz, Ny, Nx), otherwise (P, Nz, Ny, Nx), where P is for
             each molecules, M is the number of created template images, and Nz, Ny and
-            Nx is the up-sampled shape of search range.
+            Nx is the up-sampled shape of search range. For Nt templates and Nr
+            rotations, M = Nt * Nr and the (template, rotation) pairs are in the
+            template-major order, that is, ``k = i_template * Nr + i_rotation``. The
+            output can be reshaped to (P, Nt, Nr, Nz, Ny, Nx).
         """
         max_shifts = _misc.normalize_max_shifts(max_shifts)
         _max_shifts_px = tuple(np.asarray(max_shifts) / self.scale)
@@ -1104,7 +1106,6 @@ class LoaderBase(ABC):
         self,
         results: list[AlignmentResult],
         shape: tuple[int, int, int],
-        remainder: int = -1,
         label_name: str = "labels",
     ):
         local_shifts, local_rot, scores = _misc.allocate(len(results))
@@ -1116,8 +1117,6 @@ class LoaderBase(ABC):
         rotator = Rotation.from_quat(local_rot)
         mole_aligned = self.molecules.spatial_transform(local_shifts, rotator)
 
-        if remainder > 1:
-            labels %= remainder  # type: ignore
         labels = labels.astype(np.uint8)
 
         feature_list = _misc.get_feature_list(scores, local_shifts, rotator.as_rotvec())

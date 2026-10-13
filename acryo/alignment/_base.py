@@ -36,7 +36,19 @@ _Mask = AnyArray[np.float32]
 
 
 class AlignmentResult(NamedTuple):
-    """The optimal alignment result."""
+    """The optimal alignment result.
+
+    Attributes
+    ----------
+    label : int
+        Index of the best template (always 0 for a single template).
+    shift : (3,) array
+        Optimal shift in pixel, in the coordinates before rotation.
+    quat : (4,) array
+        Optimal rotation in quaternion.
+    score : float
+        Score of the optimal alignment.
+    """
 
     label: int
     shift: NDArray[np.float32]
@@ -439,7 +451,10 @@ class BaseAlignmentModel(ABC):
         -------
         np.ndarray
             N (if single template) or N+1 (if multi-template) dimensional array of
-            correlation landscape.
+            correlation landscape. If the model has rotations, the first axis
+            iterates over all the (template, rotation) pairs in the template-major
+            order, that is, ``k = i_template * n_rotations + i_rotation``. The output
+            can be reshaped to ``(n_templates, n_rotations, Nz, Ny, Nx)``.
         """
         xp = backend or Backend()
         if quaternion is None:
@@ -596,9 +611,6 @@ class BaseAlignmentModel(ABC):
         """Number of templates."""
         return self._n_templates
 
-    def remainder(self) -> int:
-        return -1
-
 
 class RotationImplemented(BaseAlignmentModel):
     """
@@ -657,8 +669,11 @@ class RotationImplemented(BaseAlignmentModel):
             Result of alignment.
         """
         iopt, shift, _, corr = super().align(img, max_shifts, quaternion, pos, backend)
-        quat = self.quaternions[iopt % self._n_rotations]
-        return AlignmentResult(label=iopt, shift=shift, quat=quat, score=corr)
+        # templates are stacked in the template-major order
+        # (see `_get_template_and_mask_input`)
+        itmp, irot = divmod(int(iopt), self._n_rotations)
+        quat = self.quaternions[irot]
+        return AlignmentResult(label=itmp, shift=shift, quat=quat, score=corr)
 
     def fit(
         self,
@@ -692,27 +707,29 @@ class RotationImplemented(BaseAlignmentModel):
         pos = np.zeros(3, dtype=np.float32)
         img_input = xp.asarray(img)
         _template, _mask = self._get_template_and_mask_input(backend=xp)
-        if _template.ndim == 3:
+        if not self._is_multiple():
             _template = [_template]
-        if _mask.ndim == 3:
             _mask = [_mask]
-        for quat, tmp, mask in zip(self.quaternions, _template, _mask):
+        # templates are stacked in the template-major order
+        # (see `_get_template_and_mask_input`)
+        for k, (tmp, mask) in enumerate(zip(_template, _mask)):
             pool.add_task(
                 self.pre_transform(img_input * mask, xp),
                 tmp,
                 max_shifts,
-                quat,
+                self.quaternions[k % self._n_rotations],
                 pos=pos,
                 backend=xp,
             )
         results = pool.compute()
         scores = [x[2] for x in results]
-        iopt = np.argmax(scores)
+        iopt = int(np.argmax(scores))
         opt_result = results[iopt]
+        itmp, irot = divmod(iopt, self._n_rotations)
         result = AlignmentResult(
-            label=0,
+            label=itmp,
             shift=opt_result[0],
-            quat=self.quaternions[iopt],
+            quat=self.quaternions[irot],
             score=opt_result[2],
         )
 
@@ -755,9 +772,11 @@ class RotationImplemented(BaseAlignmentModel):
             - no rotation, single template image ... 3D
             - has rotation, single template image ... 4D
             - no rotation, many template images ... 4D
-            - has rotation, many template images ... 4D and when iterated over
-              the first axis yielded images will be (rot0, temp0),
-              (rot0, temp1), ...
+            - has rotation, many template images ... 4D in the template-major
+              order. When iterated over the first axis, yielded images will be
+              (temp0, rot0), (temp0, rot1), ..., (temp1, rot0), ..., that is, the
+              k-th image is the ``k // n_rotations``-th template rotated by the
+              ``k % n_rotations``-th rotation.
         """
         xp = backend or Backend()
         if out := self._template_mask_cache.get(xp):
@@ -769,52 +788,32 @@ class RotationImplemented(BaseAlignmentModel):
             )
             cval = float(np.percentile(self._template, 1))
             if self._n_templates > 1:
-                inputs_templates = [
-                    xp.spline_filter(
-                        tmp * self._mask,
-                        order=3,
-                        mode="constant",
-                        output=np.float32,
-                    )
-                    for tmp in self._template
-                ]
-                pool_template = DaskTaskPool.from_func(self._transform_template)
-                pool_mask = DaskTaskPool.from_func(xp.affine_transform)
-                ntmp = len(inputs_templates)
-                for mat in matrices:
-                    for tmp in inputs_templates:
-                        pool_template.add_task(
-                            tmp,
-                            mat,
-                            order=3,
-                            cval=cval,
-                            prefilter=False,
-                            backend=xp,
-                        )
-                    pool_mask.add_tasks(
-                        ntmp, self._mask, mat, order=3, mode="nearest", prefilter=False
-                    )
+                templates = list(self._template)
             else:
-                template_masked = xp.spline_filter(
-                    self._template * self._mask,
+                templates = [self._template]
+            pool_template = DaskTaskPool.from_func(self._transform_template)
+            pool_mask = DaskTaskPool.from_func(xp.affine_transform)
+            for tmp in templates:
+                tmp_filtered = xp.spline_filter(
+                    tmp * self._mask,
                     order=3,
                     output=np.float32,
                     mode="constant",
                 )
-                pool_template = DaskTaskPool.from_func(self._transform_template)
-                pool_mask = DaskTaskPool.from_func(xp.affine_transform)
                 for mat in matrices:
                     pool_template.add_task(
-                        template_masked,
+                        tmp_filtered,
                         mat,
                         order=3,
                         cval=cval,
                         prefilter=False,
                         backend=xp,
                     )
-                    pool_mask.add_task(
-                        self._mask, mat, order=3, mode="nearest", prefilter=False
-                    )
+            # the mask is shared by all the templates
+            for mat in matrices:
+                pool_mask.add_task(
+                    self._mask, mat, order=3, mode="nearest", prefilter=False
+                )
 
             _templates, _masks = compute(
                 (
@@ -823,7 +822,7 @@ class RotationImplemented(BaseAlignmentModel):
                 )
             )
             template_input = xp.stack(_templates, axis=0)  # type: ignore
-            mask_input = xp.stack(_masks, axis=0)  # type: ignore
+            mask_input = xp.stack(list(_masks) * len(templates), axis=0)  # type: ignore
         else:
             pool = DaskTaskPool.from_func(self.pre_transform)
             if self._n_templates > 1:
@@ -850,13 +849,6 @@ class RotationImplemented(BaseAlignmentModel):
     def niter(self) -> int:
         """Number of iteration per sub-volume."""
         return self._n_templates * self._n_rotations
-
-    def remainder(self) -> int:
-        if self._n_rotations > 1:
-            remainder = len(self._n_templates)
-        else:
-            remainder = -1
-        return remainder
 
 
 class TomographyInput(RotationImplemented):
