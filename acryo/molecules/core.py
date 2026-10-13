@@ -924,7 +924,36 @@ class Molecules:
         rotator: Rotation,
         inv: bool = False,
     ) -> Self:
-        """Shift and rotate molecules around their own coordinate."""
+        """Shift and rotate molecules around their own coordinate.
+
+        The shifts are in the coordinates of the molecules *after* rotation, that is,
+        this method is equivalent to
+
+        >>> mole.rotate_by_rotvec_internal(rotator.as_rotvec()).translate_internal(shift)
+
+        Note that the shifts of the alignment results (``AlignmentResult.shift`` and
+        the "align-dz", "align-dy" and "align-dx" features) are in the coordinates
+        *before* rotation. To update molecules with the alignment results, use
+
+        >>> mole.translate_internal(shift).rotate_by_rotvec_internal(rotvec)
+
+        Parameters
+        ----------
+        shift : (N, 3) array
+            Shifts of molecules in the rotated molecule coordinates.
+        rotator : Rotation
+            Rotation of molecules in their own coordinates.
+        inv : bool, default False
+            If true, molecules are rotated by the inverse of ``rotator`` and then
+            translated by ``rotator.apply(shift, inverse=True)`` in the rotated
+            molecule coordinates. This is not the inverse of the transformation with
+            ``inv=False``.
+
+        Returns
+        -------
+        Molecules
+            Instance with updated positions and orientations.
+        """
         rotvec = rotator.as_rotvec()
         if inv:
             shift_corrected = rotator.apply(shift, inverse=True)
