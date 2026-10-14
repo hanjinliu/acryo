@@ -1073,7 +1073,7 @@ class LoaderBase(ABC):
             local_shifts[i] = loc_shift * self.scale
 
         rotator = Rotation.from_quat(local_rot)
-        mole_aligned = self.molecules.linear_transform(local_shifts, rotator)
+        mole_aligned = self.molecules.spatial_transform(local_shifts, rotator)
 
         mole_aligned.features = self.molecules.features.with_columns(
             _misc.get_feature_list(scores, local_shifts, rotator.as_rotvec()),
@@ -1114,7 +1114,7 @@ class LoaderBase(ABC):
             local_shifts[i] = loc_shift * self.scale
 
         rotator = Rotation.from_quat(local_rot)
-        mole_aligned = self.molecules.linear_transform(local_shifts, rotator)
+        mole_aligned = self.molecules.spatial_transform(local_shifts, rotator)
 
         if remainder > 1:
             labels %= remainder  # type: ignore

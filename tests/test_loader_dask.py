@@ -137,7 +137,7 @@ def test_extracted_subvolumes_prefiltered(tmp_path, rotate: bool):
     rotvec = np.tile([0.1, -0.05, 0.08] if rotate else [0.0, 0.0, 0.0], (6, 1))
     features = [pl.Series(f"align-d{c}", shifts[:, i]) for i, c in enumerate("zyx")]
     features += [pl.Series(f"align-d{c}rot", rotvec[:, i]) for i, c in enumerate("zyx")]
-    mole_aligned = mole.linear_transform(shifts, Rotation.from_rotvec(rotvec))
+    mole_aligned = mole.spatial_transform(shifts, Rotation.from_rotvec(rotvec))
     mole_aligned.features = ext_pre.molecules.features.with_columns(features)
     # `replace` keeps the prefiltered state, so coefficients are not filtered twice
     aligned_pre = ext_pre.replace(molecules=mole_aligned)
@@ -188,7 +188,7 @@ def test_extracted_subvolumes_pre_transform(tmp_path, apply_prefilter: bool):
     rotvec = np.tile([0.1, -0.05, 0.08], (6, 1))
     features = [pl.Series(f"align-d{c}", shifts[:, i]) for i, c in enumerate("zyx")]
     features += [pl.Series(f"align-d{c}rot", rotvec[:, i]) for i, c in enumerate("zyx")]
-    mole_aligned = mole_inner.linear_transform(shifts, Rotation.from_rotvec(rotvec))
+    mole_aligned = mole_inner.spatial_transform(shifts, Rotation.from_rotvec(rotvec))
     mole_aligned.features = extracted_inner.molecules.features.with_columns(features)
     # the ground truth is the interpolation of the whole tomogram, because cropping
     # also suffers from the boundary effect of the spline prefilter
@@ -219,6 +219,33 @@ def test_extracted_subvolumes_pre_transform(tmp_path, apply_prefilter: bool):
     assert_allclose(
         sub.head(2).asnumpy(), loader.asnumpy()[[1, 3]], rtol=1e-5, atol=1e-5
     )
+
+
+def test_extracted_subvolumes_align_with_rotation(tmp_path):
+    rng = np.random.default_rng(2)
+    img = ndi.gaussian_filter(rng.normal(size=(48, 56, 64)), 1.5)
+    img = (img / img.std()).astype(np.float32)
+    mole = Molecules(
+        rng.uniform(22, 26, size=(4, 3)), Rotation.random(4, random_state=2)
+    )
+    shape = (15, 15, 15)
+    kwargs = dict(order=1, output_shape=shape, corner_safe=True)
+    loader = SubtomogramLoader(img, mole, **kwargs)
+    # the template is the first molecule translated and then rotated around x-axis
+    rotvec = [0.0, 0.0, np.pi / 2]
+    truth = mole[:1].spatial_transform([1.0, -0.8, 0.9], Rotation.from_rotvec(rotvec))
+    template = SubtomogramLoader(img, truth, **kwargs).asnumpy()[0]
+    extracted = loader.extract_subtomograms(tmp_path / "ext", pre_transform=True)
+    aligned = extracted.align(
+        template, max_shifts=1.2, rotations=((0, 0), (0, 0), (90, 90))
+    )
+    drot = aligned.features.select([f"align-d{c}rot" for c in "zyx"]).to_numpy()
+    assert_allclose(drot[0], rotvec, atol=1e-4)
+    assert_allclose(aligned.molecules.pos[0], truth.pos[0], atol=0.5)
+    # subvolumes are the same as those cropped at the aligned molecules
+    ref = SubtomogramLoader(img, aligned.molecules, **kwargs).asnumpy()
+    sl = (slice(None),) + tuple(slice(2, s - 2) for s in shape)
+    assert_allclose(aligned.asnumpy()[sl], ref[sl], atol=1e-4)
 
 
 def test_order_optimize():

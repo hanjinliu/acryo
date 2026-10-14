@@ -161,6 +161,22 @@ will be useful.
   rotation vectors. The components of the rotation vectors are described in the molecule
   coordinates of each molecules.
 
+Translation and rotation
+------------------------
+
+:meth:`Molecules.spatial_transform` translates molecules in the molecule coordinates and
+then rotates them around their new positions. This is how molecules are updated by the
+results of subtomogram alignment.
+
+.. code-block:: python
+
+    from scipy.spatial.transform import Rotation
+
+    mole = Molecules([[0, 0, 0], [1, 1, 1]])
+    shifts = [[1, 0, 0], [0, 1, 0]]  # in the molecule coordinates
+    rotator = Rotation.from_rotvec([[0, 0, np.pi / 2], [np.pi / 4, 0, 0]])
+    mole_transformed = mole.spatial_transform(shifts, rotator)
+
 Molecule Features
 =================
 

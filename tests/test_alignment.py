@@ -5,12 +5,15 @@ from contextlib import contextmanager
 import numpy as np
 from numpy.testing import assert_allclose
 import polars as pl
+from scipy import ndimage as ndi
+from scipy.spatial.transform import Rotation
 from acryo import SubtomogramLoader, Molecules, pipe
 from acryo.alignment import (
     PCCAlignment,
     NCCAlignment,
     ZNCCAlignment,
     BaseAlignmentModel,
+    AlignmentResult,
 )
 from acryo._rotation import rotate, euler_to_quat
 from acryo.testing import TomogramGenerator, spiral
@@ -257,6 +260,84 @@ def test_multi_align_with_single_template():
     label_name = "labels"
     out = loader.align_multi_templates([img0], max_shifts=2, label_name=label_name)
     assert list(out.features[label_name]) == [0, 0, 0]
+
+
+def _smooth_tomogram(seed: int = 0) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    img = ndi.gaussian_filter(rng.normal(size=(64, 64, 64)), 1.5)
+    return (img / img.std()).astype(np.float32)
+
+
+# shifts (nm, in the molecule coordinates before rotation) and rotation vectors
+_SHIFT_AND_ROTVEC = [
+    ([0.0, 0.0, 1.5], [0.0, np.pi / 2, 0.0]),  # around the y axis
+    ([1.0, 0.0, 0.0], [0.0, 0.0, np.pi / 2]),  # around the x axis
+    ([0.5, -1.0, 0.5], [np.pi / 6, 0.0, 0.0]),  # around the z axis
+]
+
+
+@pytest.mark.parametrize("shift, rotvec", _SHIFT_AND_ROTVEC)
+def test_align_with_rotation(shift, rotvec):
+    scale = 0.5
+    shape = (25, 25, 25)
+    img = _smooth_tomogram()
+    mole = Molecules([[16, 16, 16]], Rotation.from_rotvec([[0.4, -0.9, 0.7]]))
+    truth = mole.spatial_transform(shift, Rotation.from_rotvec(rotvec))
+    kwargs = dict(order=3, scale=scale, output_shape=shape)
+    template = SubtomogramLoader(img, truth, **kwargs).asnumpy()[0]
+    deg = round(np.rad2deg(np.linalg.norm(rotvec)))
+    rotations = [(deg, deg) if r != 0 else (0, 0) for r in rotvec]
+    out = SubtomogramLoader(img, mole, **kwargs).align(
+        template,
+        max_shifts=2.0,
+        rotations=rotations,
+        alignment_model=ZNCCAlignment,
+    )
+    assert_allclose(out.molecules.pos, truth.pos, atol=0.2)
+    assert_allclose(
+        out.molecules.rotator.as_matrix(), truth.rotator.as_matrix(), atol=1e-4
+    )
+    # shifts in the features are those before rotation
+    dr = out.features.select([f"align-d{c}" for c in "zyx"]).to_numpy()
+    assert_allclose(dr[0], shift, atol=0.2)
+    drot = out.features.select([f"align-d{c}rot" for c in "zyx"]).to_numpy()
+    assert_allclose(drot[0], rotvec, atol=1e-4)
+
+
+@pytest.mark.parametrize("multi", [False, True])
+def test_aligned_molecules_consistent_with_affine_matrix(multi: bool):
+    # Subvolumes cropped at the aligned molecules must be the same as the subvolumes
+    # transformed by `AlignmentResult.affine_matrix`, as is done in `fit`.
+    scale = 0.5
+    shape = (25, 25, 25)
+    img = _smooth_tomogram()
+    mole = Molecules(
+        [[16, 16, 16], [15, 17, 16.5], [16.5, 15.5, 15]],
+        Rotation.from_rotvec([[0.4, -0.9, 0.7], [-1.2, 0.3, 0.5], [0.0, 2.0, -0.6]]),
+    )
+    loader = SubtomogramLoader(img, mole, order=3, scale=scale, output_shape=shape)
+    results = [
+        AlignmentResult(
+            label=i,
+            shift=np.array(shift, dtype=np.float32) / scale,
+            quat=Rotation.from_rotvec(rotvec).as_quat(),
+            score=1.0,
+        )
+        for i, (shift, rotvec) in enumerate(_SHIFT_AND_ROTVEC)
+    ]
+    if multi:
+        out = loader._post_align_multi_templates(results, shape)
+        assert list(out.features["labels"]) == [0, 1, 2]
+    else:
+        out = loader._post_align(results, shape)
+    expected = np.stack(
+        [
+            ndi.affine_transform(subvol, result.affine_matrix(shape), order=3)
+            for subvol, result in zip(loader.asnumpy(), results)
+        ]
+    )
+    sl = (slice(None),) + (slice(8, 17),) * 3  # where `expected` is not padded
+    assert_allclose(out.asnumpy()[sl], expected[sl], atol=0.05)
 
 
 @pytest.mark.parametrize("alignment_model", [ZNCCAlignment, NCCAlignment, PCCAlignment])
