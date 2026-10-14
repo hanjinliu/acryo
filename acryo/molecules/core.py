@@ -1,5 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
+import warnings
 from typing import (
     Any,
     Iterable,
@@ -918,6 +919,49 @@ class Molecules:
         rotator = Rotation.random(len(self), random_state=seed)
         return self.rotate_by(rotator, copy=copy)
 
+    def spatial_transform(
+        self,
+        shift: _Array1D | _Array2D,
+        rotator: Rotation,
+        *,
+        inv: bool = False,
+    ) -> Self:
+        """Translate and then rotate molecules in their own coordinates.
+
+        Molecules are translated by ``shift`` in their own coordinates and then rotated
+        by ``rotator`` around their new positions, that is, this method is equivalent
+        to
+
+        >>> mole.translate_internal(shift).rotate_by_rotvec_internal(rotator.as_rotvec())
+
+        This is how molecules are updated by the subtomogram alignment results. The
+        subvolumes cropped at the transformed molecules are the same as the subvolumes
+        at the original molecules transformed by ``AlignmentResult.affine_matrix``.
+
+        Parameters
+        ----------
+        shift : (3,) or (N, 3) array
+            Shifts of molecules in the molecule coordinates before rotation, such as
+            the "align-dz", "align-dy" and "align-dx" features of aligned molecules.
+        rotator : Rotation
+            Rotation of molecules in their own coordinates.
+        inv : bool, default False
+            If true, apply the inverse transformation. Molecules transformed by
+            ``spatial_transform(shift, rotator)`` are transformed back to the original
+            ones by ``spatial_transform(shift, rotator, inv=True)``.
+
+        Returns
+        -------
+        Molecules
+            Instance with updated positions and orientations.
+        """
+        rotvec = rotator.as_rotvec()
+        if inv:
+            return self.rotate_by_rotvec_internal(-rotvec).translate_internal(
+                -np.asarray(shift)
+            )
+        return self.translate_internal(shift).rotate_by_rotvec_internal(rotvec)
+
     def linear_transform(
         self,
         shift: _Array2D,
@@ -926,16 +970,12 @@ class Molecules:
     ) -> Self:
         """Shift and rotate molecules around their own coordinate.
 
-        The shifts are in the coordinates of the molecules *after* rotation, that is,
-        this method is equivalent to
+        This method is deprecated. Use :meth:`spatial_transform` instead.
 
-        >>> mole.rotate_by_rotvec_internal(rotator.as_rotvec()).translate_internal(shift)
-
-        Note that the shifts of the alignment results (``AlignmentResult.shift`` and
-        the "align-dz", "align-dy" and "align-dx" features) are in the coordinates
-        *before* rotation. To update molecules with the alignment results, use
-
-        >>> mole.translate_internal(shift).rotate_by_rotvec_internal(rotvec)
+        The shifts of this method are in the coordinates of the molecules *after*
+        rotation, while those of :meth:`spatial_transform` and the alignment results
+        are *before* rotation. ``linear_transform(shift, rotator)`` is equivalent to
+        ``spatial_transform(rotator.apply(shift), rotator)``.
 
         Parameters
         ----------
@@ -954,6 +994,15 @@ class Molecules:
         Molecules
             Instance with updated positions and orientations.
         """
+        warnings.warn(
+            "`linear_transform` is deprecated and will be removed in the future. Use "
+            "`spatial_transform` instead. Note that `spatial_transform` takes the "
+            "shifts before rotation, the same as the alignment results; "
+            "`linear_transform(shift, rotator)` is equivalent to "
+            "`spatial_transform(rotator.apply(shift), rotator)`.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         rotvec = rotator.as_rotvec()
         if inv:
             shift_corrected = rotator.apply(shift, inverse=True)

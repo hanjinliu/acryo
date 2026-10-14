@@ -151,6 +151,44 @@ def test_internal_transformation():
     assert_allclose(mol3.x, np.array([[0.0, 1 / Sq2, 1 / Sq2]]), rtol=1e-8, atol=1e-8)
 
 
+def test_spatial_transform():
+    rng = np.random.default_rng(0)
+    mol = Molecules(rng.normal(size=(5, 3)) * 10, Rotation.random(5, random_state=1))
+    shift = rng.normal(size=(5, 3))
+    rot = Rotation.random(5, random_state=2)
+
+    out = mol.spatial_transform(shift, rot)
+    # translated in the molecule coordinates before rotation
+    assert_allclose(out.pos, mol.pos + mol.rotator.apply(shift), atol=1e-4)
+    # rotated in the molecule coordinates
+    assert_allclose(out.rotator.as_matrix(), (mol.rotator * rot).as_matrix(), atol=1e-6)
+    back = out.spatial_transform(shift, rot, inv=True)
+    assert_allclose(back.pos, mol.pos, atol=1e-4)
+    assert_allclose(back.rotator.as_matrix(), mol.rotator.as_matrix(), atol=1e-6)
+
+    # single shift and rotation are applied to all the molecules
+    out = mol.spatial_transform(shift[0], rot[0])
+    assert_allclose(out.pos, mol.pos + mol.rotator.apply(shift[0]), atol=1e-4)
+    assert_allclose(
+        out.rotator.as_matrix(), (mol.rotator * rot[0]).as_matrix(), atol=1e-6
+    )
+    back = out.spatial_transform(shift[0], rot[0], inv=True)
+    assert_allclose(back.pos, mol.pos, atol=1e-4)
+    assert_allclose(back.rotator.as_matrix(), mol.rotator.as_matrix(), atol=1e-6)
+
+
+def test_linear_transform_deprecated():
+    rng = np.random.default_rng(0)
+    mol = Molecules(rng.normal(size=(5, 3)) * 10, Rotation.random(5, random_state=1))
+    shift = rng.normal(size=(5, 3))
+    rot = Rotation.random(5, random_state=2)
+    with pytest.warns(DeprecationWarning):
+        out = mol.linear_transform(shift, rot)
+    expected = mol.spatial_transform(rot.apply(shift), rot)
+    assert_allclose(out.pos, expected.pos, atol=1e-4)
+    assert_allclose(out.rotator.as_matrix(), expected.rotator.as_matrix(), atol=1e-6)
+
+
 def test_features():
     mol = Molecules(
         np.zeros((24, 3)), Rotation.random(24), features={"n": np.arange(24)}

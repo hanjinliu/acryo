@@ -1072,15 +1072,11 @@ class LoaderBase(ABC):
             _, loc_shift, local_rot[i], scores[i] = result
             local_shifts[i] = loc_shift * self.scale
 
-        rotvec = Rotation.from_quat(local_rot).as_rotvec()
-        # The shifts are in the molecule coordinates before rotation (see
-        # `AlignmentResult.affine_matrix`), so translate first and then rotate.
-        mole_aligned = self.molecules.translate_internal(
-            local_shifts
-        ).rotate_by_rotvec_internal(rotvec)
+        rotator = Rotation.from_quat(local_rot)
+        mole_aligned = self.molecules.spatial_transform(local_shifts, rotator)
 
         mole_aligned.features = self.molecules.features.with_columns(
-            _misc.get_feature_list(scores, local_shifts, rotvec),
+            _misc.get_feature_list(scores, local_shifts, rotator.as_rotvec()),
         )
 
         return self.replace(molecules=mole_aligned, output_shape=shape)
@@ -1117,17 +1113,14 @@ class LoaderBase(ABC):
             labels[i], loc_shift, local_rot[i], scores[i] = result
             local_shifts[i] = loc_shift * self.scale
 
-        rotvec = Rotation.from_quat(local_rot).as_rotvec()
-        # translate first and then rotate (see `_post_align`)
-        mole_aligned = self.molecules.translate_internal(
-            local_shifts
-        ).rotate_by_rotvec_internal(rotvec)
+        rotator = Rotation.from_quat(local_rot)
+        mole_aligned = self.molecules.spatial_transform(local_shifts, rotator)
 
         if remainder > 1:
             labels %= remainder  # type: ignore
         labels = labels.astype(np.uint8)
 
-        feature_list = _misc.get_feature_list(scores, local_shifts, rotvec)
+        feature_list = _misc.get_feature_list(scores, local_shifts, rotator.as_rotvec())
         mole_aligned.features = self.molecules.features.with_columns(
             feature_list + [pl.Series(label_name, labels)]
         )

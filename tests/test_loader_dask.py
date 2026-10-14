@@ -137,7 +137,7 @@ def test_extracted_subvolumes_prefiltered(tmp_path, rotate: bool):
     rotvec = np.tile([0.1, -0.05, 0.08] if rotate else [0.0, 0.0, 0.0], (6, 1))
     features = [pl.Series(f"align-d{c}", shifts[:, i]) for i, c in enumerate("zyx")]
     features += [pl.Series(f"align-d{c}rot", rotvec[:, i]) for i, c in enumerate("zyx")]
-    mole_aligned = mole.translate_internal(shifts).rotate_by_rotvec_internal(rotvec)
+    mole_aligned = mole.spatial_transform(shifts, Rotation.from_rotvec(rotvec))
     mole_aligned.features = ext_pre.molecules.features.with_columns(features)
     # `replace` keeps the prefiltered state, so coefficients are not filtered twice
     aligned_pre = ext_pre.replace(molecules=mole_aligned)
@@ -188,9 +188,7 @@ def test_extracted_subvolumes_pre_transform(tmp_path, apply_prefilter: bool):
     rotvec = np.tile([0.1, -0.05, 0.08], (6, 1))
     features = [pl.Series(f"align-d{c}", shifts[:, i]) for i, c in enumerate("zyx")]
     features += [pl.Series(f"align-d{c}rot", rotvec[:, i]) for i, c in enumerate("zyx")]
-    mole_aligned = mole_inner.translate_internal(shifts).rotate_by_rotvec_internal(
-        rotvec
-    )
+    mole_aligned = mole_inner.spatial_transform(shifts, Rotation.from_rotvec(rotvec))
     mole_aligned.features = extracted_inner.molecules.features.with_columns(features)
     # the ground truth is the interpolation of the whole tomogram, because cropping
     # also suffers from the boundary effect of the spline prefilter
@@ -235,8 +233,7 @@ def test_extracted_subvolumes_align_with_rotation(tmp_path):
     loader = SubtomogramLoader(img, mole, **kwargs)
     # the template is the first molecule translated and then rotated around x-axis
     rotvec = [0.0, 0.0, np.pi / 2]
-    truth = mole[:1].translate_internal([1.0, -0.8, 0.9])
-    truth = truth.rotate_by_rotvec_internal(rotvec)
+    truth = mole[:1].spatial_transform([1.0, -0.8, 0.9], Rotation.from_rotvec(rotvec))
     template = SubtomogramLoader(img, truth, **kwargs).asnumpy()[0]
     extracted = loader.extract_subtomograms(tmp_path / "ext", pre_transform=True)
     aligned = extracted.align(

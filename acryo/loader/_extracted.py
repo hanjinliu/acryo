@@ -138,9 +138,10 @@ class ExtractedSubvolumeLoader(LoaderBase):
             if rotation is None:
                 rotation = Rotation.identity(nmole)
             # The shifts are in the subvolume coordinates before rotation, the same as
-            # `AlignmentResult.shift`. Molecules are translated by them and then
-            # rotated after alignment, so the affine matrices of the alignment results
-            # are consistent with the subvolumes cropped at the aligned molecules.
+            # `AlignmentResult.shift`. Molecules are updated by
+            # `Molecules.spatial_transform` after alignment, so the affine matrices of
+            # the alignment results are consistent with the subvolumes cropped at the
+            # aligned molecules.
             shift_px = shift / self.scale
             matrices = np.stack(
                 [

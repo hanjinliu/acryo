@@ -282,9 +282,7 @@ def test_align_with_rotation(shift, rotvec):
     shape = (25, 25, 25)
     img = _smooth_tomogram()
     mole = Molecules([[16, 16, 16]], Rotation.from_rotvec([[0.4, -0.9, 0.7]]))
-    # The template is the subvolume of the molecule that is translated in its own
-    # coordinates and then rotated around its own center.
-    truth = mole.translate_internal(shift).rotate_by_rotvec_internal(rotvec)
+    truth = mole.spatial_transform(shift, Rotation.from_rotvec(rotvec))
     kwargs = dict(order=3, scale=scale, output_shape=shape)
     template = SubtomogramLoader(img, truth, **kwargs).asnumpy()[0]
     deg = round(np.rad2deg(np.linalg.norm(rotvec)))
