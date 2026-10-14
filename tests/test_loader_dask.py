@@ -221,13 +221,18 @@ def test_extracted_subvolumes_pre_transform(tmp_path, apply_prefilter: bool):
     )
 
 
-def test_extracted_subvolumes_align_with_rotation(tmp_path):
-    rng = np.random.default_rng(2)
+def _smooth_image_and_molecules(seed: int = 2):
+    rng = np.random.default_rng(seed)
     img = ndi.gaussian_filter(rng.normal(size=(48, 56, 64)), 1.5)
     img = (img / img.std()).astype(np.float32)
     mole = Molecules(
-        rng.uniform(22, 26, size=(4, 3)), Rotation.random(4, random_state=2)
+        rng.uniform(22, 26, size=(4, 3)), Rotation.random(4, random_state=seed)
     )
+    return img, mole
+
+
+def test_extracted_subvolumes_align_with_rotation(tmp_path):
+    img, mole = _smooth_image_and_molecules()
     shape = (15, 15, 15)
     kwargs = dict(order=1, output_shape=shape, corner_safe=True)
     loader = SubtomogramLoader(img, mole, **kwargs)
@@ -246,6 +251,74 @@ def test_extracted_subvolumes_align_with_rotation(tmp_path):
     ref = SubtomogramLoader(img, aligned.molecules, **kwargs).asnumpy()
     sl = (slice(None),) + tuple(slice(2, s - 2) for s in shape)
     assert_allclose(aligned.asnumpy()[sl], ref[sl], atol=1e-4)
+
+
+def test_extracted_subvolumes_align_twice(tmp_path):
+    img, mole = _smooth_image_and_molecules()
+    shape = (15, 15, 15)
+    kwargs = dict(order=1, output_shape=shape, corner_safe=True)
+    loader = SubtomogramLoader(img, mole, **kwargs)
+    # the first molecule is translated and rotated around x-axis, and then translated
+    # and rotated around z-axis
+    rotvec1 = [0.0, 0.0, np.pi / 2]
+    rotvec2 = [np.pi / 2, 0.0, 0.0]
+    truth1 = mole[:1].spatial_transform([1.0, -0.8, 0.9], Rotation.from_rotvec(rotvec1))
+    truth2 = truth1.spatial_transform([-0.6, 0.9, 0.7], Rotation.from_rotvec(rotvec2))
+    template1 = SubtomogramLoader(img, truth1, **kwargs).asnumpy()[0]
+    template2 = SubtomogramLoader(img, truth2, **kwargs).asnumpy()[0]
+    extracted = loader.extract_subtomograms(tmp_path / "ext", pre_transform=True)
+    aligned1 = extracted.align(
+        template1, max_shifts=1.2, rotations=((0, 0), (0, 0), (90, 90))
+    )
+    aligned2 = aligned1.align(
+        template2, max_shifts=1.2, rotations=((90, 90), (0, 0), (0, 0))
+    )
+    assert_allclose(aligned2.molecules.pos[0], truth2.pos[0], atol=0.5)
+    # "align-d*" features are the results of the latest alignment, the same as the
+    # other loaders
+    dpos = aligned2.features.select([f"align-d{c}" for c in "zyx"]).to_numpy()
+    drot = aligned2.features.select([f"align-d{c}rot" for c in "zyx"]).to_numpy()
+    assert_allclose(drot[0], rotvec2, atol=1e-4)
+    expected = aligned1.molecules.spatial_transform(dpos, Rotation.from_rotvec(drot))
+    assert_allclose(aligned2.molecules.pos, expected.pos, atol=0.01)
+    # subvolumes are the same as those cropped at the molecules aligned twice
+    ref = SubtomogramLoader(img, aligned2.molecules, **kwargs).asnumpy()
+    sl = (slice(None),) + tuple(slice(2, s - 2) for s in shape)
+    assert_allclose(aligned2.asnumpy()[sl], ref[sl], atol=1e-4)
+
+
+def test_extracted_subvolumes_resampled_at_molecules(tmp_path):
+    import polars as pl
+
+    img, mole = _smooth_image_and_molecules(seed=3)
+    rng = np.random.default_rng(3)
+    shifts = rng.uniform(-0.6, 0.6, size=(4, 3))
+    rotvec = rng.uniform(-0.15, 0.15, size=(4, 3))
+    # "align-d*" features of the molecules to be extracted are kept, but they are not
+    # used to transform the subvolumes
+    mole = mole.with_features(
+        [pl.Series(f"align-d{c}", shifts[:, i]) for i, c in enumerate("zyx")]
+    )
+    shape = (15, 15, 15)
+    kwargs = dict(order=1, output_shape=shape, corner_safe=True)
+    loader = SubtomogramLoader(img, mole, **kwargs)
+    extracted = loader.extract_subtomograms(tmp_path / "ext", pre_transform=True)
+    assert extracted.features.columns[:3] == ["align-dz", "align-dy", "align-dx"]
+    assert_allclose(extracted.asnumpy(), loader.asnumpy(), rtol=1e-5, atol=1e-5)
+
+    # subvolumes are resampled at any molecules without "align-d*" features
+    sl = (slice(None),) + tuple(slice(2, s - 2) for s in shape)
+    moved = extracted.replace(
+        molecules=extracted.molecules.drop_features([f"align-d{c}" for c in "zyx"])
+    )
+    for _ in range(2):
+        target = moved.molecules.spatial_transform(shifts, Rotation.from_rotvec(rotvec))
+        moved = moved.replace(molecules=target)
+        ref = SubtomogramLoader(img, target, **kwargs).asnumpy()
+        assert_allclose(moved.asnumpy()[sl], ref[sl], atol=1e-4)
+    # subvolumes are selected consistently after subsetting
+    sub = moved.replace(molecules=moved.molecules.subset([3, 0, 2]))
+    assert_allclose(sub.asnumpy()[sl], ref[[3, 0, 2]][sl], atol=1e-4)
 
 
 def test_order_optimize():
