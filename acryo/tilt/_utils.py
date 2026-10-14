@@ -36,6 +36,7 @@ def get_norms_x(
 def get_indices(shape: tuple[int, int, int]) -> NDArray[np.float32]:
     inds = np.indices(shape, dtype=np.float32)
     for ind, s in zip(inds, shape):
-        # Note that the shifts in indices must resemble the shifts in fftshift.
-        ind -= math.ceil(s / 2)
-    return np.fft.fftshift(np.stack(list(inds), axis=-1), axes=(0, 1, 2))
+        # Zero frequency is at s // 2 after fftshift, so the centered indices are
+        # shifted back by ifftshift (not fftshift, which differs for odd sizes).
+        ind -= s // 2
+    return np.fft.ifftshift(np.stack(list(inds), axis=-1), axes=(0, 1, 2))

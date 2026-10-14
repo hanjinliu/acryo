@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 from acryo._typed_scipy import fftn, ifftn, affine_transform
 from acryo.molecules import Molecules
+from acryo.tilt import single_axis
 from acryo._utils import compose_matrices
 from acryo._rotation import normalize_rotations
 from acryo._types import nm, degree
@@ -51,9 +53,6 @@ class TomogramGenerator:
     def _get_matrices(self, rng: np.random.Generator):
         gy, gx = self.grid_shape
         quat_idx = rng.choice(self.quaternions.shape[0], size=(gy * gx))
-
-        from scipy.spatial.transform import Rotation
-
         rotators = [Rotation.from_quat(self.quaternions[idx]) for idx in quat_idx]
         return compose_matrices(np.array(self.template.shape) / 2 - 0.5, rotators)
 
@@ -81,10 +80,11 @@ class TomogramGenerator:
             mols[i][j] += rng.normal(scale=self.noise_sigma, size=template.shape)
 
         if tilt_range != (-90, 90):
-            mw = _missing_wedge_mask(template.shape, tilt_range=tilt_range)
+            mw = single_axis(tilt_range).create_mask(
+                Rotation.identity(), template.shape
+            )
             for i, j in wrange(gy, gx):
-                ft = np.fft.fftshift(fftn(mols[i][j]))
-                mols[i][j] = np.real(np.fft.ifftshift(ifftn(ft * mw)))
+                mols[i][j] = np.real(ifftn(fftn(mols[i][j]) * mw))
 
         tomogram: np.ndarray = np.block(mols)  # type: ignore
         return tomogram
@@ -101,37 +101,6 @@ class TomogramGenerator:
         return Molecules(centers).translate_random(
             max_distance=max_distance, seed=self._seed
         )
-
-
-def _missing_wedge_mask(
-    shape: tuple[int, int, int], tilt_range: tuple[degree, degree]
-) -> np.ndarray:
-    """
-    Create a missing-wedge binary mask image.
-
-    Mask created by this function should be multiplied to Fourier transformed
-    image.
-
-    Parameters
-    ----------
-    shape : tuple of int
-        Shape of the output array.
-    tilt_range : tuple[float, float]
-        Tomogram tilt range in degree.
-
-    Returns
-    -------
-    np.ndarray
-        A binary mask.
-    """
-    radmin, radmax = np.deg2rad(tilt_range)
-    x0 = (shape[2] - 1) / 2
-    z0 = (shape[0] - 1) / 2
-    zz, yy, xx = np.indices(shape)
-    d0 = zz - z0 - np.tan(radmin) * (xx - x0)
-    d1 = zz - z0 - np.tan(radmax) * (xx - x0)
-    missing = d0 * d1 < 0
-    return missing
 
 
 def wrange(l0: int, l1: int):
