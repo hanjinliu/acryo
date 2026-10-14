@@ -345,7 +345,6 @@ class LoaderGroup(Generic[_K, _L]):
         all_tasks: list[DaskTaskList[AlignmentResult]] = []
         template_map = _normalize_template(templates)
         input_shape: tuple[int, int, int] | None = None
-        has_rotation = False
         for key, loader in self:
             _tmps = template_map[key]
             model = alignment_model(
@@ -365,24 +364,14 @@ class LoaderGroup(Generic[_K, _L]):
             )
             all_tasks.append(tasks)
             input_shape = model.input_shape
-            has_rotation = model.has_rotation
 
         if input_shape is None:
             raise RuntimeError("LoaderGroup has no loader.")
 
         all_results = compute(all_tasks)
-        if has_rotation:
-            remainder = len(templates)
-        else:
-            remainder = -1
         out: list[tuple[_K, _L]] = []
         for (key, loader), results in zip(self, all_results):
-            new = loader._post_align_multi_templates(
-                results,
-                input_shape,
-                remainder,
-                label_name,
-            )
+            new = loader._post_align_multi_templates(results, input_shape, label_name)
             out.append((key, new))
         return self.__class__(out)
 

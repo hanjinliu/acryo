@@ -389,7 +389,6 @@ class BatchLoader(LoaderBase):
             )
             if model.has_hetero_templates:
                 is_multi = True
-                remainder = model.remainder()
                 tasks.extend(
                     each._prep_align_multi_templates(model, max_shifts, _backend)
                 )
@@ -399,9 +398,7 @@ class BatchLoader(LoaderBase):
         all_results = tasks.compute()
 
         if is_multi:
-            return self._post_align_multi_templates(
-                all_results, model.input_shape, remainder
-            )
+            return self._post_align_multi_templates(all_results, model.input_shape)
         return self._post_align(all_results, model.input_shape)
 
     def construct_landscape(

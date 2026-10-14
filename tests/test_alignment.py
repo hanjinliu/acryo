@@ -7,7 +7,7 @@ from numpy.testing import assert_allclose
 import polars as pl
 from scipy import ndimage as ndi
 from scipy.spatial.transform import Rotation
-from acryo import SubtomogramLoader, Molecules, pipe
+from acryo import BatchLoader, SubtomogramLoader, Molecules, pipe
 from acryo.alignment import (
     PCCAlignment,
     NCCAlignment,
@@ -302,6 +302,121 @@ def test_align_with_rotation(shift, rotvec):
     assert_allclose(dr[0], shift, atol=0.2)
     drot = out.features.select([f"align-d{c}rot" for c in "zyx"]).to_numpy()
     assert_allclose(drot[0], rotvec, atol=1e-4)
+
+
+# 9 rotations around the z and y axes by -90, 0 and 90 degrees
+_ROTATIONS_90 = [(90, 90), (90, 90), (0, 0)]
+# shifts (nm, in the molecule coordinates before rotation) and rotation vectors, where
+# the rotations are included in `_ROTATIONS_90`
+_SHIFT_AND_ROTVEC_90 = [
+    ([0.5, -1.0, 1.0], [0.0, np.pi / 2, 0.0]),  # around the y axis
+    ([1.0, 0.5, 0.0], [np.pi / 2, 0.0, 0.0]),  # around the z axis
+    ([0.0, 0.0, -1.0], [-np.pi / 2, 0.0, 0.0]),  # around the z axis
+    ([0.0, 1.0, 0.0], [0.0, 0.0, 0.0]),  # no rotation
+]
+
+
+def _prep_multi_templates(shift, rotvec):
+    """Return a loader, [wrong template, true template] and the true molecule."""
+    scale = 0.5
+    # use a cubic box so that the 90-degree rotations do not pad the template
+    shape = (25, 25, 25)
+    img = _smooth_tomogram()
+    mole = Molecules(
+        [[16, 16, 16]], Rotation.from_rotvec([[0.4, -0.9, 0.7]]), features={"id": [0]}
+    )
+    truth = mole.spatial_transform(shift, Rotation.from_rotvec(rotvec))
+    kwargs = dict(order=3, scale=scale, output_shape=shape)
+    true_template = SubtomogramLoader(img, truth, **kwargs).asnumpy()[0]
+    # The mirror image cannot be superposed on the true template by any rotation. Note
+    # that it has the same voxel values as the true template.
+    wrong_template = np.ascontiguousarray(true_template[::-1])
+    loader = SubtomogramLoader(img, mole, **kwargs)
+    return loader, [wrong_template, true_template], truth
+
+
+def _assert_aligned_to_truth(out: SubtomogramLoader, truth: Molecules, rotvec):
+    assert list(out.features["labels"]) == [1]
+    assert_allclose(out.molecules.pos, truth.pos, atol=0.2)
+    assert_allclose(
+        out.molecules.rotator.as_matrix(), truth.rotator.as_matrix(), atol=1e-4
+    )
+    drot = out.features.select([f"align-d{c}rot" for c in "zyx"]).to_numpy()
+    assert_allclose(drot[0], rotvec, atol=1e-4)
+
+
+@pytest.mark.parametrize("shift, rotvec", _SHIFT_AND_ROTVEC_90)
+def test_align_multi_templates_with_rotation(shift, rotvec):
+    loader, templates, truth = _prep_multi_templates(shift, rotvec)
+    out = loader.align_multi_templates(
+        templates,
+        max_shifts=2.0,
+        rotations=_ROTATIONS_90,
+        alignment_model=ZNCCAlignment,
+    )
+    _assert_aligned_to_truth(out, truth, rotvec)
+    dr = out.features.select([f"align-d{c}" for c in "zyx"]).to_numpy()
+    assert_allclose(dr[0], shift, atol=0.2)
+
+    # `fit` must give the same result
+    model = ZNCCAlignment(templates, rotations=_ROTATIONS_90)
+    _, result = model.fit(loader.asnumpy()[0], max_shifts=(4, 4, 4))
+    assert result.label == 1
+    assert_allclose(
+        Rotation.from_quat(result.quat).as_matrix(),
+        Rotation.from_rotvec(rotvec).as_matrix(),
+        atol=1e-4,
+    )
+    assert_allclose(result.shift * loader.scale, shift, atol=0.2)
+
+
+@pytest.mark.parametrize("kind", ["batch", "group"])
+def test_align_multi_templates_with_rotation_in_batch_and_group(kind: str):
+    shift, rotvec = _SHIFT_AND_ROTVEC_90[0]
+    loader, templates, truth = _prep_multi_templates(shift, rotvec)
+    kwargs = dict(max_shifts=2.0, rotations=_ROTATIONS_90)
+    if kind == "batch":
+        batch = BatchLoader.from_loaders(
+            [loader], order=loader.order, scale=loader.scale, output_shape=(25,) * 3
+        )
+        out_batch = batch.align(templates, **kwargs)
+        out = out_batch.loaders[0]
+    else:
+        ((_, out),) = loader.groupby("id").align_multi_templates(templates, **kwargs)
+    _assert_aligned_to_truth(out, truth, rotvec)
+
+
+@pytest.mark.parametrize("shift, rotvec", _SHIFT_AND_ROTVEC_90[:2])
+def test_landscape_order_multi_templates_with_rotation(shift, rotvec):
+    # The landscape of Nt templates and Nr rotations must be in the template-major
+    # order, that is, the k-th landscape is of the (k // Nr)-th template rotated by
+    # the (k % Nr)-th rotation.
+    loader, templates, _ = _prep_multi_templates(shift, rotvec)
+    max_shifts = (4, 4, 4)
+    model = ZNCCAlignment(templates, rotations=_ROTATIONS_90)
+    ntmps, nrots = len(templates), model.quaternions.shape[0]
+    lnd = model.landscape(loader.asnumpy()[0], max_shifts)
+    assert lnd.shape == (ntmps * nrots, 9, 9, 9)
+    lnd = lnd.reshape(ntmps, nrots, 9, 9, 9)
+    for i, template in enumerate(templates):
+        # the padding value of rotated templates is the same as `model`, because
+        # the templates have the same voxel values.
+        model_i = ZNCCAlignment(template, rotations=_ROTATIONS_90)
+        lnd_i = model_i.landscape(loader.asnumpy()[0], max_shifts)
+        assert_allclose(lnd[i], lnd_i, rtol=1e-5, atol=1e-5)
+
+    # decode the best template and rotation from the landscape of the loader
+    lnd_loader = loader.construct_landscape(
+        templates, max_shifts=2.0, rotations=_ROTATIONS_90
+    ).compute()
+    assert lnd_loader.shape == (1, ntmps * nrots, 9, 9, 9)
+    kopt = np.argmax(lnd_loader[0].max(axis=(1, 2, 3)))
+    assert kopt // nrots == 1
+    assert_allclose(
+        Rotation.from_quat(model.quaternions[kopt % nrots]).as_matrix(),
+        Rotation.from_rotvec(rotvec).as_matrix(),
+        atol=1e-4,
+    )
 
 
 @pytest.mark.parametrize("multi", [False, True])

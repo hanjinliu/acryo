@@ -278,6 +278,13 @@ image.
 - ``pos`` is the position of the sub-volume in the original tomogram. It must be a (3,)
   :class:`numpy.ndarray` object. Default alignment models does not use this parameter.
 
+If the model has multiple templates and/or rotations, the output will be a 4D array,
+whose first axis iterates over all the (template, rotation) pairs in the template-major
+order.
+For ``Nt`` templates and ``Nr`` rotations, the ``k``-th landscape is that of the
+``k // Nr``-th template rotated by the ``k % Nr``-th rotation, so that the output can be
+reshaped to ``(Nt, Nr, Nz, Ny, Nx)``.
+
 Define Custom Alignment Model
 =============================
 
