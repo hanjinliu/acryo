@@ -8,15 +8,15 @@ dynamic = ["version"]
 description = "An extensible cryo-EM/ET toolkit for Python."
 classifiers = [
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
 ]
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     { name = "Hanjin Liu", email = "liuhanjin.sc@gmail.com" },
 ]
