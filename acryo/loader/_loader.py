@@ -385,17 +385,12 @@ class SubtomogramLoader(LoaderBase):
             chunksize=chunksize,
         )
         index = pl.arange(num_mole).alias(SUBVOLUME_INDEX)
-        # `ExtractedSubvolumeLoader` uses these features to apply local Affine
-        # transformation. Drop them.
-        _to_drop = [
-            "align-dz", "align-dy", "align-dx",
-            "align-dzrot", "align-dyrot", "align-dxrot"
-        ]  # fmt: skip
+        # `ExtractedSubvolumeLoader` resamples the subvolumes using the molecules
+        # relative to these extracted ones, not the "align-d*" features. They are kept
+        # as is.
         return ExtractedSubvolumeLoader(
             dsk_round,
-            molecules=self.molecules.with_features(index).drop_features(
-                _to_drop, strict=False
-            ),
+            molecules=self.molecules.with_features(index),
             order=self.order,
             scale=self.scale,
             tilt_model=self.tilt_model,
