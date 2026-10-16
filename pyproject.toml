@@ -37,6 +37,9 @@ include = [
 ]
 
 [project.optional-dependencies]
+torch = [
+    "torch-reconstruct-tomogram>=0.6.0",
+]
 testing = [
     "pytest",
     "pytest-cov",
