@@ -314,10 +314,11 @@ Reconstructing Subtomograms from a Tilt Series
 ==============================================
 
 :class:`PseudoSubtomogramLoader` does not need a tomogram. Subtomograms are reconstructed
-from a tilt series every time they are needed, at the pixel size given by ``scale``,
-using `torch-reconstruct-tomogram <https://github.com/teamtomo/torch-reconstruct-tomogram>`_.
-This optional dependency is installed by ``pip install acryo[torch]``. CTF is not corrected
-yet.
+from a tilt series every time they are needed, at the pixel size given by ``scale``, by
+direct Fourier inversion (insertion of the central slices into the 3D Fourier transform). The
+optional dependencies, such as
+`torch-reconstruct-tomogram <https://github.com/teamtomo/torch-reconstruct-tomogram>`_, are
+installed by ``pip install acryo[torch]``. CTF is not corrected yet.
 
 The tilt series is given as a ``TiltSeries`` object of
 `torch-tilt-series <https://github.com/teamtomo/torch-tilt-series>`_. Because the tilt series
@@ -344,12 +345,23 @@ the tomogram center.
     avg = loader.average()
 
 The tilt images are loaded only once and shared by the loaders created from it (such as the
-results of :meth:`align` or :meth:`binning`). When subtomograms are requested, they are
-reconstructed immediately by PyTorch, and only their cropping and rotation are processed lazily
-and in parallel by :mod:`dask`. A cube is reconstructed for each molecule, or, if the molecules
-are dense, for each chunk of about ``chunk_size`` (100 nm by default) that contains molecules,
-whichever has smaller total volume. The subtomograms are then cropped from the cubes in the same
-way as :class:`SubtomogramLoader`.
+results of :meth:`align` or :meth:`binning`). They are read from the file tilt by tilt,
+preprocessed, binned by the largest integer factor whose pixel size does not exceed ``scale``,
+and cached in memory, so the raw tilt series is never in memory all at once. Subtomograms are
+reconstructed lazily and in
+parallel by :mod:`dask`. A cube aligned to the tomogram axes is reconstructed around each
+molecule, and the subtomogram is cropped from the cube with the rotation of the molecule, in
+the same way as :class:`SubtomogramLoader` (interpolation order ``order``, and larger cubes if
+``corner_safe=True``). All the cubes share the same geometry, so the insertion of the central
+slices is computed only once as a sparse matrix.
+
+The 3D Fourier transform of each cube is padded by the factor ``padding`` (2 by default).
+Densities outside the padded cube, such as neighboring molecules, are partly aliased into the
+cube. If the molecules are densely packed, a larger ``padding`` (such as 3) gives subtomograms
+closer to those from a reconstructed tomogram, at the cost of speed.
+
+The functions for reconstruction are available in :mod:`acryo.projection`, and they do not
+depend on ``torch``.
 
 The full tomogram can also be reconstructed at the pixel size of ``scale`` using
 ``torch_reconstruct_tomogram.reconstruct_tomogram``. The tomogram is centered at

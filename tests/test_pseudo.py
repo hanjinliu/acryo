@@ -168,22 +168,22 @@ def test_loading_methods_are_consistent(blob_tilt_series):
 
 @pytest.fixture
 def recorded_calls(monkeypatch) -> list[tuple[int, int]]:
-    """Record the number of points and the sidelength of each reconstruction."""
-    import torch_reconstruct_tomogram.reconstruct as _mod
+    """Record the number of cubes and the sidelength of each reconstruction."""
+    from acryo.projection import DirectFourierReconstructor
 
     calls: list[tuple[int, int]] = []
-    _recon = _mod._reconstruct_subvolume
+    _call = DirectFourierReconstructor.__call__
 
-    def _recon_record(tilt_series, images, points, sidelength, **kwargs):
-        calls.append((len(points), sidelength))
-        return _recon(tilt_series, images, points, sidelength, **kwargs)
+    def _call_record(self, positions):
+        calls.append((len(positions), self.sidelength))
+        return _call(self, positions)
 
-    monkeypatch.setattr(_mod, "_reconstruct_subvolume", _recon_record)
+    monkeypatch.setattr(DirectFourierReconstructor, "__call__", _call_record)
     return calls
 
 
 @pytest.mark.parametrize(
-    "batch_size, npoints", [(1, [1] * 5), (2, [2, 2, 1]), (None, [5])]
+    "batch_size, npoints", [(1, [1] * 5), (2, [2, 2, 1]), (None, [1] * 5)]
 )
 def test_batch_size(blob_tilt_series, recorded_calls, batch_size, npoints):
     mole = Molecules(BLOBS + CENTER, Rotation.random(len(BLOBS), random_state=4))
@@ -191,19 +191,40 @@ def test_batch_size(blob_tilt_series, recorded_calls, batch_size, npoints):
     recorded_calls.clear()
     loader = _loader(blob_tilt_series, mole, batch_size=batch_size)
     stack = loader.construct_dask()
-    # subtomograms are reconstructed immediately, and only rotation is delayed
-    assert [n for n, _ in recorded_calls] == npoints
+    assert recorded_calls == []  # lazy
+    assert stack.chunks[0] == tuple(npoints)
     assert_allclose(stack.compute(), ref, rtol=1e-5, atol=1e-5)
-    assert [n for n, _ in recorded_calls] == npoints
+    assert sorted(n for n, _ in recorded_calls) == sorted(npoints)
 
 
 def test_load_reconstructs_given_subtomograms(blob_tilt_series, recorded_calls):
     mole = Molecules(BLOBS + CENTER, Rotation.random(len(BLOBS), random_state=4))
-    loader = _loader(blob_tilt_series, mole)
+    loader = _loader(blob_tilt_series, mole, batch_size=8)
     loader.load(2)
     loader.load([3, 1])
     loader.load(slice(1, 5, 2))
     assert [n for n, _ in recorded_calls] == [1, 2, 2]
+
+
+def test_reconstructor_is_cached(blob_tilt_series, monkeypatch):
+    from acryo.projection import DirectFourierReconstructor
+
+    sidelengths: list[int] = []
+    _init = DirectFourierReconstructor.__init__
+
+    def _init_record(self, *args, **kwargs):
+        _init(self, *args, **kwargs)
+        sidelengths.append(self.sidelength)
+
+    monkeypatch.setattr(DirectFourierReconstructor, "__init__", _init_record)
+    mole = Molecules(BLOBS + CENTER, Rotation.random(len(BLOBS), random_state=4))
+    loader = _loader(blob_tilt_series, mole, order=1)
+    loader.asnumpy()
+    loader.load(1)
+    loader.load([0, 2])
+    assert sidelengths == [15]  # 13 + 2 * order
+    loader.asnumpy(output_shape=(9, 9, 9))
+    assert sidelengths == [15, 11]
 
 
 # 4 x 4 x 4 grid of blobs with 4 nm spacing
@@ -212,49 +233,35 @@ DENSE_BLOBS = np.stack(
 ).reshape(-1, 3)
 
 
-@pytest.mark.parametrize(
-    "blobs, chunk_size, calls",
-    [
-        (DENSE_BLOBS, 15.0, [(1, 30)] * 8),  # 2 x 2 x 2 chunks of 30 pixels
-        (DENSE_BLOBS, 1000.0, [(64, 16)]),  # chunks are too large
-        (BLOBS, 15.0, [(5, 16)]),  # molecules are sparse
-    ],
-)
-def test_chunk_strategy(tmp_path, recorded_calls, blobs, chunk_size, calls):
-    ts = _make_tilt_series(tmp_path / "blobs.mrc", blobs)
-    mole = Molecules(blobs + CENTER, Rotation.random(len(blobs), random_state=6))
-    loader = _loader(ts, mole, output_shape=(9, 9, 9), chunk_size=chunk_size)
-    assert loader.asnumpy().shape == (len(blobs), 9, 9, 9)
-    assert recorded_calls == calls
-
-
+# Neighboring molecules outside the padded cube are aliased into the cube, so the
+# subtomograms are less consistent with the tomogram for smaller padding.
+@pytest.mark.parametrize("padding, min_corr", [(2.0, 0.85), (3.0, 0.93)])
 @pytest.mark.parametrize("tomo_hand", [1, -1])
-@pytest.mark.parametrize("corner_safe, chunk_size", [(False, 15.0), (True, 20.0)])
-def test_chunks_consistent_with_tomogram_reconstruction(
-    tmp_path, recorded_calls, corner_safe, chunk_size, tomo_hand
+def test_dense_molecules_consistent_with_tomogram_reconstruction(
+    tmp_path, tomo_hand, padding, min_corr
 ):
     ts = _make_tilt_series(tmp_path / "blobs.mrc", DENSE_BLOBS)
     scale = 0.5
     shape = (60, 100, 100)
     tomo_center = np.array(shape) // 2 * scale
     rot = Rotation.random(len(DENSE_BLOBS), random_state=7)
-    mole = Molecules(DENSE_BLOBS + tomo_center, rot)
-    kwargs = dict(output_shape=(9, 9, 9), scale=scale, corner_safe=corner_safe)
+    blobs = DENSE_BLOBS if tomo_hand == 1 else _mirror_z(DENSE_BLOBS)
+    mole = Molecules(blobs + tomo_center, rot)
+    kwargs = dict(output_shape=(9, 9, 9), scale=scale)
     loader = PseudoSubtomogramLoader(
         ts,
         mole,
         tomogram_center=tomo_center,
-        chunk_size=chunk_size,
         tomo_hand=tomo_hand,
+        padding=padding,
         **kwargs,
     )
     out = loader.asnumpy()
-    assert [n for n, _ in recorded_calls] == [1] * 8  # 2 x 2 x 2 chunks
     # NOTE: the contrast of the tomogram is not inverted
     tomo = -loader.reconstruct_tomogram(shape, patch_size=32)
     ref = SubtomogramLoader(tomo, mole, **kwargs).asnumpy()
     for img0, img1 in zip(ref, out):
-        assert np.corrcoef(img0.ravel(), img1.ravel())[0, 1] > 0.95
+        assert np.corrcoef(img0.ravel(), img1.ravel())[0, 1] > min_corr
 
 
 @pytest.mark.parametrize("corner_safe", [False, True])
@@ -286,8 +293,9 @@ def test_properties(blob_tilt_series):
     assert binned.output_shape == loader.output_shape
     assert binned.tilt_model is loader.tilt_model
     assert binned.batch_size is loader.batch_size is None
-    assert binned.chunk_size == loader.chunk_size == 100.0
     assert binned.tomo_hand == loader.tomo_hand == 1
+    assert binned.padding == loader.padding == 2.0
+    assert _loader(blob_tilt_series, mole, padding=3).replace(scale=1.0).padding == 3.0
     mirrored = _loader(blob_tilt_series, mole, tomo_hand=-1)
     assert mirrored.tilt_model.tilt_range == (-60.0, 40.0)
     assert mirrored.binning(2).tomo_hand == -1
@@ -309,9 +317,9 @@ def test_invalid_input(blob_tilt_series):
     with pytest.raises(ValueError):
         PseudoSubtomogramLoader(blob_tilt_series, mole, batch_size=0)
     with pytest.raises(ValueError):
-        PseudoSubtomogramLoader(blob_tilt_series, mole, chunk_size=0)
-    with pytest.raises(ValueError):
         PseudoSubtomogramLoader(blob_tilt_series, mole, tomo_hand=0)
+    with pytest.raises(ValueError):
+        PseudoSubtomogramLoader(blob_tilt_series, mole, padding=0.5)
     ts = TiltSeries(
         tilt_angles=TILT_ANGLES,
         tilt_axis_angle=np.zeros_like(TILT_ANGLES),
@@ -503,13 +511,15 @@ def test_refined_loader(tmp_path):
     translations = initial.sample_translations.clone()
     loader = _loader(initial, mole, output_shape=(15, 15, 15))
     template = _particle_template(0.5, 15)
+    images = loader._images.get(1)[1].copy()
     refined = loader.refine_tilt_series([(mole, template)])
+    assert_allclose(loader._images.get(1)[1], images)  # the cache is not modified
     assert isinstance(refined, PseudoSubtomogramLoader)
     assert refined.tilt_series is not initial
     assert loader.tilt_series is initial
     assert_allclose(initial.sample_translations, translations)  # not modified
     assert refined.molecules is loader.molecules
-    assert refined._images.get() is loader._images.get()  # images are shared
+    assert refined._images.get(1)[1] is loader._images.get(1)[1]  # shared images
 
     # subtomograms are sharper after refinement
     def _score(ldr: PseudoSubtomogramLoader) -> float:
@@ -534,3 +544,128 @@ def test_refine_invalid_input(blob_tilt_series):
         loader.refine_tilt_series(
             [(Molecules(BLOBS + CENTER), template)], grid_shape=(0, 2)
         )
+
+
+@pytest.mark.parametrize(
+    "kwargs", [{}, {"low": 0.02, "high": 0.4}, {"subtract_background": False}]
+)
+def test_tilt_by_tilt_preprocessing(blob_tilt_series, kwargs):
+    from torch_tilt_series import load_tilt_series_images, preprocess_tilt_series_images
+    from acryo.loader._pseudo import _TiltSeriesImages
+
+    ref = preprocess_tilt_series_images(
+        load_tilt_series_images(blob_tilt_series), **kwargs
+    )
+    _, images = _TiltSeriesImages(blob_tilt_series, True, kwargs).get(1)
+    assert_allclose(images, ref.numpy(), atol=1e-4)
+    # cached in memory, and read-only because the cache is shared
+    assert type(images) is np.ndarray
+    assert images.dtype == np.float32
+    assert not images.flags.writeable
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.int16, np.uint16, np.float16])
+@pytest.mark.parametrize("extended_header", [False, True])
+def test_mrc_images_are_read_one_by_one(tmp_path, monkeypatch, dtype, extended_header):
+    from acryo.loader._pseudo import _MrcImageStack
+
+    rng = np.random.default_rng(0)
+    data = (rng.normal(size=(5, 12, 17)) * 100).astype(dtype)
+    path = tmp_path / "stack.mrc"
+    with mrcfile.new(path) as mrc:
+        mrc.set_data(data)
+        if extended_header:
+            mrc.set_extended_header(np.zeros(10, dtype=[("a", "<i4", (7,))]))
+
+    # the whole file must not be read nor memory-mapped
+    def _fail(*args, **kwargs):
+        raise AssertionError("The whole file is read.")
+
+    monkeypatch.setattr(mrcfile, "mmap", _fail)
+    monkeypatch.setattr(mrcfile, "read", _fail)
+    monkeypatch.setattr(np, "memmap", _fail)
+    stack = _MrcImageStack(path)
+    assert stack.shape == data.shape
+    images = list(stack.iter_images([3, 0, -1]))
+    for image, index in zip(images, [3, 0, -1]):
+        assert image.dtype == np.float32
+        assert_allclose(image, data[index].astype(np.float32))
+    with pytest.raises(IndexError):
+        list(stack.iter_images([5]))
+
+
+@pytest.mark.parametrize("shape", [(64, 80), (63, 81), (66, 70)])
+@pytest.mark.parametrize("binsize", [2, 3])
+def test_fourier_bin_keeps_center(shape, binsize):
+    from acryo.loader._pseudo import _fourier_bin
+
+    shift = np.array([6.0, -9.0])  # from the center, in the original pixels
+    pos = np.array(shape) // 2 + shift
+    yy, xx = np.indices(shape, dtype=np.float32)
+    image = np.exp(-((yy - pos[0]) ** 2 + (xx - pos[1]) ** 2) / (2 * 3.0**2))
+    binned = _fourier_bin(torch.as_tensor(image), binsize).numpy()
+    expected = np.array(binned.shape) // 2 + shift / binsize
+    weight = np.clip(binned, 0, None) ** 2
+    com = (np.indices(binned.shape) * weight).sum(axis=(1, 2)) / weight.sum()
+    assert_allclose(com, expected, atol=0.05)
+
+
+def test_tilt_images_are_loaded_once_per_binsize(blob_tilt_series, monkeypatch):
+    from acryo.loader._pseudo import _TiltSeriesImages
+
+    loaded: list[int] = []
+    _load = _TiltSeriesImages._load
+
+    def _recorded_load(self, binsize):
+        loaded.append(binsize)
+        return _load(self, binsize)
+
+    monkeypatch.setattr(_TiltSeriesImages, "_load", _recorded_load)
+    loader = _loader(blob_tilt_series, Molecules(BLOBS + CENTER))
+    assert loaded == []  # lazy
+    loader.average()
+    loader.head(3).average()
+    loader.binning(2).replace(output_shape=(7, 7, 7)).average()
+    loader.binning(2).average(output_shape=(7, 7, 7))
+    loader.replace(scale=0.7).average()  # binsize 1 is used again
+    assert loaded == [1, 2]
+
+
+def test_image_indices(tmp_path, blob_tilt_series):
+    # the same tilt images with an excluded image at the beginning
+    with mrcfile.open(blob_tilt_series.image_path) as mrc:
+        data = mrc.data.copy()
+    path = tmp_path / "with_excluded.mrc"
+    with mrcfile.new(path) as mrc:
+        mrc.set_data(np.concatenate([np.ones_like(data[:1]), data]))
+    ts = copy.copy(blob_tilt_series)
+    ts.image_path = path
+    ts.image_indices = torch.arange(1, data.shape[0] + 1)
+    mole = Molecules(BLOBS + CENTER, Rotation.random(len(BLOBS), random_state=9))
+    ref = _loader(blob_tilt_series, mole).asnumpy()
+    assert_allclose(_loader(ts, mole).asnumpy(), ref, atol=1e-5)
+
+
+@pytest.mark.parametrize("scale", [1.0, 1.5])  # binsize 2 and 3
+def test_binned_tilt_images(blob_tilt_series, monkeypatch, scale):
+    from acryo.loader._pseudo import _TiltSeriesImages
+
+    mole = Molecules(BLOBS + CENTER, Rotation.random(len(BLOBS), random_state=10))
+    loader = _loader(blob_tilt_series, mole, scale=scale, output_shape=(9, 9, 9))
+    assert loader._images.binsize_for(scale * 10) == round(scale * 2)
+    binned = loader.asnumpy()
+    monkeypatch.setattr(_TiltSeriesImages, "binsize_for", lambda self, spacing: 1)
+    unbinned = loader.replace().asnumpy()
+    for img0, img1 in zip(binned, unbinned):
+        assert np.corrcoef(img0.ravel(), img1.ravel())[0, 1] > 0.95
+        assert_allclose(_center_of_mass(img0), [4, 4, 4], atol=0.15)
+
+
+def test_subtomograms_are_not_kept(blob_tilt_series, recorded_calls):
+    # the same subtomograms are reconstructed again in another computation
+    mole = Molecules(BLOBS + CENTER)
+    stack = _loader(blob_tilt_series, mole, batch_size=2).construct_dask()
+    stack[:2].compute()
+    assert [n for n, _ in recorded_calls] == [2]
+    stack.compute()
+    assert sorted(n for n, _ in recorded_calls) == [1, 2, 2, 2]

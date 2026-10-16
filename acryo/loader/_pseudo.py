@@ -1,21 +1,25 @@
 # pyright: reportPrivateImportUsage=false
 from __future__ import annotations
 
+import copy
 import math
 import threading
-from typing import TYPE_CHECKING, Any, Iterable, Sequence, SupportsIndex
+from typing import TYPE_CHECKING, Any, Iterable, Iterator, Sequence, SupportsIndex
+import uuid
 import warnings
 
 import numpy as np
 from numpy.typing import NDArray
 from dask import array as da
+from dask.highlevelgraph import HighLevelGraph
 
 from acryo._types import nm, pixel
-from acryo._dask import DaskArrayList, DaskTaskPool
+from acryo._dask import DaskArrayList
 from acryo.backend import Backend
 from acryo.loader import _misc
 from acryo.loader._base import LoaderBase, Unset, _ShapeType, TemplateInputType
 from acryo.molecules import Molecules
+from acryo.projection import DirectFourierReconstructor
 from acryo.tilt import TiltSeriesModel, single_axis
 
 if TYPE_CHECKING:
@@ -30,36 +34,39 @@ class PseudoSubtomogramLoader(LoaderBase):
     """A loader that reconstructs subtomograms directly from a tilt series.
 
     No tomogram is needed. Every time subtomograms are requested, they are
-    reconstructed from the tilt series at the pixel size given by ``scale`` using
-    `torch-reconstruct-tomogram <https://github.com/teamtomo/torch-reconstruct-tomogram>`_
-    (install by ``pip install acryo[torch]``). CTF is not corrected.
-
-    When subtomograms are requested, cubes aligned to the tomogram axes are
-    reconstructed immediately using the multi-threaded PyTorch. A cube is
-    reconstructed for each molecule, or, if the molecules are dense, for each chunk of
-    about ``chunk_size`` that contains molecules, whichever has smaller total volume.
-    The subtomograms are then cropped from the cubes and rotated to the orientation of
-    the molecules in parallel by dask.
+    reconstructed from the tilt series at the pixel size given by ``scale`` by direct
+    Fourier inversion (insertion of the central slices into the 3D Fourier
+    transform), as in ``torch-reconstruct-tomogram``. A cube aligned to the tomogram
+    axes is reconstructed around each molecule, and the subtomogram is cropped from
+    the cube in the same way as ``SubtomogramLoader``. Subtomograms are reconstructed
+    lazily in dask tasks. CTF is not corrected. The tilt series is given as a
+    ``TiltSeries`` of
+    `torch-tilt-series <https://github.com/teamtomo/torch-tilt-series>`_ (install by
+    ``pip install acryo[torch]``).
 
     Parameters
     ----------
     tilt_series : torch_tilt_series.TiltSeries
         Tilt series with the alignment parameters. ``image_path`` and
-        ``pixel_spacing`` must be set. The tilt images are loaded (and preprocessed)
-        only once when they are needed for the first time.
+        ``pixel_spacing`` must be set. The tilt images are loaded only once when they
+        are needed for the first time. They are read from the file tilt by tilt,
+        preprocessed at the original pixel spacing, binned by the largest integer
+        factor whose pixel spacing does not exceed ``scale``, and cached in memory.
+        The raw tilt series is never in memory all at once.
     molecules : Molecules
         Molecules object that represents positions and orientations of
         subtomograms.
     order : int, default is 3
-        Interpolation order used to rotate the reconstructed subtomograms.
+        Interpolation order of the rotation of subtomograms.
     scale : float, default is 1.0
         Pixel size of the reconstructed subtomograms in nm.
     output_shape : int or tuple of int, optional
         Shape of output subtomogram in pixel. This parameter is not required
         if template (or mask) image is available immediately.
     corner_safe : bool, default is False
-        If true, regions larger than ``output_shape`` are reconstructed so that
-        densities at the corners will not be lost due to rotation.
+        If true, the cubes around molecules are reconstructed larger than
+        ``output_shape`` so that densities at the corners will not be lost due to
+        rotation.
     tomogram_center : (float, float, float), default is (0, 0, 0)
         The (z, y, x) coordinates of the tomogram center in nm, in the same
         coordinate system as the molecules. The tomogram center is the origin of the
@@ -77,17 +84,18 @@ class PseudoSubtomogramLoader(LoaderBase):
     preprocess_kwargs : dict, optional
         Keyword arguments passed to ``preprocess_tilt_series_images``.
     batch_size : int, optional
-        Maximum number of subtomograms reconstructed in one call of PyTorch. Memory
-        usage is proportional to this value. If None, all the subtomograms are
-        reconstructed in one call. Chunks are always reconstructed one by one.
-    chunk_size : float, default is 100.0
-        Approximate size of the chunks in nm, including the overlap of the
-        subtomogram size.
+        Number of subtomograms reconstructed in one dask task. Default is 1.
     tomo_hand : int, default is 1
         Handedness of the tomogram, 1 or -1. The handedness is inverted depending on
         the positive direction of the tilt angles. If -1, the tomogram of the
         molecules is regarded as the one reconstructed from the tilt series, mirrored
         along the z axis around ``tomogram_center``.
+    padding : float, default is 2.0
+        Padding factor of the reconstruction. The 3D Fourier transform of each cube
+        is ``padding`` times as large as the cube, which reduces the interpolation
+        artifacts and the aliasing of the densities around the molecule, such as the
+        neighboring molecules. Larger value is more accurate for dense molecules but
+        slower.
     """
 
     def __init__(
@@ -103,8 +111,8 @@ class PseudoSubtomogramLoader(LoaderBase):
         preprocess: bool = True,
         preprocess_kwargs: dict[str, Any] | None = None,
         batch_size: int | None = None,
-        chunk_size: nm = 100.0,
         tomo_hand: int = 1,
+        padding: float = 2.0,
     ) -> None:
         if tilt_series.image_path is None:
             raise ValueError("'image_path' of the tilt series is not set.")
@@ -121,10 +129,10 @@ class PseudoSubtomogramLoader(LoaderBase):
             )
         if batch_size is not None and batch_size <= 0:
             raise ValueError(f"'batch_size' must be positive, got {batch_size}.")
-        if chunk_size <= 0:
-            raise ValueError(f"'chunk_size' must be positive, got {chunk_size}.")
         if tomo_hand not in (1, -1):
             raise ValueError(f"'tomo_hand' must be 1 or -1, got {tomo_hand!r}.")
+        if padding < 1:
+            raise ValueError(f"'padding' must be >= 1, got {padding!r}.")
         if tilt_model is None:
             # mirroring along the z axis inverts the tilt angles
             angles = tilt_series.tilt_angles * tomo_hand
@@ -137,8 +145,8 @@ class PseudoSubtomogramLoader(LoaderBase):
         self._tomogram_center = _center
         self._tilt_model = tilt_model
         self._batch_size = None if batch_size is None else int(batch_size)
-        self._chunk_size = float(chunk_size)
         self._tomo_hand = int(tomo_hand)
+        self._padding = float(padding)
         super().__init__(order=order, scale=scale, output_shape=output_shape)
 
     def __repr__(self) -> str:
@@ -163,8 +171,8 @@ class PseudoSubtomogramLoader(LoaderBase):
         preprocess: bool = True,
         preprocess_kwargs: dict[str, Any] | None = None,
         batch_size: int | None = None,
-        chunk_size: nm = 100.0,
         tomo_hand: int = 1,
+        padding: float = 2.0,
     ) -> PseudoSubtomogramLoader:
         from torch_tilt_series.io import from_etomo_directory
 
@@ -183,8 +191,8 @@ class PseudoSubtomogramLoader(LoaderBase):
             preprocess=preprocess,
             preprocess_kwargs=preprocess_kwargs,
             batch_size=batch_size,
-            chunk_size=chunk_size,
             tomo_hand=tomo_hand,
+            padding=padding,
         )
 
     @property
@@ -218,14 +226,14 @@ class PseudoSubtomogramLoader(LoaderBase):
         return self._batch_size
 
     @property
-    def chunk_size(self) -> nm:
-        """Return the approximate size of the chunks in nm."""
-        return self._chunk_size
-
-    @property
     def tomo_hand(self) -> int:
         """Return the handedness of the tomogram (1 or -1)."""
         return self._tomo_hand
+
+    @property
+    def padding(self) -> float:
+        """Return the padding factor of the reconstruction."""
+        return self._padding
 
     def replace(
         self,
@@ -253,8 +261,8 @@ class PseudoSubtomogramLoader(LoaderBase):
             tomogram_center=tuple(self.tomogram_center),
             tilt_model=self.tilt_model,
             batch_size=self.batch_size,
-            chunk_size=self.chunk_size,
             tomo_hand=self.tomo_hand,
+            padding=self.padding,
         )
         out._images = self._images  # share the loaded tilt images
         return out
@@ -276,24 +284,15 @@ class PseudoSubtomogramLoader(LoaderBase):
     ) -> DaskArrayList:
         """Construct a list of subtomogram lazy loader.
 
-        The subtomograms are reconstructed immediately, and only their rotation is
-        delayed.
+        Note that subtomograms are reconstructed in batches, so computing each
+        subtomogram separately is inefficient.
 
         Returns
         -------
         DaskArrayList
             Each dask array returns a subtomogram on computation.
         """
-        output_shape = self._get_output_shape(output_shape)
-        if self.molecules.count() == 0:
-            return DaskArrayList([])
-        xp = backend or Backend()
-        cubes, cube_index, regions, matrices = self._reconstruct(output_shape)
-        pool = DaskTaskPool.from_func(_rotated_crop)
-        for i, region in enumerate(regions):
-            subimg = cubes[cube_index[i]][region]
-            pool.add_task(subimg, matrices[i], output_shape, self.order, xp)
-        return pool.asarrays(shape=output_shape, dtype=np.float32)
+        return DaskArrayList(list(self.construct_dask(output_shape, backend)))
 
     def construct_dask(
         self,
@@ -302,8 +301,8 @@ class PseudoSubtomogramLoader(LoaderBase):
     ) -> da.Array:
         """Construct a dask array of subtomograms.
 
-        The subtomograms are reconstructed immediately, and only their rotation is
-        delayed.
+        Each dask task reconstructs ``batch_size`` subtomograms, so the subtomograms
+        are never in memory all at once.
 
         Returns
         -------
@@ -313,7 +312,27 @@ class PseudoSubtomogramLoader(LoaderBase):
         output_shape = self._get_output_shape(output_shape)
         if self.molecules.count() == 0:
             return da.zeros((0,) + tuple(output_shape), dtype=np.float32)
-        return super().construct_dask(output_shape, backend)
+        return self._plan_reconstruction(output_shape).to_dask(backend or Backend())
+
+    def load_iter(
+        self, output_shape: _ShapeType = None
+    ) -> Iterator[NDArray[np.float32]]:
+        """Iterate over subtomograms.
+
+        Parameters
+        ----------
+        output_shape : int or tuple of int
+            Shape of the output subtomograms.
+
+        Yields
+        ------
+        3D array
+            Subtomogram
+        """
+        stack = self.construct_dask(output_shape=output_shape)
+        step = max(self.batch_size or 1, 64)
+        for start in range(0, stack.shape[0], step):
+            yield from stack[start : start + step].compute()
 
     def load(
         self,
@@ -347,98 +366,49 @@ class PseudoSubtomogramLoader(LoaderBase):
         loader = self.replace(molecules=self.molecules.subset(spec))
         return loader.asnumpy(output_shape=output_shape)
 
-    def _reconstruct(
-        self,
-        output_shape: tuple[pixel, pixel, pixel],
-    ) -> tuple[
-        NDArray[np.float32],
-        NDArray[np.intp],
-        list[tuple[slice, ...]],
-        NDArray[np.float32],
-    ]:
-        """Reconstruct cubes that contain the subtomograms.
+    def _plan_reconstruction(
+        self, output_shape: tuple[pixel, pixel, pixel]
+    ) -> _ReconstructionPlan:
+        """Plan the reconstruction of the subtomograms. The tilt images are loaded."""
+        import torch
 
-        A cube is reconstructed for each molecule, or, if the molecules are dense,
-        for each chunk of about ``chunk_size`` that contains molecules. The strategy
-        with smaller total volume is chosen.
-
-        Returns
-        -------
-        cubes : (M, L, L, L) array
-            The reconstructed cubes.
-        cube_index : (N,) array
-            Index of the cube that contains each molecule.
-        regions : list of tuple of slices
-            Region of the cube that each subtomogram is cropped from.
-        matrices : (N, 4, 4) array
-            Affine matrices that map the output coordinates to the coordinates of the
-            cropped regions.
-        """
-        if self.corner_safe:
-            extent = math.sqrt(sum(s**2 for s in output_shape))
-        else:
-            extent = max(output_shape)
-        output_spacing = self.scale * _ANGSTROM_PER_NM
-        input_spacing = self.tilt_series.pixel_spacing
-        mole = self.molecules
-        nmole = mole.count()
-        pos, rotations = self._to_tilt_series_frame(mole)
-
-        # strategy 1: reconstruct a cube for each molecule
-        sidelength, pixel_spacing = _cube_geometry(
-            extent, 2 * self.order, output_spacing, input_spacing
+        binsize = self._images.binsize_for(self.scale * _ANGSTROM_PER_NM)
+        tilt_series, images = self._images.get(binsize)
+        sidelength = _cube_sidelength(output_shape, self.order, self.corner_safe)
+        reconstructor = self._images.reconstructor(
+            binsize, self.scale * _ANGSTROM_PER_NM, sidelength, self.padding
         )
-        centers = pos
-        cube_index = np.arange(nmole)
-        batch_size = self.batch_size or nmole
-
-        # strategy 2: reconstruct a cube for each chunk that contains molecules. Each
-        # chunk has margins so that it contains the whole subtomograms.
-        margin = 2 * self.order + 2
-        core = math.floor(self.chunk_size / self.scale) - math.ceil(extent) - margin
-        if core > 0:
-            chunk_sidelength, chunk_spacing = _cube_geometry(
-                core + extent, margin, output_spacing, input_spacing
+        pos, rotations = self._to_tilt_series_frame(self.molecules)
+        points = (pos - self.tomogram_center) * _ANGSTROM_PER_NM
+        # the projection of the molecules, including the local shifts
+        with torch.no_grad():
+            projected = tilt_series.project_points(
+                torch.as_tensor(points, dtype=torch.float32)
             )
-            origin = pos.min(axis=0)
-            core_nm = core * self.scale
-            chunk_ids = np.floor((pos - origin) / core_nm).astype(np.intp)
-            unique_ids, inverse = np.unique(chunk_ids, axis=0, return_inverse=True)
-            volume_per_molecule = nmole * (sidelength * pixel_spacing) ** 3
-            volume_per_chunk = (
-                unique_ids.shape[0] * (chunk_sidelength * chunk_spacing) ** 3
-            )
-            if volume_per_chunk < volume_per_molecule:
-                sidelength, pixel_spacing = chunk_sidelength, chunk_spacing
-                centers = origin + (unique_ids + 0.5) * core_nm
-                cube_index = inverse.ravel()
-                batch_size = 1
-
-        cubes = self._reconstruct_cubes(centers, sidelength, pixel_spacing, batch_size)
-
-        # Crop the region around each molecule from the cube, similar to
-        # `SubtomogramLoader`. The center of the cubes (sidelength // 2) is at
-        # `centers`, and the pixel spacing of the cubes is slightly different from
-        # the output.
-        stretch = output_spacing / pixel_spacing
-        mole_centers = sidelength // 2 + (pos - centers[cube_index]) * (
-            _ANGSTROM_PER_NM / pixel_spacing
+        # (Å from the detector center) -> (pixels of the tilt images)
+        image_center = np.array(images.shape[1:]) // 2
+        positions = (
+            projected.cpu().numpy().astype(np.float64) / tilt_series.pixel_spacing
+            + image_center
         )
-        half = extent * stretch / 2 + self.order
-        starts = np.clip(np.floor(mole_centers - half), 0, sidelength).astype(np.intp)
-        stops = np.clip(np.ceil(mole_centers + half) + 1, 0, sidelength).astype(np.intp)
-        regions = [
-            tuple(slice(start, stop) for start, stop in zip(start_i, stop_i))
-            for start_i, stop_i in zip(starts.tolist(), stops.tolist())
-        ]
-        translation_0 = np.tile(np.eye(4, dtype=np.float32), (nmole, 1, 1))
-        translation_0[:, :3, 3] = mole_centers - starts
-        rot_mat = np.tile(np.eye(4, dtype=np.float32), (nmole, 1, 1))
-        rot_mat[:, :3, :3] = rotations * stretch
-        translation_1 = np.eye(4, dtype=np.float32)
+        # The molecules are at the center of the cubes (sidelength // 2). Crop the
+        # rotated subtomograms from the cubes, similar to `SubtomogramLoader`.
+        nmole = rotations.shape[0]
+        translation_0 = np.eye(4)
+        translation_0[:3, 3] = sidelength // 2
+        rot_mat = np.tile(np.eye(4), (nmole, 1, 1))
+        rot_mat[:, :3, :3] = rotations
+        translation_1 = np.eye(4)
         translation_1[:3, 3] = -(np.array(output_shape) / 2 - 0.5)
-        matrices = np.matmul(np.matmul(translation_0, rot_mat), translation_1)
-        return cubes, cube_index, regions, matrices
+        matrices = translation_0 @ rot_mat @ translation_1
+        return _ReconstructionPlan(
+            reconstructor,
+            positions,
+            matrices.astype(np.float32),
+            output_shape,
+            self.order,
+            self.batch_size or 1,
+        )
 
     def _to_tilt_series_frame(
         self, mole: Molecules
@@ -455,40 +425,10 @@ class PseudoSubtomogramLoader(LoaderBase):
             rotations[:, 0, :] *= -1
         return pos, rotations
 
-    def _reconstruct_cubes(
-        self,
-        centers: NDArray[np.float64],
-        sidelength: int,
-        pixel_spacing: float,
-        batch_size: int,
-    ) -> NDArray[np.float32]:
-        """Reconstruct cubes of given sidelength and pixel spacing (Å) at centers."""
-        import torch
-        from torch_reconstruct_tomogram.reconstruct import _reconstruct_subvolume
-
-        points = ((centers - self.tomogram_center) * _ANGSTROM_PER_NM).astype(
-            np.float32
-        )
-        # NOTE: The public `reconstruct_subvolume` loads the tilt images from the file
-        # every time, so the private function is used here.
-        images = self._images.get()
-        ncubes = points.shape[0]
-        cubes = np.empty((ncubes,) + (sidelength,) * 3, dtype=np.float32)
-        with torch.no_grad():
-            for start in range(0, ncubes, batch_size):
-                sl = slice(start, start + batch_size)
-                cubes[sl] = (
-                    -_reconstruct_subvolume(
-                        self.tilt_series,
-                        images,
-                        points[sl],
-                        sidelength,
-                        output_pixel_spacing=pixel_spacing,
-                    )
-                    .cpu()
-                    .numpy()
-                )
-        return cubes
+    def _tilt_images(self) -> tuple[TiltSeries, NDArray[np.float32]]:
+        """The tilt series and its images binned to the pixel size of this loader."""
+        binsize = self._images.binsize_for(self.scale * _ANGSTROM_PER_NM)
+        return self._images.get(binsize)
 
     def reconstruct_tomogram(
         self,
@@ -624,10 +564,17 @@ class PseudoSubtomogramLoader(LoaderBase):
             particle_sets.append(
                 ParticleSet(points, rotations, self.normalize_template(template))
             )
-        images = self._images.get()
-        tilt_series = refine_tilt_series(
-            self.tilt_series,
-            images,
+        import torch
+
+        tilt_series, images = self._tilt_images()
+        with warnings.catch_warnings():
+            # The cached images are read-only, but they are not modified, so they are
+            # not copied.
+            warnings.filterwarnings("ignore", message=".*not writable.*")
+            images_tensor = torch.as_tensor(images, device=tilt_series.device)
+        refined = refine_tilt_series(
+            tilt_series,
+            images_tensor,
             particle_sets,
             pixel_spacing=self.scale * _ANGSTROM_PER_NM,
             max_shift=max_shift * _ANGSTROM_PER_NM,
@@ -636,6 +583,10 @@ class PseudoSubtomogramLoader(LoaderBase):
             niter=niter,
             batch_size=batch_size,
         )
+        # the geometry is in Å, so it does not depend on the binning of the images
+        tilt_series = copy.copy(self.tilt_series)
+        tilt_series.sample_translations = refined.sample_translations
+        tilt_series.local_shifts_2d = refined.local_shifts_2d
         out = self.replace()
         out._images = self._images.with_tilt_series(tilt_series)
         return out
@@ -646,7 +597,15 @@ class PseudoSubtomogramLoader(LoaderBase):
 
 
 class _TiltSeriesImages:
-    """Tilt series and its images that are loaded only once on demand."""
+    """Tilt series and its images that are loaded only once on demand.
+
+    The images are read from the file tilt by tilt, preprocessed at the original pixel
+    spacing and binned by an integer factor. The images of each binning factor are
+    cached in memory. The reconstructors of the latest geometries of cubes are also
+    cached.
+    """
+
+    _MAX_RECONSTRUCTORS = 2
 
     def __init__(
         self,
@@ -657,80 +616,320 @@ class _TiltSeriesImages:
         self.tilt_series = tilt_series
         self.preprocess = preprocess
         self.preprocess_kwargs = dict(preprocess_kwargs or {})
-        self._images: torch.Tensor | None = None
+        self._images: dict[int, NDArray[np.float32]] = {}
         self._lock = threading.Lock()
+        # reconstructors depend on the geometry, so they are not shared with the
+        # instances of other tilt series
+        self._reconstructors: dict[
+            tuple[int, float, int, float], DirectFourierReconstructor
+        ] = {}
 
-    def get(self) -> torch.Tensor:
-        """Get the (preprocessed) tilt images."""
-        if self._images is None:
-            with self._lock:
-                if self._images is None:
-                    self._images = self._load()
-        return self._images
+    def binsize_for(self, pixel_spacing: float) -> int:
+        """Largest binning factor whose pixel spacing does not exceed the given one."""
+        ratio = pixel_spacing / self.tilt_series.pixel_spacing
+        return max(math.floor(ratio + 1e-6), 1)
+
+    def get(self, binsize: int = 1) -> tuple[TiltSeries, NDArray[np.float32]]:
+        """Get the tilt series and the (preprocessed) tilt images binned by binsize.
+
+        The returned tilt series is a shallow copy with the binned pixel spacing.
+        """
+        with self._lock:
+            if binsize not in self._images:
+                self._images[binsize] = self._load(binsize)
+            images = self._images[binsize]
+        if binsize == 1:
+            return self.tilt_series, images
+        tilt_series = copy.copy(self.tilt_series)
+        tilt_series.pixel_spacing = self.tilt_series.pixel_spacing * binsize
+        return tilt_series, images
+
+    def reconstructor(
+        self, binsize: int, output_spacing: float, sidelength: int, padding: float
+    ) -> DirectFourierReconstructor:
+        """Get the reconstructor of cubes from the tilt images binned by binsize."""
+        key = (binsize, round(output_spacing, 6), sidelength, padding)
+        if (out := self._reconstructors.get(key)) is not None:
+            return out
+        tilt_series, images = self.get(binsize)
+        # from the detector to the tomogram space
+        matrices = tilt_series.projection_matrices @ tilt_series.tomo2sample
+        rotations = np.linalg.pinv(
+            matrices[:, :3, :3].detach().cpu().numpy().astype(np.float64)
+        )
+        out = DirectFourierReconstructor(
+            images,
+            rotations,
+            input_spacing=tilt_series.pixel_spacing,
+            output_spacing=output_spacing,
+            sidelength=sidelength,
+            padding=padding,
+        )
+        with self._lock:
+            self._reconstructors[key] = out
+            while len(self._reconstructors) > self._MAX_RECONSTRUCTORS:
+                self._reconstructors.pop(next(iter(self._reconstructors)))
+        return out
 
     def with_tilt_series(self, tilt_series: TiltSeries) -> _TiltSeriesImages:
         """Return a new instance of another geometry for the same tilt images."""
         out = _TiltSeriesImages(tilt_series, self.preprocess, self.preprocess_kwargs)
         out._images = self._images
+        out._lock = self._lock
         return out
 
-    def _load(self) -> torch.Tensor:
-        from torch_tilt_series import (
-            load_tilt_series_images,
-            preprocess_tilt_series_images,
+    def _load(self, binsize: int) -> NDArray[np.float32]:
+        import torch
+
+        tilt_series = self.tilt_series
+        device = tilt_series.device
+        stack = _MrcImageStack(tilt_series.image_path)
+        if tilt_series.image_indices is None:
+            indices = list(range(stack.shape[0]))
+        else:
+            indices = tilt_series.image_indices.tolist()
+        out: NDArray[np.float32] | None = None
+        preprocessor: _TiltPreprocessor | None = None
+        for t, raw in enumerate(stack.iter_images(indices)):
+            image = torch.as_tensor(raw, device=device)
+            if self.preprocess:
+                if preprocessor is None:
+                    preprocessor = _TiltPreprocessor(
+                        tuple(image.shape), device, **self.preprocess_kwargs
+                    )
+                image = preprocessor(image)
+            image = _fourier_bin(image, binsize).cpu().numpy()
+            if out is None:
+                out = np.empty((len(indices),) + image.shape, dtype=np.float32)
+            out[t] = image
+        assert out is not None
+        # the cache is shared by the loaders
+        out.setflags(write=False)
+        return out
+
+
+class _MrcImageStack:
+    """An MRC file of a stack of 2D images, such as a tilt series.
+
+    Images are read one by one from the file, so the whole stack is never read nor
+    memory-mapped.
+    """
+
+    def __init__(self, path):
+        import mrcfile
+        from mrcfile.utils import data_dtype_from_header
+
+        with mrcfile.open(path, mode="r", header_only=True, permissive=True) as mrc:
+            header = mrc.header
+            self.shape = (int(header.nz), int(header.ny), int(header.nx))
+            self.dtype = data_dtype_from_header(header)
+            # the data block follows the main header and the extended header
+            self.offset = header.nbytes + int(header.nsymbt)
+        self.path = path
+
+    def iter_images(self, indices: Iterable[int]) -> Iterator[NDArray[np.float32]]:
+        """Iterate over the images of given indices as float32 arrays."""
+        nimages, ny, nx = self.shape
+        with open(self.path, "rb") as f:
+            for index in indices:
+                if not -nimages <= index < nimages:
+                    raise IndexError(
+                        f"Index {index} is out of range of {nimages} images in "
+                        f"{self.path}."
+                    )
+                f.seek(self.offset + (index % nimages) * ny * nx * self.dtype.itemsize)
+                image = np.fromfile(f, dtype=self.dtype, count=ny * nx)
+                if image.size != ny * nx:
+                    raise ValueError(f"The data block of {self.path} is truncated.")
+                yield image.reshape(ny, nx).astype(np.float32)
+
+
+class _TiltPreprocessor:
+    """Preprocess tilt images one by one.
+
+    This is the same as ``torch_tilt_series.preprocess_tilt_series_images``, but the
+    plane fitting and the filters are computed only once for all the tilt images.
+    """
+
+    def __init__(
+        self,
+        shape: tuple[int, int],
+        device,
+        low: float = 0.0,
+        high: float = 0.5,
+        falloff: float = 0.0,
+        bandpass_padding: int = 128,
+        subtract_background: bool = True,
+        normalize: bool = True,
+    ):
+        import torch
+        from torch_fourier_filter.bandpass import bandpass_filter
+        from torch_grid_utils.shapes_2d import rectangle
+
+        h, w = shape
+        self.shape = shape
+        self.subtract_background = subtract_background
+        self.normalize = normalize
+        if subtract_background:
+            y, x = torch.meshgrid(
+                torch.arange(h, device=device, dtype=torch.float32),
+                torch.arange(w, device=device, dtype=torch.float32),
+                indexing="ij",
+            )
+            ones = torch.ones(h * w, device=device, dtype=torch.float32)
+            self.design = torch.stack([y.reshape(-1), x.reshape(-1), ones], dim=-1)
+            self.pinv = torch.linalg.pinv(self.design)
+        self.pad = pad = max(0, min(bandpass_padding, h - 1, w - 1))
+        padded_shape = (h + 2 * pad, w + 2 * pad)
+        self.mask = rectangle(
+            dimensions=(h, w),
+            image_shape=padded_shape,
+            smoothing_radius=pad,
+            device=device,
+        )
+        self.filter = bandpass_filter(
+            low=low,
+            high=high,
+            falloff=falloff,
+            image_shape=padded_shape,
+            rfft=True,
+            fftshift=False,
+            device=device,
         )
 
-        images = load_tilt_series_images(self.tilt_series)
-        if self.preprocess:
-            images = preprocess_tilt_series_images(images, **self.preprocess_kwargs)
-        return images
+    def __call__(self, image: torch.Tensor) -> torch.Tensor:
+        import torch
+        import torch.nn.functional as F
+        from torch_tilt_series.utils import normalize_on_central_crop
+
+        h, w = self.shape
+        if self.subtract_background:
+            coeffs = image.reshape(1, h * w) @ self.pinv.T
+            image = image - (coeffs @ self.design.T).reshape(h, w)
+        pad = self.pad
+        padded = F.pad(image[None], [pad, pad, pad, pad], mode="reflect")
+        padded = padded * self.mask
+        padded = torch.fft.irfft2(
+            torch.fft.rfft2(padded) * self.filter, s=padded.shape[-2:]
+        )
+        image = padded[0, pad : pad + h, pad : pad + w]
+        if self.normalize:
+            image = normalize_on_central_crop(image)
+        return image
 
 
-def _rotated_crop(
-    cube: NDArray[np.float32],
-    matrix: NDArray[np.float32],
-    output_shape: tuple[int, int, int],
-    order: int,
-    backend: Backend,
-) -> NDArray[np.float32]:
-    """Rotate the reconstructed cube to the output subvolume."""
-    return backend.rotated_crop(
-        backend.asarray(cube),
-        matrix,
-        shape=output_shape,
-        order=order,
-        cval=backend.mean,
+def _fourier_bin(image: torch.Tensor, binsize: int) -> torch.Tensor:
+    """Bin a 2D image by Fourier cropping, keeping the position of the image center.
+
+    The image center (``size // 2``) is the origin of the detector, so the image is
+    first cropped symmetrically around the center to a multiple of ``2 * binsize``.
+    The pixel spacing of the output is exactly ``binsize`` times larger.
+    """
+    from torch_fourier_rescale import fourier_rescale_2d
+
+    if binsize == 1:
+        return image
+    slices: list[slice] = []
+    target_shape: list[int] = []
+    for size in image.shape[-2:]:
+        cropped = size - size % (2 * binsize)
+        start = size // 2 - cropped // 2
+        slices.append(slice(start, start + cropped))
+        target_shape.append(cropped // binsize)
+    binned, _ = fourier_rescale_2d(
+        image[..., slices[0], slices[1]], target_shape=tuple(target_shape)
     )
+    return binned
+
+
+def _cube_sidelength(
+    output_shape: tuple[int, int, int], order: int, corner_safe: bool
+) -> int:
+    """Sidelength of the cubes to crop the subtomograms with the interpolation margin.
+
+    The molecule is at the center of the cube (``sidelength // 2``).
+    """
+    half = (np.asarray(output_shape, dtype=np.float64) - 1) / 2
+    radius = float(np.linalg.norm(half)) if corner_safe else float(half.max())
+    return 2 * math.ceil(radius + order) + 1
+
+
+class _ReconstructionPlan:
+    """Reconstruct the subtomograms in batches."""
+
+    def __init__(
+        self,
+        reconstructor: DirectFourierReconstructor,
+        positions: NDArray[np.float64],
+        matrices: NDArray[np.float32],
+        output_shape: tuple[int, int, int],
+        order: int,
+        batch_size: int,
+    ):
+        self.reconstructor = reconstructor
+        self.positions = positions  # (N, T, 2) positions on the tilt images
+        self.matrices = matrices  # (N, 4, 4) from the subtomograms to the cubes
+        self.output_shape = tuple(output_shape)
+        self.order = order
+        self.batch_size = batch_size
+
+    def to_dask(self, backend: Backend) -> da.Array:
+        """Construct the dask array of the subtomograms."""
+        output_shape = self.output_shape
+        name = f"pseudo-subvolumes-{uuid.uuid4().hex}"
+        zeros = (0,) * len(output_shape)
+        task = _ReconstructionTask(
+            self.reconstructor, output_shape, self.order, backend
+        )
+        layer = {}
+        sizes = []
+        nmole = self.positions.shape[0]
+        for ib, start in enumerate(range(0, nmole, self.batch_size)):
+            sl = slice(start, start + self.batch_size)
+            layer[(name, ib, *zeros)] = (task, self.positions[sl], self.matrices[sl])
+            sizes.append(self.positions[sl].shape[0])
+        graph = HighLevelGraph.from_collections(name, layer, dependencies=[])
+        chunks = (tuple(sizes),) + tuple((s,) for s in output_shape)
+        meta = np.empty((0,) * (len(output_shape) + 1), dtype=np.float32)
+        return da.Array(graph, name, chunks, meta=meta)
+
+
+class _ReconstructionTask:
+    """Reconstruct a batch of subtomograms in a dask task."""
+
+    def __init__(
+        self,
+        reconstructor: DirectFourierReconstructor,
+        output_shape: tuple[int, int, int],
+        order: int,
+        backend: Backend,
+    ):
+        self.reconstructor = reconstructor
+        self.output_shape = output_shape
+        self.order = order
+        self.backend = backend
+
+    def __call__(
+        self, positions: NDArray[np.float64], matrices: NDArray[np.float32]
+    ) -> NDArray[np.float32]:
+        xp = self.backend
+        cubes = self.reconstructor(positions)
+        # the tilt images have dark densities on a light background
+        cubes *= -1
+        subvolumes = [
+            xp.rotated_crop(
+                xp.asarray(cube),
+                matrix,
+                shape=self.output_shape,
+                order=self.order,
+                cval=xp.mean,
+            )
+            for cube, matrix in zip(cubes, matrices)
+        ]
+        return xp.stack(subvolumes, axis=0)
 
 
 _PAD_FACTOR = 2.0
-
-
-def _cube_geometry(
-    extent: float,
-    margin: int,
-    output_spacing: float,
-    input_spacing: float,
-) -> tuple[int, float]:
-    """Determine the sidelength and the pixel spacing (Angstrom) of the cube.
-
-    ``torch-reconstruct-tomogram`` crops the tilt images around the projected point
-    at the native pixel spacing and Fourier-rescales the crops. The size of the
-    crops is rounded to an integer, and odd-sized crops are shifted by one pixel.
-    To avoid both, the pixel spacing of the cube is adjusted so that the crop size
-    is exactly an even integer. The cube is large enough to sample a region of
-    ``extent`` output pixels with ``margin`` pixels.
-    """
-    ratio = output_spacing / input_spacing
-    sidelength = math.ceil(extent) + margin
-    while True:
-        sidelength += sidelength % 2  # odd sidelength is not supported
-        padded = int(_PAD_FACTOR * sidelength)
-        native = max(2 * round(padded * ratio / 2), 2)
-        pixel_spacing = input_spacing * native / padded
-        if math.ceil(extent * output_spacing / pixel_spacing) + margin <= sidelength:
-            return sidelength, pixel_spacing
-        sidelength += 1
 
 
 def _even_crop_margin(
