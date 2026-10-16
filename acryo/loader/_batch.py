@@ -63,6 +63,16 @@ class ConcatenatedLoader(LoaderBase):
             axis=0,
         )
 
+    def construct_wedge_weighted_ft(self, output_shape, backend) -> da.Array:
+        # each loader has its own tilt series model
+        return da.concatenate(
+            [
+                loader.construct_wedge_weighted_ft(output_shape, backend)
+                for loader in self._loaders
+            ],
+            axis=0,
+        )
+
     def replace(self, molecules=None, output_shape=None, order=None, scale=None):
         if molecules is not None:
             raise ValueError(f"Cannot replace molecules of {type(self).__name__}.")
@@ -336,6 +346,20 @@ class BatchLoader(LoaderBase):
         return da.concatenate(
             [
                 loader.construct_dask(output_shape=output_shape, backend=_backend)
+                for loader in self.loaders
+            ],
+            axis=0,
+        )
+
+    def construct_wedge_weighted_ft(
+        self,
+        output_shape: tuple[pixel, pixel, pixel],
+        backend: Backend,
+    ) -> da.Array:
+        # each tomogram has its own tilt series model
+        return da.concatenate(
+            [
+                loader.construct_wedge_weighted_ft(output_shape, backend)
                 for loader in self.loaders
             ],
             axis=0,
