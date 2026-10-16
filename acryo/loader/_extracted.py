@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from dask import array as da
 import numpy as np
-import polars as pl
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
 from acryo.alignment._base import AlignmentResult
@@ -18,6 +17,9 @@ if TYPE_CHECKING:
     from typing_extensions import Self
 
 SUBVOLUME_INDEX = "subvolume_index"
+# transformations from the extracted molecules smaller than these are ignored
+_SHIFT_TOL = 1e-4  # pixel
+_ROTATION_TOL = 1e-6  # radian
 
 
 class ExtractedSubvolumeLoader(LoaderBase):
@@ -29,7 +31,9 @@ class ExtractedSubvolumeLoader(LoaderBase):
         4D array of all the extracted subvolumes. The ``subvolume_index`` feature of
         the molecules is the index of the subvolume in this array.
     molecules : Molecules
-        Molecules with the ``subvolume_index`` feature.
+        Molecules with the ``subvolume_index`` feature. If they are moved from the
+        extracted molecules, subvolumes are resampled from the stored ones at these
+        molecules.
     pre_transform : (N, 4, 4) array, optional
         Affine matrices that map the output coordinates to the coordinates of each
         subvolume in ``dask_array``. If given, subvolumes are transformed by them on
@@ -37,6 +41,9 @@ class ExtractedSubvolumeLoader(LoaderBase):
     output_shape : tuple of int, optional
         Shape of the output subvolumes. Same as the shape of ``dask_array`` if not
         given.
+    extracted_molecules : Molecules, optional
+        Molecules at which the subvolumes were extracted, with the ``subvolume_index``
+        feature. Same as ``molecules`` if not given.
     """
 
     def __init__(
@@ -49,11 +56,19 @@ class ExtractedSubvolumeLoader(LoaderBase):
         is_array_prefiltered: bool = False,
         pre_transform: NDArray[np.float32] | None = None,
         output_shape: tuple[pixel, pixel, pixel] | None = None,
+        *,
+        extracted_molecules: Molecules | None = None,
     ) -> None:
         if dask_array.ndim != 4:
             raise ValueError(f"Expected a 4D dask array, got {dask_array.ndim}D.")
         if SUBVOLUME_INDEX not in molecules.features.columns:
             raise ValueError(f"Molecules object must have {SUBVOLUME_INDEX!r} feature.")
+        if extracted_molecules is None:
+            extracted_molecules = molecules
+        elif SUBVOLUME_INDEX not in extracted_molecules.features.columns:
+            raise ValueError(
+                f"Extracted molecules must have {SUBVOLUME_INDEX!r} feature."
+            )
         if pre_transform is None:
             if output_shape is not None and tuple(output_shape) != dask_array.shape[1:]:
                 raise ValueError(
@@ -77,6 +92,15 @@ class ExtractedSubvolumeLoader(LoaderBase):
         # if True, `dask_array` is the spline coefficients for interpolation of `order`
         self._is_array_prefiltered = is_array_prefiltered
         self._pre_transform = pre_transform
+        # Subvolumes are resampled using the transformation from the extracted
+        # molecules to the current ones, so that they are always consistent with the
+        # current molecules, however many times they are aligned. Only the poses are
+        # needed.
+        self._extracted_molecules = Molecules(
+            extracted_molecules.pos,
+            extracted_molecules.rotator,
+            features=extracted_molecules.features.select(SUBVOLUME_INDEX),
+        )
 
     @property
     def molecules(self) -> Molecules:
@@ -103,44 +127,37 @@ class ExtractedSubvolumeLoader(LoaderBase):
         if self._get_output_shape(output_shape) != self.output_shape:
             raise ValueError("Cannot change output_shape for this class.")
         shape = self.output_shape
-        nmole = self.molecules.count()
-        if nmole == 0:
+        if self.molecules.count() == 0:
             return da.zeros((0, *shape), dtype=np.float32)
         xp = backend or Backend()
         dsk, pre_transform = self._get_stored_arrays()
-        shift, rotation = self._get_alignment_results()
-        has_alignment = shift is not None or rotation is not None
-        if shift is None:
-            shift = np.zeros((nmole, 3), dtype=np.float32)
+        shift, rotation = self._get_relative_transforms()
+        shift_px = (shift / self.scale).astype(np.float32)
+        is_shifted = np.any(np.abs(shift_px) > _SHIFT_TOL)
+        is_rotated = np.any(rotation.magnitude() > _ROTATION_TOL)
         if self._is_array_prefiltered:
             prefilter = False
         else:
             prefilter = self.order > 1
-        if pre_transform is None:
-            if not has_alignment:
+        if pre_transform is None and not is_rotated:
+            if not is_shifted:
                 return self._get_image_array(dsk, xp)
-            if rotation is None or np.allclose(
-                rotation.as_quat(), np.array([0, 0, 0, 1], dtype=np.float32)
-            ):
-                # No rotation. Use ndi.shift
-                shift_px = shift / self.scale
-                return map_subvolumes_to_array(
-                    dsk,
-                    _shift_subvolume,
-                    shape,
-                    dtype=np.float32,
-                    var_kwarg={"shift": shift_px},
-                    order=self.order,
-                    prefilter=prefilter,
-                    backend=xp,
-                )
-        if has_alignment:
-            if rotation is None:
-                rotation = Rotation.identity(nmole)
-            # Molecules are updated by `Molecules.linear_transform` after alignment,
-            # which rotates the shift before translation. Do the same here so that the
-            # results are consistent with the subvolumes cropped at the aligned molecules.
-            shift_px = rotation.apply(shift) / self.scale
+            # No rotation. Use ndi.shift
+            return map_subvolumes_to_array(
+                dsk,
+                _shift_subvolume,
+                shape,
+                dtype=np.float32,
+                var_kwarg={"shift": shift_px},
+                order=self.order,
+                prefilter=prefilter,
+                backend=xp,
+            )
+        if is_shifted or is_rotated:
+            # The shifts are in the subvolume coordinates before rotation, the same as
+            # `AlignmentResult.shift`. The current molecules are the extracted ones
+            # transformed by `Molecules.spatial_transform(shift, rotation)`, so the
+            # affine matrices are consistent with the subvolumes cropped at them.
             matrices = np.stack(
                 [
                     AlignmentResult(0, sh, quat, 0.0).affine_matrix(shape)
@@ -195,6 +212,7 @@ class ExtractedSubvolumeLoader(LoaderBase):
             is_array_prefiltered=is_array_prefiltered,
             pre_transform=self._pre_transform,
             output_shape=self.output_shape,
+            extracted_molecules=self._extracted_molecules,
         )
 
     def _default_align_kwargs(self):
@@ -229,23 +247,24 @@ class ExtractedSubvolumeLoader(LoaderBase):
             backend=backend,
         )
 
-    def _get_alignment_results(
-        self,
-    ) -> tuple[NDArray[np.float32] | None, Rotation | None]:
-        df = self.molecules.features
-        try:
-            shift_df = df.select([f"align-d{r}" for r in "zyx"])
-        except pl.exceptions.ColumnNotFoundError:
-            shift = None
-        else:
-            shift = shift_df.to_numpy().astype(np.float32)
-        try:
-            rotation_df = df.select([f"align-d{r}rot" for r in "zyx"])
-        except pl.exceptions.ColumnNotFoundError:
-            rotation = None
-        else:
-            rotation = Rotation.from_rotvec(rotation_df.to_numpy())
-        return shift, rotation
+    def _get_relative_transforms(self) -> tuple[NDArray[np.float64], Rotation]:
+        """Return the transformation from the extracted molecules to the current ones.
+
+        The returned shifts (nm) and rotations are what `Molecules.spatial_transform`
+        consumes, that is, ``extracted.spatial_transform(shift, rotation)`` gives the
+        current molecules. Unlike the "align-d*" features, which are the results of the
+        latest alignment, they are cumulative since the extraction.
+        """
+        ref = self._extracted_molecules
+        ref_indices = ref.features[SUBVOLUME_INDEX].to_numpy()
+        rows = np.full(self._dask_array.shape[0], -1, dtype=np.intp)
+        rows[ref_indices] = np.arange(ref_indices.size)
+        rows = rows[self.molecules.features[SUBVOLUME_INDEX].to_numpy()]
+        if np.any(rows < 0):
+            raise ValueError("Some subvolumes do not have the extracted molecules.")
+        ref_rot = ref.rotator[rows]
+        dpos = self.molecules.pos.astype(np.float64) - ref.pos[rows]
+        return ref_rot.apply(dpos, inverse=True), ref_rot.inv() * self.molecules.rotator
 
 
 def _transform_subvolume(

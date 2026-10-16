@@ -95,6 +95,8 @@ class LoaderGroup(Generic[_K, _L]):
         *,
         chunksize: int | Literal["auto"] = 64,
         backend: Backend | None = None,
+        wedge_weighting: bool = False,
+        wiener_constant: float = 0.1,
     ) -> ArrayDict[_K]:
         """Calculate average images.
 
@@ -105,6 +107,11 @@ class LoaderGroup(Generic[_K, _L]):
             loader objects will be used.
         chunksize : int or "auto", default is 64
             Number of subtomograms summed up in a task. Larger value uses more memory.
+        wedge_weighting : bool, default is False
+            If true, subtomograms are averaged with the missing wedge weighting. See
+            `LoaderBase.average` for details.
+        wiener_constant : float, default is 0.1
+            Regularization of the wedge weighting.
 
         Returns
         -------
@@ -117,9 +124,14 @@ class LoaderGroup(Generic[_K, _L]):
         for key, loader in self:
             keys.append(key)
             _output_shape = loader._get_output_shape(output_shape)
-            dsk = loader.construct_dask(_output_shape, backend=xp)
-            dsk = dsk.rechunk((chunksize,) + _output_shape)  # type: ignore
-            tasks.append(da.mean(dsk, axis=0))
+            dsk = loader._construct_average_stack(
+                _output_shape, chunksize, xp, wedge_weighting
+            )
+            tasks.append(
+                _misc.lazy_average(
+                    dsk, _output_shape, xp, wedge_weighting, wiener_constant
+                )
+            )
 
         out: list[AnyArray[np.float32]] = da.compute(tasks)[0]
         return ArrayDict({key: xp.asnumpy(img) for key, img in zip(keys, out)})
@@ -133,6 +145,8 @@ class LoaderGroup(Generic[_K, _L]):
         *,
         chunksize: int | Literal["auto"] = 64,
         backend: Backend | None = None,
+        wedge_weighting: bool = False,
+        wiener_constant: float = 0.1,
     ) -> ArrayDict[_K]:
         """Split subtomograms into two set and average separately.
 
@@ -153,6 +167,11 @@ class LoaderGroup(Generic[_K, _L]):
             shape of the loader objects will be used.
         chunksize : int or "auto", default is 64
             Number of subtomograms loaded in a task. Larger value uses more memory.
+        wedge_weighting : bool, default is False
+            If true, each split is averaged with the missing wedge weighting. See
+            `LoaderBase.average` for details.
+        wiener_constant : float, default is 0.1
+            Regularization of the wedge weighting.
 
         Returns
         -------
@@ -165,18 +184,25 @@ class LoaderGroup(Generic[_K, _L]):
         all_tasks: list[list[da.Array]] = []
         for key, loader in self:
             _output_shape = loader._get_output_shape(output_shape)
-            dask_array = loader.construct_dask(_output_shape, backend=xp)
-            nmole = dask_array.shape[0]
             # rechunk before indexing, otherwise each subtomogram is sliced and
             # reduced in its own tasks.
-            dask_array = dask_array.rechunk((chunksize,) + _output_shape)  # type: ignore
+            dask_array = loader._construct_average_stack(
+                _output_shape, chunksize, xp, wedge_weighting
+            )
+            nmole = dask_array.shape[0]
             tasks: list[da.Array] = []
             for _ in range(n_set):
-                ind0, ind1 = _misc.random_splitter(rng, nmole)
+                inds = _misc.random_splitter(rng, nmole)
                 _stack = da.stack(
                     [
-                        da.mean(dask_array[ind0], axis=0),
-                        da.mean(dask_array[ind1], axis=0),
+                        _misc.lazy_average(
+                            dask_array[ind],
+                            _output_shape,
+                            xp,
+                            wedge_weighting,
+                            wiener_constant,
+                        )
+                        for ind in inds
                     ],
                     axis=0,
                 )
@@ -345,7 +371,6 @@ class LoaderGroup(Generic[_K, _L]):
         all_tasks: list[DaskTaskList[AlignmentResult]] = []
         template_map = _normalize_template(templates)
         input_shape: tuple[int, int, int] | None = None
-        has_rotation = False
         for key, loader in self:
             _tmps = template_map[key]
             model = alignment_model(
@@ -365,24 +390,14 @@ class LoaderGroup(Generic[_K, _L]):
             )
             all_tasks.append(tasks)
             input_shape = model.input_shape
-            has_rotation = model.has_rotation
 
         if input_shape is None:
             raise RuntimeError("LoaderGroup has no loader.")
 
         all_results = compute(all_tasks)
-        if has_rotation:
-            remainder = len(templates)
-        else:
-            remainder = -1
         out: list[tuple[_K, _L]] = []
         for (key, loader), results in zip(self, all_results):
-            new = loader._post_align_multi_templates(
-                results,
-                input_shape,
-                remainder,
-                label_name,
-            )
+            new = loader._post_align_multi_templates(results, input_shape, label_name)
             out.append((key, new))
         return self.__class__(out)
 
@@ -441,6 +456,9 @@ class LoaderGroup(Generic[_K, _L]):
         seed: int | None = 0,
         n_set: int = 1,
         dfreq: float = 0.05,
+        *,
+        wedge_weighting: bool = False,
+        wiener_constant: float = 0.1,
     ) -> DataFrameDict[_K]:
         """Calculate Fourier shell correlation for each group.
 
@@ -454,6 +472,11 @@ class LoaderGroup(Generic[_K, _L]):
             Number of split set of averaged images.
         dfreq : float, default is 0.05
             Frequency sampling width.
+        wedge_weighting : bool, default is False
+            If true, the half maps are averaged with the missing wedge weighting. See
+            `LoaderBase.average` for details.
+        wiener_constant : float, default is 0.1
+            Regularization of the wedge weighting.
 
         Returns
         -------
@@ -478,6 +501,8 @@ class LoaderGroup(Generic[_K, _L]):
             seed=seed,
             squeeze=False,
             output_shape=output_shape,
+            wedge_weighting=wedge_weighting,
+            wiener_constant=wiener_constant,
         )
         out = DataFrameDict()
         for key, img in imgs.items():

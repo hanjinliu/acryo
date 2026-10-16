@@ -45,6 +45,7 @@ from acryo.molecules import Molecules
 from acryo.loader import _misc
 from acryo.loader._group import LoaderGroup
 from acryo.pipe._classes import ImageProvider, ImageConverter
+from acryo.tilt import NoWedge
 
 if TYPE_CHECKING:
     from typing_extensions import Self
@@ -307,6 +308,8 @@ class LoaderBase(ABC):
         *,
         chunksize: int | Literal["auto"] = 64,
         backend: Backend | None = None,
+        wedge_weighting: bool = False,
+        wiener_constant: float = 0.1,
     ) -> NDArray[np.float32]:
         """Calculate the average of subtomograms.
 
@@ -320,6 +323,18 @@ class LoaderBase(ABC):
             loader object will be used.
         chunksize : int or "auto", default is 64
             Number of subtomograms summed up in a task. Larger value uses more memory.
+        wedge_weighting : bool, default is False
+            If true, subtomograms are averaged in the Fourier space weighted by their
+            missing wedge masks ``W_i``, as ``sum(W_i * F_i) / (sum(W_i) + c * N)``,
+            where ``c`` is ``wiener_constant`` and ``N`` is the number of
+            subtomograms. A simple average multiplies each frequency by the fraction
+            of subtomograms sampling it, which is anisotropic unless the orientations
+            fill the missing wedge evenly (e.g. filaments not parallel to the tilt
+            axis). The tilt series model of the loader is used for the masks.
+        wiener_constant : float, default is 0.1
+            Regularization of the wedge weighting, used only if ``wedge_weighting``
+            is true. Frequencies sampled by much fewer than ``wiener_constant * N``
+            subtomograms are suppressed instead of amplified.
 
         Returns
         -------
@@ -328,9 +343,13 @@ class LoaderBase(ABC):
         """
         xp = backend or Backend()
         output_shape = self._get_output_shape(output_shape)
-        dsk = self.construct_dask(output_shape=output_shape, backend=xp)
-        dsk = dsk.rechunk((chunksize,) + output_shape)  # type: ignore
-        return xp.asnumpy(dsk.mean(axis=0).compute())
+        dsk = self._construct_average_stack(
+            output_shape, chunksize, xp, wedge_weighting
+        )
+        avg = _misc.lazy_average(
+            dsk, output_shape, xp, wedge_weighting, wiener_constant
+        )
+        return xp.asnumpy(avg.compute())
 
     def average_split(
         self,
@@ -341,6 +360,8 @@ class LoaderBase(ABC):
         output_shape: _ShapeType = None,
         *,
         chunksize: int | Literal["auto"] = 64,
+        wedge_weighting: bool = False,
+        wiener_constant: float = 0.1,
     ) -> NDArray[np.float32]:
         """Split subtomograms into two set and average separately.
 
@@ -361,6 +382,11 @@ class LoaderBase(ABC):
             shape of the loader object will be used.
         chunksize : int or "auto", default is 64
             Number of subtomograms loaded in a task. Larger value uses more memory.
+        wedge_weighting : bool, default is False
+            If true, each split is averaged with the missing wedge weighting. See
+            `average` for details.
+        wiener_constant : float, default is 0.1
+            Regularization of the wedge weighting. See `average` for details.
 
         Returns
         -------
@@ -373,15 +399,25 @@ class LoaderBase(ABC):
         rng = _get_rng(seed)
 
         tasks: list[da.Array] = []
-        dsk = self.construct_dask(output_shape=output_shape)
-        nmole = dsk.shape[0]
         # rechunk before indexing, otherwise each subtomogram is sliced and reduced
         # in its own tasks. The rechunked chunks are shared by all the splits.
-        dsk = dsk.rechunk((chunksize,) + output_shape)  # type: ignore
+        dsk = self._construct_average_stack(
+            output_shape, chunksize, backend, wedge_weighting
+        )
+        nmole = dsk.shape[0]
         for _ in range(n_set):
             inds = _misc.random_splitter(rng, nmole, n_split)
             _stack = da.stack(
-                [dsk[ind].mean(axis=0) for ind in inds],
+                [
+                    _misc.lazy_average(
+                        dsk[ind],
+                        output_shape,
+                        backend,
+                        wedge_weighting,
+                        wiener_constant,
+                    )
+                    for ind in inds
+                ],
                 axis=0,
             )
             tasks.append(_stack)
@@ -500,9 +536,8 @@ class LoaderBase(ABC):
         )
         tasks = self._prep_align_multi_templates(model, max_shifts, backend)
         all_results = tasks.compute()
-        remainder = model.remainder()
         return self._post_align_multi_templates(
-            all_results, model.input_shape, remainder, label_name
+            all_results, model.input_shape, label_name
         )
 
     def construct_landscape(
@@ -526,7 +561,10 @@ class LoaderBase(ABC):
             If input alignment model has rotation or multiple templates, the output
             shape will be (P, M, Nz, Ny, Nx), otherwise (P, Nz, Ny, Nx), where P is for
             each molecules, M is the number of created template images, and Nz, Ny and
-            Nx is the up-sampled shape of search range.
+            Nx is the up-sampled shape of search range. For Nt templates and Nr
+            rotations, M = Nt * Nr and the (template, rotation) pairs are in the
+            template-major order, that is, ``k = i_template * Nr + i_rotation``. The
+            output can be reshaped to (P, Nt, Nr, Nz, Ny, Nx).
         """
         max_shifts = _misc.normalize_max_shifts(max_shifts)
         _max_shifts_px = tuple(np.asarray(max_shifts) / self.scale)
@@ -665,6 +703,9 @@ class LoaderBase(ABC):
         seed: int | None = 0,
         n_set: int = 1,
         dfreq: float = 0.05,
+        *,
+        wedge_weighting: bool = False,
+        wiener_constant: float = 0.1,
     ) -> pl.DataFrame:
         """Calculate Fourier shell correlation.
 
@@ -678,6 +719,11 @@ class LoaderBase(ABC):
             Number of split set of averaged images.
         dfreq : float, optional
             Frequency sampling width. Automatically determined if not provided.
+        wedge_weighting : bool, default is False
+            If true, the half maps are averaged with the missing wedge weighting. See
+            `average` for details.
+        wiener_constant : float, default is 0.1
+            Regularization of the wedge weighting.
 
         Returns
         -------
@@ -688,7 +734,14 @@ class LoaderBase(ABC):
         --------
         fsc_with_average
         """
-        return self.fsc_with_average(mask, seed, n_set, dfreq)[0]
+        return self.fsc_with_average(
+            mask,
+            seed,
+            n_set,
+            dfreq,
+            wedge_weighting=wedge_weighting,
+            wiener_constant=wiener_constant,
+        )[0]
 
     def fsc_with_average(
         self,
@@ -697,7 +750,14 @@ class LoaderBase(ABC):
         n_set: int = 1,
         dfreq: float | None = None,
         zero_norm: bool = True,
+        *,
+        wedge_weighting: bool = False,
+        wiener_constant: float = 0.1,
     ) -> tuple[pl.DataFrame, NDArray[np.float32]]:
+        """Calculate Fourier shell correlation and the average of the half maps.
+
+        See `fsc_with_halfmaps` for the parameters.
+        """
         df, (img0, img1), _ = self.fsc_with_halfmaps(
             mask=mask,
             seed=seed,
@@ -705,6 +765,8 @@ class LoaderBase(ABC):
             dfreq=dfreq,
             zero_norm=zero_norm,
             squeeze=False,
+            wedge_weighting=wedge_weighting,
+            wiener_constant=wiener_constant,
         )
         return df, (img0[0] + img1[0]) / 2
 
@@ -716,6 +778,9 @@ class LoaderBase(ABC):
         dfreq: float | None = None,
         zero_norm: bool = True,
         squeeze: bool = True,
+        *,
+        wedge_weighting: bool = False,
+        wiener_constant: float = 0.1,
     ) -> FscTuple:
         """Calculate Fourier shell correlation and the resulting half maps.
 
@@ -732,6 +797,13 @@ class LoaderBase(ABC):
         zero_norm : bool, default is True
             If True, subtract the mean from the half maps to minimize the sharp mask
             edge effect.
+        squeeze : bool, default is True
+            If true and n_set is 1, return the half maps as 3D arrays.
+        wedge_weighting : bool, default is False
+            If true, the half maps are averaged with the missing wedge weighting. See
+            `average` for details.
+        wiener_constant : float, default is 0.1
+            Regularization of the wedge weighting.
 
         Returns
         -------
@@ -768,6 +840,8 @@ class LoaderBase(ABC):
             seed=seed,
             squeeze=False,
             output_shape=output_shape,
+            wedge_weighting=wedge_weighting,
+            wiener_constant=wiener_constant,
         )
         if isinstance(mask, ImageConverter):
             avg = (halves[0, 0] + halves[0, 1]) / 2
@@ -962,6 +1036,46 @@ class LoaderBase(ABC):
             _output_shape = _misc.normalize_shape(output_shape, ndim=3)
         return _output_shape  # type: ignore
 
+    def _construct_average_stack(
+        self,
+        output_shape: tuple[pixel, pixel, pixel],
+        chunksize: int | Literal["auto"],
+        backend: Backend,
+        wedge_weighting: bool,
+    ) -> da.Array:
+        """Construct the stack to be passed to `_misc.lazy_average`."""
+        if wedge_weighting:
+            dsk = self.construct_wedge_weighted_ft(output_shape, backend)
+        else:
+            dsk = self.construct_dask(output_shape=output_shape, backend=backend)
+        return dsk.rechunk((chunksize,) + dsk.shape[1:])  # type: ignore
+
+    def construct_wedge_weighted_ft(
+        self,
+        output_shape: tuple[pixel, pixel, pixel] | None = None,
+        backend: Backend | None = None,
+    ) -> da.Array:
+        """Construct the stack of the missing-wedge-masked spectra and the masks.
+
+        The returned array has shape ``(N, 2, *rfft_shape)`` and is in the same order
+        as ``construct_dask``.
+        """
+        xp = backend or Backend()
+        output_shape = self._get_output_shape(output_shape)
+
+        # the same tilt series model as the one used in alignment
+        tilt_model = self._default_align_kwargs().get("tilt") or NoWedge()
+        z, y, x = output_shape
+        return map_subvolumes_to_array(
+            self.construct_dask(output_shape=output_shape, backend=xp),
+            _misc.wedge_weighted_ft,
+            (2, z, y, x // 2 + 1),
+            np.complex64,
+            var_kwarg={"quat": self.molecules.quaternion()},
+            tilt_model=tilt_model,
+            backend=xp,
+        )
+
     @overload
     def normalize_template(
         self,
@@ -1073,7 +1187,7 @@ class LoaderBase(ABC):
             local_shifts[i] = loc_shift * self.scale
 
         rotator = Rotation.from_quat(local_rot)
-        mole_aligned = self.molecules.linear_transform(local_shifts, rotator)
+        mole_aligned = self.molecules.spatial_transform(local_shifts, rotator)
 
         mole_aligned.features = self.molecules.features.with_columns(
             _misc.get_feature_list(scores, local_shifts, rotator.as_rotvec()),
@@ -1104,7 +1218,6 @@ class LoaderBase(ABC):
         self,
         results: list[AlignmentResult],
         shape: tuple[int, int, int],
-        remainder: int = -1,
         label_name: str = "labels",
     ):
         local_shifts, local_rot, scores = _misc.allocate(len(results))
@@ -1114,10 +1227,8 @@ class LoaderBase(ABC):
             local_shifts[i] = loc_shift * self.scale
 
         rotator = Rotation.from_quat(local_rot)
-        mole_aligned = self.molecules.linear_transform(local_shifts, rotator)
+        mole_aligned = self.molecules.spatial_transform(local_shifts, rotator)
 
-        if remainder > 1:
-            labels %= remainder  # type: ignore
         labels = labels.astype(np.uint8)
 
         feature_list = _misc.get_feature_list(scores, local_shifts, rotator.as_rotvec())

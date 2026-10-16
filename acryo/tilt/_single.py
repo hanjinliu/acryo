@@ -49,15 +49,7 @@ class SingleAxis(_base.TiltSeriesModel):
             Missing wedge mask.
         """
         normal0, normal1 = self._get_norms()
-        shape_vector = np.array(shape, dtype=np.float32)
-        rotator_inv = rotator.inv()
-        normal0 = rotator_inv.apply(normal0 * shape_vector)
-        normal1 = rotator_inv.apply(normal1 * shape_vector)
-        vectors = _utils.get_indices(shape)
-        dot0 = vectors.dot(normal0)
-        dot1 = vectors.dot(normal1)
-        missing = dot0 * dot1 <= 0
-        return missing
+        return self._mask_from_norms(normal0, normal1, rotator, shape)
 
     def _mask_from_norms(
         self,
@@ -68,8 +60,10 @@ class SingleAxis(_base.TiltSeriesModel):
     ) -> NDArray[np.float32]:
         shape_vector = np.array(shape, dtype=np.float32)
         rotator_inv = rotator.inv()
-        normal0 = rotator_inv.apply(normal0 * shape_vector)
-        normal1 = rotator_inv.apply(normal1 * shape_vector)
+        # Normals are rotated in the frequency space and then converted to the space of
+        # FFT indices (frequency = index / shape).
+        normal0 = rotator_inv.apply(normal0) / shape_vector
+        normal1 = rotator_inv.apply(normal1) / shape_vector
         vectors = _utils.get_indices(shape)
         dot0 = vectors.dot(normal0)
         dot1 = vectors.dot(normal1)

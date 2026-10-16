@@ -284,8 +284,10 @@ def missing_wedge_mask(
     normal0, normal1 = _get_unrotated_normals(tilt_range)
     shape_vector = np.array(shape, dtype=np.float32)
     rotator_inv = rotator.inv()
-    normal0 = rotator_inv.apply(normal0 * shape_vector)
-    normal1 = rotator_inv.apply(normal1 * shape_vector)
+    # Normals are rotated in the frequency space and then converted to the space of FFT
+    # indices (frequency = index / shape).
+    normal0 = rotator_inv.apply(normal0) / shape_vector
+    normal1 = rotator_inv.apply(normal1) / shape_vector
     vectors = _get_indices(shape)
     dot0 = vectors.dot(normal0)
     dot1 = vectors.dot(normal1)
@@ -310,9 +312,10 @@ def _get_unrotated_normals(
 def _get_indices(shape: tuple[int, ...]) -> NDArray[np.float32]:
     inds = np.indices(shape, dtype=np.float32)
     for ind, s in zip(inds, shape):
-        # Note that the shifts in indices must resemble the shifts in fftshift.
-        ind -= np.ceil(s / 2)
-    return np.fft.fftshift(np.stack(list(inds), axis=-1), axes=(0, 1, 2))
+        # Zero frequency is at s // 2 after fftshift, so the centered indices are
+        # shifted back by ifftshift (not fftshift, which differs for odd sizes).
+        ind -= s // 2
+    return np.fft.ifftshift(np.stack(list(inds), axis=-1), axes=(0, 1, 2))
 
 
 # lowpass filter

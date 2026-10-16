@@ -63,6 +63,16 @@ class ConcatenatedLoader(LoaderBase):
             axis=0,
         )
 
+    def construct_wedge_weighted_ft(self, output_shape, backend) -> da.Array:
+        # each loader has its own tilt series model
+        return da.concatenate(
+            [
+                loader.construct_wedge_weighted_ft(output_shape, backend)
+                for loader in self._loaders
+            ],
+            axis=0,
+        )
+
     def replace(self, molecules=None, output_shape=None, order=None, scale=None):
         if molecules is not None:
             raise ValueError(f"Cannot replace molecules of {type(self).__name__}.")
@@ -341,6 +351,20 @@ class BatchLoader(LoaderBase):
             axis=0,
         )
 
+    def construct_wedge_weighted_ft(
+        self,
+        output_shape: tuple[pixel, pixel, pixel],
+        backend: Backend,
+    ) -> da.Array:
+        # each tomogram has its own tilt series model
+        return da.concatenate(
+            [
+                loader.construct_wedge_weighted_ft(output_shape, backend)
+                for loader in self.loaders
+            ],
+            axis=0,
+        )
+
     def align(
         self,
         template: TemplateInputType,
@@ -389,7 +413,6 @@ class BatchLoader(LoaderBase):
             )
             if model.has_hetero_templates:
                 is_multi = True
-                remainder = model.remainder()
                 tasks.extend(
                     each._prep_align_multi_templates(model, max_shifts, _backend)
                 )
@@ -399,9 +422,7 @@ class BatchLoader(LoaderBase):
         all_results = tasks.compute()
 
         if is_multi:
-            return self._post_align_multi_templates(
-                all_results, model.input_shape, remainder
-            )
+            return self._post_align_multi_templates(all_results, model.input_shape)
         return self._post_align(all_results, model.input_shape)
 
     def construct_landscape(
