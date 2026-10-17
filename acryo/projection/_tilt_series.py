@@ -4,19 +4,26 @@ import dataclasses
 from dataclasses import dataclass
 from pathlib import Path
 import json
-from typing import TYPE_CHECKING, Any, Callable, Sequence
+from typing import TYPE_CHECKING, Any, Sequence
 import warnings
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from acryo._types import nm
+from acryo.projection._local_shifts import (
+    AffineShifts2D,
+    FunctionShifts,
+    LocalAlignment,
+    LocalShiftFunction,
+    LocalShiftModel,
+    _readonly,
+    as_local_shift_model,
+)
 
 if TYPE_CHECKING:
     from typing_extensions import Self
     from torch_tilt_series import TiltSeries as TorchTiltSeries
-
-LocalShiftFunction = Callable[[NDArray[np.float64]], NDArray[np.float64]]
 
 _ANGSTROM_PER_NM = 10.0
 
@@ -35,7 +42,8 @@ class TiltSeries:
        rotation by ``tilt_angles`` around the y axis),
     4. ``scope2detector`` (rotation by ``tilt_axis_angle`` around the optical axis,
        followed by the translation by ``sample_translations``),
-    5. ``local_shifts_2d`` (shifts on the detector, optional).
+    5. ``local_shifts_2d`` (shifts on the detector, optional), which may depend on
+       the points in the sample space (see :class:`LocalShiftModel`).
 
     Instances are immutable. Use :meth:`replace` to create a modified one.
 
@@ -54,8 +62,11 @@ class TiltSeries:
         sample space, and from the levelled sample space to the tomogram space.
     local_shifts : callable, optional
         Function that maps (N, 3) points in the sample space (nm) to their shifts.
-    local_shifts_2d : callable, optional
-        Function that maps (N, T, 2) projected points (nm) to their shifts.
+    local_shifts_2d : LocalShiftModel or callable, optional
+        Model of the shifts of the projected points on the detector, such as
+        :class:`LocalShifts2D` and :class:`LocalAlignment`. A function that maps
+        (N, T, 2) projected points (nm) to their shifts is converted to a
+        :class:`FunctionShifts`, which cannot be serialized.
     image_path : str, Path or sequence of them, optional
         Path to the MRC file of the stack of the tilt images, or the paths to the MRC
         files of each tilt image (such as the motion-corrected tilt images of RELION).
@@ -74,7 +85,7 @@ class TiltSeries:
     sample2levelled: NDArray[np.float64] = None  # type: ignore
     levelled2tomo: NDArray[np.float64] = None  # type: ignore
     local_shifts: LocalShiftFunction | None = None
-    local_shifts_2d: LocalShiftFunction | None = None
+    local_shifts_2d: LocalShiftModel | None = None
     image_path: Path | tuple[Path, ...] | None = None
     image_indices: NDArray[np.intp] | None = None
     scale: nm | None = None
@@ -104,6 +115,7 @@ class TiltSeries:
                 f"{translations.shape}."
             )
         _set(self, "sample_translations", _readonly(translations))
+        _set(self, "local_shifts_2d", as_local_shift_model(self.local_shifts_2d))
         for name in ["sample2levelled", "levelled2tomo"]:
             value = getattr(self, name)
             mtx = np.eye(4) if value is None else np.asarray(value, dtype=np.float64)
@@ -209,9 +221,10 @@ class TiltSeries:
         if self.local_shifts is not None:
             points = points + self.local_shifts(points)
         matrices = self.projection_matrices[:, 1:3, :]  # (T, 2, 4)
-        projected = np.einsum("tij,nj->nti", matrices, _homogenize(points))
+        projected = _homogenize(points) @ matrices.reshape(-1, 4).T
+        projected = projected.reshape(-1, self.ntilts, 2)
         if self.local_shifts_2d is not None:
-            projected = projected + self.local_shifts_2d(projected)
+            projected = projected + self.local_shifts_2d.shifts(self, points, projected)
         return projected.reshape(batch_shape + projected.shape[1:])
 
     @classmethod
@@ -267,10 +280,19 @@ class TiltSeries:
         )
 
     @classmethod
-    def from_etomo_directory(cls, path: str | Path, scale: nm) -> TiltSeries:
+    def from_etomo_directory(
+        cls,
+        path: str | Path,
+        scale: nm,
+        *,
+        local_alignment: bool | str | Path = False,
+    ) -> TiltSeries:
         """Read the alignment of an IMOD etomo directory.
 
-        ``etomofiles`` is required. Excluded views are dropped.
+        ``etomofiles`` is required. Excluded views are dropped. The tilt axis angle of
+        each view is the rotation of the transformation (.xf) of the view, and the
+        rest of the transformation, such as the change of magnification, is given as
+        ``local_shifts_2d`` (:class:`AffineShifts2D`).
 
         Parameters
         ----------
@@ -278,28 +300,66 @@ class TiltSeries:
             The etomo directory.
         scale : float
             Pixel size of the raw tilt images in nm.
+        local_alignment : bool, str or Path, default is False
+            Whether to read the local alignments of tiltalign as ``local_shifts_2d``
+            (:class:`LocalAlignment`). If True, the file is ``LOCALFILE`` of tilt.com
+            (or ``OutputLocalFile`` of align.com). A path to the file can also be
+            given. As ``tilt`` of IMOD, the Z factors of the local alignments are used
+            only if tilt.com has ``ZFACTORFILE``.
         """
         import etomofiles
 
         path = Path(path)
-        df = etomofiles.read(path)
-        df = df.loc[~df["excluded"]].reset_index(drop=True)
+        df_all = etomofiles.read(path)
+        df = df_all.loc[~df_all["excluded"]].reset_index(drop=True)
         image_path = Path(df["image_path"][0].split("[")[0])
         if not image_path.is_absolute():
             image_path = path / image_path
         xf = etomofiles.df_to_xf(df, yx=True)  # (T, 2, 3) in (y, x)
-        mtx, shifts = xf[:, :, :2], xf[:, :, 2]
         # IMOD transforms the images to the aligned ones, which is the inverse of
-        # the projection model. The rotation is orthogonal, so it is the transpose.
-        translations = -np.einsum("nji,nj->ni", mtx, shifts) * scale
+        # the projection model.
+        inv = np.linalg.inv(xf[:, :, :2])
+        translations = -np.einsum("nij,nj->ni", inv, xf[:, :, 2]) * scale
+        # The closest rotation of each view is the tilt axis angle, and the rest
+        # (such as the change of magnification) is an affine transformation about the
+        # projected center of the tomogram.
+        u, _, vt = np.linalg.svd(inv)
+        rotations = u @ vt
+        tilt_axis_angle = np.rad2deg(np.arctan2(rotations[:, 0, 1], rotations[:, 0, 0]))
+        affine = inv @ rotations.transpose(0, 2, 1)
+        offsets = -np.einsum("nij,nj->ni", affine - np.eye(2), translations)
         # The sign of IMOD's XAXISTILT is opposite.
         xaxistilt = -(df["xaxistilt"].iloc[0] or 0.0)
         x_tilts = xaxistilt + np.nan_to_num(df["xtilt"].to_numpy(), nan=0.0)
+        tilt_com = _read_imod_com(path / "tilt.com")
+        if "ZFACTORFILE" in tilt_com:
+            warnings.warn(
+                "Z factors of the global alignment (ZFACTORFILE in tilt.com) are not "
+                "supported and ignored.",
+                UserWarning,
+                stacklevel=2,
+            )
+        local_shifts_2d = None
+        if local_alignment is not False:
+            local_shifts_2d = _read_imod_local_alignment(
+                path,
+                local_alignment,
+                tilt_com,
+                image_path=image_path,
+                scale=scale,
+                indices=df["idx_tilt"].to_numpy(),
+                nviews=len(df_all),
+            )
+        # the local alignments are increments to the aligned images, which are then
+        # transformed by the inverse of .xf
+        if not np.allclose(affine, np.eye(2), rtol=0, atol=1e-7):
+            local_shifts_2d = AffineShifts2D(affine, offsets, base=local_shifts_2d)
         return cls(
             tilt_angles=df["tlt"].to_numpy(),
-            tilt_axis_angle=df["tilt_axis_angle"].to_numpy(),
+            tilt_axis_angle=tilt_axis_angle,
             sample_translations=translations,
             x_tilts=x_tilts,
+            local_shifts_2d=local_shifts_2d,
             image_path=image_path,
             image_indices=df["idx_tilt"].to_numpy(),
             scale=scale,
@@ -472,6 +532,7 @@ class TiltSeries:
         # the geometry below may be missing in the json files of older versions
         sample2levelled = data.get("sample2levelled")
         levelled2tomo = data.get("levelled2tomo")
+        local_shifts_2d = data.get("local_shifts_2d")
         return cls(
             tilt_angles=np.array(data["tilt_angles"], dtype=np.float64),
             tilt_axis_angle=np.array(data["tilt_axis_angle"], dtype=np.float64),
@@ -487,12 +548,21 @@ class TiltSeries:
                 if levelled2tomo is not None
                 else None
             ),
+            local_shifts_2d=(
+                LocalShiftModel.from_dict(local_shifts_2d)
+                if local_shifts_2d is not None
+                else None
+            ),
             image_path=image_path,
             image_indices=image_indices,
             scale=data["scale"],
         )
 
     def dump_json(self) -> str:
+        if self.local_shifts is not None:
+            raise TypeError(
+                f"'local_shifts' {self.local_shifts!r} cannot be serialized."
+            )
         if isinstance(self.image_path, tuple):
             image_path: str | list[str] | None = [str(p) for p in self.image_path]
         elif self.image_path is not None:
@@ -510,75 +580,16 @@ class TiltSeries:
                 "x_tilts": self.x_tilts.tolist(),
                 "sample2levelled": self.sample2levelled.tolist(),
                 "levelled2tomo": self.levelled2tomo.tolist(),
+                "local_shifts_2d": (
+                    self.local_shifts_2d.to_dict()
+                    if self.local_shifts_2d is not None
+                    else None
+                ),
                 "image_path": image_path,
                 "image_indices": image_indices,
                 "scale": self.scale,
             }
         )
-
-
-@dataclass(frozen=True, eq=False)
-class LocalShifts2D:
-    """Smooth 2D shifts of each tilt image interpolated from a grid of control points.
-
-    This object can be used as ``TiltSeries.local_shifts_2d``. The shifts are
-    bilinearly interpolated, and constant outside the grid.
-
-    Parameters
-    ----------
-    control_points : (T, 2, gy, gx) array
-        (y, x) shifts in nm at the control points of each tilt image. The control
-        points are evenly placed from edge to edge of the images.
-    half_extent : (2,) array
-        Half size of the tilt images (y, x) in nm.
-    base : callable, optional
-        Local shifts to be added.
-    """
-
-    control_points: NDArray[np.float64]
-    half_extent: NDArray[np.float64]
-    base: LocalShiftFunction | None = None
-
-    def __post_init__(self):
-        control_points = np.asarray(self.control_points, dtype=np.float64)
-        if control_points.ndim != 4 or control_points.shape[1] != 2:
-            raise ValueError(
-                "Shape of 'control_points' must be (T, 2, gy, gx), got "
-                f"{control_points.shape}."
-            )
-        half_extent = np.asarray(self.half_extent, dtype=np.float64)
-        if half_extent.shape != (2,):
-            raise ValueError(
-                f"Shape of 'half_extent' must be (2,), got {half_extent.shape}."
-            )
-        object.__setattr__(self, "control_points", _readonly(control_points))
-        object.__setattr__(self, "half_extent", _readonly(half_extent))
-
-    def __call__(self, projected: NDArray[np.float64]) -> NDArray[np.float64]:
-        """Local shifts of the projected (N, T, 2) points in nm."""
-        grid = self.control_points
-        ntilts, _, gy, gx = grid.shape
-        normed = projected / self.half_extent
-        # (N, T) continuous indices of the control points
-        iy = np.clip((normed[..., 0] + 1) / 2 * (gy - 1), 0, gy - 1)
-        ix = np.clip((normed[..., 1] + 1) / 2 * (gx - 1), 0, gx - 1)
-        iy0 = np.minimum(np.floor(iy).astype(np.intp), max(gy - 2, 0))
-        ix0 = np.minimum(np.floor(ix).astype(np.intp), max(gx - 2, 0))
-        iy1 = np.minimum(iy0 + 1, gy - 1)
-        ix1 = np.minimum(ix0 + 1, gx - 1)
-        fy = (iy - iy0)[..., np.newaxis]
-        fx = (ix - ix0)[..., np.newaxis]
-        tilt = np.arange(ntilts)
-        # (N, T, 2) values at the corners
-        shifts = (
-            grid[tilt, :, iy0, ix0] * (1 - fy) * (1 - fx)
-            + grid[tilt, :, iy0, ix1] * (1 - fy) * fx
-            + grid[tilt, :, iy1, ix0] * fy * (1 - fx)
-            + grid[tilt, :, iy1, ix1] * fy * fx
-        )
-        if self.base is not None:
-            shifts = shifts + self.base(projected)
-        return shifts
 
 
 _RELION_ALIGNMENT_COLUMNS = (
@@ -666,10 +677,61 @@ def _relion_project_dir(
     )
 
 
-def _readonly(arr: NDArray) -> NDArray:
-    arr = np.array(arr)  # copy
-    arr.setflags(write=False)
-    return arr
+def _read_imod_com(path: Path) -> dict[str, list[str]]:
+    """Read the options (in upper case) and their values of an IMOD command file."""
+    if not path.exists():
+        return {}
+    options: dict[str, list[str]] = {}
+    for line in path.read_text().splitlines():
+        parts = line.split()
+        if not parts or parts[0].startswith(("#", "$")):
+            continue
+        options[parts[0].upper()] = parts[1:]
+    return options
+
+
+def _read_imod_local_alignment(
+    path: Path,
+    local_alignment: bool | str | Path,
+    tilt_com: dict[str, list[str]],
+    *,
+    image_path: Path,
+    scale: nm,
+    indices: NDArray[np.integer],
+    nviews: int,
+) -> LocalAlignment:
+    """Read the local alignments of an etomo directory for the selected views."""
+    if local_alignment is True:
+        names = tilt_com.get("LOCALFILE") or _read_imod_com(path / "align.com").get(
+            "OUTPUTLOCALFILE"
+        )
+        if not names:
+            raise ValueError(
+                f"No local alignment file is specified in tilt.com or align.com in "
+                f"{path}."
+            )
+        file = Path(names[0])
+    else:
+        file = Path(local_alignment)
+    if not file.is_absolute():
+        file = path / file
+    if fullimage := tilt_com.get("FULLIMAGE"):
+        image_shape = (int(fullimage[1]), int(fullimage[0]))
+    else:
+        from acryo.projection._io import MrcImageStack
+
+        image_shape = MrcImageStack(image_path).shape[1:]
+    local = LocalAlignment.from_imod(
+        file, image_shape, scale, z_factors="ZFACTORFILE" in tilt_com
+    )
+    if local.ntilts == nviews:
+        return local.select_tilts(indices)
+    elif local.ntilts == len(indices):
+        return local
+    raise ValueError(
+        f"{file} has the local alignments of {local.ntilts} views, but the tilt series "
+        f"has {nviews} views ({len(indices)} views are not excluded)."
+    )
 
 
 def _per_tilt(value, ntilts: int, name: str) -> NDArray[np.float64]:
@@ -735,9 +797,9 @@ class _TorchShiftFunction:
 
 
 class _NumpyShiftFunction:
-    """A local shift function of numpy (in nm) wrapped for torch (in Å)."""
+    """A local shift function or model of numpy (in nm) wrapped for torch (in Å)."""
 
-    def __init__(self, func: LocalShiftFunction):
+    def __init__(self, func: LocalShiftFunction | LocalShiftModel):
         self.numpy_function = func
 
     def __call__(self, points):
@@ -748,39 +810,38 @@ class _NumpyShiftFunction:
         zyxw = points.ndim == 3 and points.shape[-1] == 4
         values = points[..., 1:3] if zyxw else points
         array = values.detach().cpu().numpy().astype(np.float64) / _ANGSTROM_PER_NM
-        out = self.numpy_function(array) * _ANGSTROM_PER_NM
-        out = torch.as_tensor(out, dtype=points.dtype, device=points.device)
+        if isinstance(func := self.numpy_function, LocalShiftModel):
+            out = func.shifts(None, None, array)
+        else:
+            out = func(array)
+        out = torch.as_tensor(out * _ANGSTROM_PER_NM, device=points.device)
+        out = out.to(points.dtype)
         return F.pad(out, (1, 1)) if zyxw else out
 
 
-def _shift_function_from_torch(func) -> LocalShiftFunction | None:
-    from acryo.loader._tilt_refine import LocalShifts2D as TorchLocalShifts2D
-
+def _shift_function_from_torch(func):
+    """Convert a local shift function of torch to a function or model of numpy."""
     if func is None:
         return None
     if isinstance(func, _NumpyShiftFunction):
         return func.numpy_function
-    if isinstance(func, TorchLocalShifts2D):
-        return LocalShifts2D(
-            func.control_points.detach().cpu().numpy() / _ANGSTROM_PER_NM,
-            func.half_extent.detach().cpu().numpy() / _ANGSTROM_PER_NM,
-            base=_shift_function_from_torch(func.base),
-        )
     return _TorchShiftFunction(func)
 
 
-def _shift_function_to_torch(func: LocalShiftFunction | None):
-    import torch
-    from acryo.loader._tilt_refine import LocalShifts2D as TorchLocalShifts2D
-
+def _shift_function_to_torch(func: LocalShiftFunction | LocalShiftModel | None):
+    """Convert a local shift function or model of numpy to a function of torch."""
     if func is None:
         return None
+    if isinstance(func, FunctionShifts):
+        return _shift_function_to_torch(func.func)
     if isinstance(func, _TorchShiftFunction):
         return func.torch_function
-    if isinstance(func, LocalShifts2D):
-        return TorchLocalShifts2D(
-            torch.as_tensor(func.control_points * _ANGSTROM_PER_NM).float(),
-            torch.as_tensor(func.half_extent * _ANGSTROM_PER_NM).float(),
-            base=_shift_function_to_torch(func.base),
-        )
+    model = func
+    while model is not None:
+        if isinstance(model, LocalAlignment):
+            raise NotImplementedError(
+                "LocalAlignment cannot be converted to torch_tilt_series, because it "
+                "depends on the 3D positions of the points."
+            )
+        model = getattr(model, "base", None)
     return _NumpyShiftFunction(func)

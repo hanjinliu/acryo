@@ -6,6 +6,7 @@ from scipy import fft as sfft
 from acryo.projection import (
     CentralSliceInsertion,
     DirectFourierReconstructor,
+    VolumeProjector,
     centered_patches_rfft,
     read_patch,
 )
@@ -159,3 +160,75 @@ def test_centered_patches_rfft(shift):
         axis=(0, 1),
     )
     assert_allclose(patch, expected, atol=1e-3)
+
+
+def _blobs(size: int, offsets, sigma: float = 1.5) -> np.ndarray:
+    """Gaussian blobs around the center (size // 2) of a cube."""
+    inds = np.indices((size,) * 3, dtype=np.float64)
+    c = size // 2
+    vol = sum(
+        np.exp(-sum((i - (c + o)) ** 2 for i, o in zip(inds, off)) / (2 * sigma**2))
+        for off in offsets
+    )
+    return vol.astype(np.float32)
+
+
+def _realspace_projection(vol: np.ndarray, matrix: np.ndarray) -> np.ndarray:
+    """Sum along z of the volume sampled at ``matrix @ (z, y, x)`` about the center."""
+    from scipy import ndimage as ndi
+
+    size = vol.shape[0]
+    c = size // 2
+    zz, yy, xx = np.indices((2 * size, size, size), dtype=np.float64)
+    coords = np.stack([zz - size, yy - c, xx - c]).reshape(3, -1)
+    values = ndi.map_coordinates(vol.astype(np.float64), matrix @ coords + c, order=3)
+    return values.reshape(2 * size, size, size).sum(axis=0)
+
+
+BLOB_OFFSETS = [(0, 0, 0), (2, -3, 1), (-2, 2, 3)]
+
+
+@pytest.mark.parametrize("size", [16, 17, 20, 21])
+def test_volume_projector(size):
+    from scipy.spatial.transform import Rotation
+
+    vol = _blobs(size, BLOB_OFFSETS)
+    rotations = Rotation.random(5, random_state=3).as_matrix()
+    projector = VolumeProjector(vol)
+    out = projector(rotations)
+    assert out.shape == (5, size, size)
+    ref = np.stack([_realspace_projection(vol, m) for m in rotations])
+    assert np.abs(out - ref).max() < 0.04 * np.abs(ref).max()
+    # batch dimensions, and the reflection along the y axis of the projections
+    flip = np.diag([1.0, -1.0, 1.0])
+    out = projector(np.stack([rotations[:2], rotations[:2] @ flip]))
+    assert out.shape == (2, 2, size, size)
+    # the row 0 of even-sized projections is not mirrored inside the projections
+    start = 1 - size % 2
+    assert_allclose(out[1, :, start:], out[0, :, start:][:, ::-1], atol=1e-5)
+
+
+def test_volume_projector_background():
+    # the average near the faces is projected exactly
+    out = VolumeProjector(np.full((10, 10, 10), 2.0))(np.eye(3)[np.newaxis])
+    assert_allclose(out, 20.0, rtol=1e-5)
+    with pytest.raises(ValueError):
+        VolumeProjector(np.zeros((8, 8, 9)))
+    with pytest.raises(ValueError):
+        VolumeProjector(np.zeros((8, 8, 8)), padding=0.5)
+    with pytest.raises(ValueError):
+        VolumeProjector(np.zeros((8, 8, 8)))(np.eye(4))
+
+
+def test_volume_projector_matches_torch():
+    torch = pytest.importorskip("torch")
+    fourier_slice = pytest.importorskip("torch_fourier_slice")
+    from scipy.spatial.transform import Rotation
+
+    vol = _blobs(16, BLOB_OFFSETS)
+    rotations = Rotation.random(20, random_state=1).as_matrix()
+    out = VolumeProjector(vol)(rotations)
+    ref = fourier_slice.project_3d_to_2d(
+        torch.as_tensor(vol), torch.as_tensor(rotations).float(), zyx_matrices=True
+    ).numpy()
+    assert np.abs(out - ref).max() < 3e-3 * np.abs(ref).max()

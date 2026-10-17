@@ -38,7 +38,7 @@ include = [
 
 [project.optional-dependencies]
 torch = [
-    "torch-reconstruct-tomogram>=0.6.0",
+    "torch-tilt-series>=0.6.0",
 ]
 testing = [
     "pytest",

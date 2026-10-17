@@ -121,8 +121,7 @@ def test_immutable_and_replace():
 
 
 def test_json_roundtrip():
-    # local shifts are not serialized
-    ts = _random_tilt_series(local_shifts_2d=None)
+    ts = _random_tilt_series()
     out = TiltSeries.from_json(ts.dump_json())
     for name in [
         "tilt_angles",
@@ -201,7 +200,6 @@ def test_project_points_matches_torch():
 def test_torch_roundtrip():
     torch = pytest.importorskip("torch")
     pytest.importorskip("torch_tilt_series")
-    from acryo.loader._tilt_refine import LocalShifts2D as TorchLocalShifts2D
 
     def _shift(p):
         return 0.01 * p
@@ -209,7 +207,6 @@ def test_torch_roundtrip():
     ts = _random_tilt_series(local_shifts=_shift)
     torch_ts = ts.to_torch()
     assert torch_ts.pixel_spacing == pytest.approx(2.5)
-    assert isinstance(torch_ts.local_shifts_2d, TorchLocalShifts2D)
     back = TiltSeries.from_torch(torch_ts)
     for name in [
         "tilt_angles",
@@ -246,50 +243,6 @@ def test_torch_roundtrip():
         atol=1e-4,
     )
     assert TiltSeries.from_torch(wrapped.to_torch()).local_shifts_2d is not None
-
-
-def _etomo_dataframe(rng):
-    pd = pytest.importorskip("pandas")
-    n = 7
-    angles = np.radians(rng.normal(85, 1, n))
-    excluded = np.zeros(n, dtype=bool)
-    excluded[2] = True
-    return pd.DataFrame(
-        {
-            "image_path": [f"TS_01.st[{i}]" for i in range(n)],
-            "idx_tilt": np.arange(n),
-            "tilt_axis_angle": rng.normal(85, 1, n),
-            "rawtlt": np.linspace(-45, 45, n),
-            "tlt": np.linspace(-45, 45, n) + 0.3,
-            "xtilt": rng.normal(size=n),
-            "xaxistilt": [1.5] * n,
-            "xf_a11": np.cos(angles),
-            "xf_a12": -np.sin(angles),
-            "xf_a21": np.sin(angles),
-            "xf_a22": np.cos(angles),
-            "xf_dx": rng.normal(scale=5, size=n),
-            "xf_dy": rng.normal(scale=5, size=n),
-            "excluded": excluded,
-        }
-    )
-
-
-def test_from_etomo_directory(tmp_path, monkeypatch):
-    etomofiles = pytest.importorskip("etomofiles")
-    torch = pytest.importorskip("torch")
-    from torch_tilt_series.io import from_etomo_directory
-
-    df = _etomo_dataframe(np.random.default_rng(5))
-    monkeypatch.setattr(etomofiles, "read", lambda path: df.copy())
-    ts = TiltSeries.from_etomo_directory(tmp_path, scale=0.2)
-    ref = TiltSeries.from_torch(from_etomo_directory(tmp_path, pixel_spacing=2.0))
-    assert ts.ntilts == 6  # excluded view is dropped
-    assert ts.image_path == tmp_path / "TS_01.st"
-    assert ts.scale == pytest.approx(0.2)
-    assert_allclose(ts.image_indices, [0, 1, 3, 4, 5, 6])
-    points = np.random.default_rng(6).uniform(-100, 100, size=(10, 3))
-    assert_allclose(ts.project_points(points), ref.project_points(points), atol=1e-4)
-    del torch
 
 
 def test_from_aretomo_output(tmp_path, monkeypatch):

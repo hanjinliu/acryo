@@ -1,5 +1,3 @@
-import importlib.util
-
 import numpy as np
 from numpy.testing import assert_allclose
 import polars as pl
@@ -8,15 +6,15 @@ from scipy.spatial.transform import Rotation
 
 from acryo import Molecules, SubtomogramLoader, BackProjectionLoader
 from acryo.backend import Backend
-from acryo.projection import LocalShifts2D, TiltImagePreprocessor, TiltSeries
+from acryo.projection import (
+    LocalAlignment,
+    LocalShifts2D,
+    TiltImagePreprocessor,
+    TiltSeries,
+)
 from acryo.tilt import SingleAxis
 
 mrcfile = pytest.importorskip("mrcfile")
-
-requires_torch = pytest.mark.skipif(
-    importlib.util.find_spec("torch_reconstruct_tomogram") is None,
-    reason="torch-reconstruct-tomogram is not installed",
-)
 
 IMAGE_SCALE = 0.5  # pixel size of the tilt images in nm
 IMAGE_SHAPE = (128, 144)
@@ -453,7 +451,6 @@ def _perturbed(ts: TiltSeries, amplitude: float, seed: int = 0) -> TiltSeries:
     return ts.replace(sample_translations=ts.sample_translations + shifts)
 
 
-@requires_torch
 @pytest.mark.parametrize("tomo_hand", [1, -1])
 @pytest.mark.parametrize("scale, size", [(0.5, 16), (1.0, 9)])
 def test_refine_tilt_series(tmp_path, scale, size, tomo_hand):
@@ -473,7 +470,6 @@ def test_refine_tilt_series(tmp_path, scale, size, tomo_hand):
     assert refined.tilt_series.local_shifts_2d is None
 
 
-@requires_torch
 def test_refine_local_shifts(tmp_path):
     centers, rot = _random_particles(60, seed=2)
     rng = np.random.default_rng(3)
@@ -511,7 +507,49 @@ def test_refine_local_shifts(tmp_path):
     )
 
 
-@requires_torch
+def test_refine_with_local_alignment(tmp_path):
+    centers, rot = _random_particles(30, seed=8)
+    rng = np.random.default_rng(9)
+    ntilts = TILT_ANGLES.size
+    local = LocalAlignment(
+        origin=[-20.0, -25.0],
+        spacing=[40.0, 50.0],
+        tilt_angles=rng.normal(scale=1.0, size=(2, 2, ntilts)),
+        translations=rng.normal(scale=0.6, size=(2, 2, ntilts, 2)),
+    )
+    ts = _make_tilt_series(
+        tmp_path / "ts.mrc", _particle_points(centers, rot), local_shifts_2d=local
+    )
+    mole = Molecules(centers + CENTER, rot)
+    template = _particle_template(0.5, 16)
+    initial = _perturbed(ts, 1.2)  # with the local alignment
+    true_pos = ts.project_points(centers)
+
+    refined = _loader(initial, mole).refine_tilt_series([(mole, template)])
+    assert refined.tilt_series.local_shifts_2d is local
+    error = refined.tilt_series.sample_translations - ts.sample_translations
+    assert np.abs(error).max() < 0.1
+
+    # the local alignment is the base of the refined local shifts
+    refined = _loader(initial, mole).refine_tilt_series(
+        [(mole, template)], grid_shape=(2, 2)
+    )
+    model = refined.tilt_series.local_shifts_2d
+    assert isinstance(model, LocalShifts2D) and model.base is local
+    error = np.linalg.norm(
+        refined.tilt_series.project_points(centers) - true_pos, axis=-1
+    )
+    assert error.mean() < 0.05
+
+    # the local alignment cannot be fully refined by the uniform shifts
+    without = _loader(initial.replace(local_shifts_2d=None), mole)
+    refined = without.refine_tilt_series([(mole, template)])
+    error = np.linalg.norm(
+        refined.tilt_series.project_points(centers) - true_pos, axis=-1
+    )
+    assert error.mean() > 0.2
+
+
 def test_refine_with_multiple_references(tmp_path):
     other = np.array([[0.0, -1.5, 1.5], [0.0, 1.5, -1.5]])  # another kind of particle
     centers0, rot0 = _random_particles(15, seed=4)
@@ -533,7 +571,6 @@ def test_refine_with_multiple_references(tmp_path):
     assert np.abs(error).max() < 0.1
 
 
-@requires_torch
 def test_refined_loader(tmp_path):
     centers, rot = _random_particles(20, seed=6)
     ts = _make_tilt_series(tmp_path / "ts.mrc", _particle_points(centers, rot))
@@ -562,7 +599,24 @@ def test_refined_loader(tmp_path):
     assert _score(refined) > _score(loader) + 0.05
 
 
-@requires_torch
+def test_with_tilt_series(blob_tilt_series):
+    loader = _loader(blob_tilt_series, Molecules(BLOBS + CENTER), scale=1.0)
+    shifted = blob_tilt_series.replace(
+        sample_translations=blob_tilt_series.sample_translations + 1.0
+    )
+    with loader.cache_tilt_images():
+        images = loader._images.get(2)[1]
+        other = loader.with_tilt_series(shifted)
+        assert other.tilt_series is shifted
+        assert other.binsize == loader.binsize
+        assert other.molecules is loader.molecules
+        # the preprocessed images are shared
+        assert other._images.get(2)[1] is images
+    # the images of another pixel size are not shared
+    another = loader.with_tilt_series(blob_tilt_series.replace(scale=0.6))
+    assert another._images.cache is not loader._images.cache
+
+
 def test_refine_invalid_input(blob_tilt_series):
     loader = _loader(blob_tilt_series, Molecules(BLOBS + CENTER))
     template = _particle_template(0.5, 16)

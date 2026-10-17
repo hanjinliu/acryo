@@ -17,7 +17,6 @@ from typing import (
     SupportsIndex,
 )
 import uuid
-import warnings
 
 import numpy as np
 from numpy.typing import DTypeLike, NDArray
@@ -31,7 +30,6 @@ from acryo.loader._base import LoaderBase, Unset, _ShapeType, TemplateInputType
 from acryo.molecules import Molecules
 from acryo.projection import (
     DirectFourierReconstructor,
-    LocalShifts2D,
     TiltImagePreprocessor,
     TiltSeries,
     fourier_bin,
@@ -44,7 +42,6 @@ if TYPE_CHECKING:
     from typing_extensions import Self
     from torch_tilt_series import TiltSeries as TorchTiltSeries
 
-_ANGSTROM_PER_NM = 10.0
 # Memory budget (bytes) of the tilt images being preprocessed in parallel. Each
 # thread needs about five times the size of the (padded) tilt image.
 _LOAD_MEMORY_BUDGET = 2e9
@@ -61,8 +58,7 @@ class BackProjectionLoader(LoaderBase):
     axes is reconstructed around each molecule, and the subtomogram is cropped from
     the cube in the same way as ``SubtomogramLoader``. Subtomograms are reconstructed
     lazily in dask tasks. CTF can be corrected in preprocessing (see ``preprocess``).
-    Reading the tilt images requires ``mrcfile``. :meth:`refine_tilt_series` requires
-    ``torch-reconstruct-tomogram`` (install by ``pip install acryo[torch]``).
+    Reading the tilt images requires ``mrcfile``.
 
     Parameters
     ----------
@@ -260,8 +256,8 @@ class BackProjectionLoader(LoaderBase):
         subtomograms are requested, and released after that. In this context, the
         preprocessed tilt images (of each binning factor) and the reconstructors are
         cached, and reused by this loader and the loaders created from it, such as the
-        results of :meth:`replace`, :meth:`binning`, :meth:`align` and
-        :meth:`refine_tilt_series`. The cache is released when the outermost context
+        results of :meth:`replace`, :meth:`binning`, :meth:`align`,
+        :meth:`with_tilt_series` and :meth:`refine_tilt_series`. The cache is released when the outermost context
         exits. Lazy arrays created in the context can still be computed after that.
 
         Examples
@@ -319,6 +315,21 @@ class BackProjectionLoader(LoaderBase):
             binsize=binsize,
         )
         out._images = self._images  # share the loaded tilt images
+        return out
+
+    def with_tilt_series(self, tilt_series: TiltSeries | TorchTiltSeries) -> Self:
+        """Return a new instance with another tilt series, such as a refined one.
+
+        If the tilt series has the same tilt images (``image_path``,
+        ``image_indices`` and ``scale``), the preprocessed images and their cache are
+        shared with this loader, so updating the alignment is cheap.
+        """
+        tilt_series = _as_tilt_series(tilt_series)
+        out = self.replace()
+        if _same_tilt_images(self.tilt_series, tilt_series):
+            out._images = self._images.with_tilt_series(tilt_series)
+        else:
+            out._images = _TiltSeriesImages(tilt_series, self.preprocessor)
         return out
 
     def binning(self, binsize: float = 2, *, compute: bool = True) -> Self:
@@ -592,7 +603,7 @@ class BackProjectionLoader(LoaderBase):
             points, compared with the sum of normalized cross correlation over
             particles. Larger value is more robust against noise and fewer particles.
         niter : int, default is 100
-            Number of iterations to optimize the local shifts.
+            Maximum number of iterations to optimize the local shifts (L-BFGS-B).
         batch_size : int, default is 16
             Number of particles processed at once.
 
@@ -608,46 +619,31 @@ class BackProjectionLoader(LoaderBase):
         particle_sets: list[ParticleSet] = []
         for mole, template in references:
             pos, rotations = self._to_tilt_series_frame(mole)
-            points = ((pos - self.tomogram_center) * _ANGSTROM_PER_NM).astype(
-                np.float32
-            )
             particle_sets.append(
-                ParticleSet(points, rotations, self.normalize_template(template))
+                ParticleSet(
+                    pos - self.tomogram_center,
+                    rotations,
+                    self.normalize_template(template),
+                )
             )
-        import torch
-
         tilt_series, images = self._tilt_images()
-        with warnings.catch_warnings():
-            # The cached images are read-only, but they are not modified, so they are
-            # not copied.
-            warnings.filterwarnings("ignore", message=".*not writable.*")
-            images_tensor = torch.as_tensor(images)
         refined = refine_tilt_series(
-            tilt_series.to_torch(),
-            images_tensor,
+            tilt_series,
+            images,
             particle_sets,
-            pixel_spacing=self.scale * _ANGSTROM_PER_NM,
-            max_shift=max_shift * _ANGSTROM_PER_NM,
+            scale=self.scale,
+            max_shift=max_shift,
             grid_shape=grid_shape,
             smoothness=smoothness,
             niter=niter,
             batch_size=batch_size,
         )
         # the geometry is in nm, so it does not depend on the binning of the images
-        translations = refined.sample_translations.cpu().numpy() / _ANGSTROM_PER_NM
-        local_shifts_2d = self.tilt_series.local_shifts_2d
-        if tuple(grid_shape) != (1, 1):
-            local_shifts_2d = LocalShifts2D(
-                refined.local_shifts_2d.control_points.cpu().numpy() / _ANGSTROM_PER_NM,
-                refined.local_shifts_2d.half_extent.cpu().numpy() / _ANGSTROM_PER_NM,
-                base=local_shifts_2d,
-            )
         tilt_series = self.tilt_series.replace(
-            sample_translations=translations, local_shifts_2d=local_shifts_2d
+            sample_translations=refined.sample_translations,
+            local_shifts_2d=refined.local_shifts_2d,
         )
-        out = self.replace()
-        out._images = self._images.with_tilt_series(tilt_series)
-        return out
+        return self.with_tilt_series(tilt_series)
 
     def _default_align_kwargs(self) -> dict[str, Any]:
         """Return default keyword arguments for alignment."""
@@ -838,6 +834,15 @@ def _as_tilt_series(tilt_series: TiltSeries | TorchTiltSeries) -> TiltSeries:
     if type(tilt_series).__module__.startswith("torch_tilt_series"):
         return TiltSeries.from_torch(tilt_series)  # type: ignore
     raise TypeError(f"Expected a TiltSeries, got {type(tilt_series)}.")
+
+
+def _same_tilt_images(ts0: TiltSeries, ts1: TiltSeries) -> bool:
+    """Whether the tilt series have the same tilt images."""
+    if ts0.image_path != ts1.image_path or ts0.scale != ts1.scale:
+        return False
+    if ts0.image_indices is None or ts1.image_indices is None:
+        return ts0.image_indices is None and ts1.image_indices is None
+    return np.array_equal(ts0.image_indices, ts1.image_indices)
 
 
 def _cube_sidelength(

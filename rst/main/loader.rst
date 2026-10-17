@@ -316,16 +316,14 @@ Reconstructing Subtomograms from a Tilt Series
 :class:`BackProjectionLoader` does not need a tomogram. Subtomograms are reconstructed
 from a tilt series every time they are needed, at the pixel size given by ``scale``, by
 direct Fourier inversion (insertion of the central slices into the 3D Fourier transform).
-Reading the tilt images requires ``mrcfile``. Only :meth:`refine_tilt_series` requires
-`torch-reconstruct-tomogram <https://github.com/teamtomo/torch-reconstruct-tomogram>`_, which
-is installed by ``pip install acryo[torch]``.
+Reading the tilt images requires ``mrcfile``.
 
 The tilt series is given as a :class:`acryo.projection.TiltSeries` object, which describes
 the alignment of the tilt series in nm. It is a numpy port of ``TiltSeries`` of
 `torch-tilt-series <https://github.com/teamtomo/torch-tilt-series>`_, and the alignment of
 IMOD (``etomofiles`` is required), AreTomo (``alnfile`` is required) and RELION 5
 (``starfile-rs`` is required) can be read. ``torch_tilt_series.TiltSeries`` is also accepted
-and converted. Because the tilt series
+and converted (``pip install acryo[torch]``). Because the tilt series
 defines the coordinates relative to the tomogram center, the position of the tomogram center
 in the coordinate system of the molecules has to be given as ``tomogram_center`` (in nm).
 Depending on the positive direction of the tilt angles, the handedness of the tomogram may be
@@ -417,8 +415,8 @@ Densities outside the padded cube, such as neighboring molecules, are partly ali
 cube. If the molecules are densely packed, a larger ``padding`` (such as 3) gives subtomograms
 closer to those from a reconstructed tomogram, at the cost of speed.
 
-The functions for reconstruction are available in :mod:`acryo.projection`, and they do not
-depend on ``torch``.
+The functions for reconstruction and projection (:class:`acryo.projection.VolumeProjector`)
+are available in :mod:`acryo.projection`, and they do not depend on ``torch``.
 
 The full tomogram can also be reconstructed at the pixel size of ``scale`` from the
 preprocessed tilt images. The tomogram is tiled by patches, which are reconstructed by direct
@@ -447,6 +445,40 @@ tomograms (subvolumes are converted to float32).
 The same reconstruction is available for any tilt images and tilt series as
 :func:`acryo.projection.reconstruct_tomogram`.
 
+Local Shifts of the Tilt Images
+-------------------------------
+
+Deviations of the projections from the rigid geometry of the tilt series are given as
+``local_shifts_2d`` of :class:`acryo.projection.TiltSeries`, a model of the shifts of the
+projected points on the detector. The models are serializable (``TiltSeries.dump_json``):
+
+- :class:`acryo.projection.LocalShifts2D`: smooth shifts of each tilt image interpolated from
+  a grid of control points (the result of :meth:`refine_tilt_series`).
+- :class:`acryo.projection.AffineShifts2D`: an affine transformation of each tilt image, such
+  as a change of magnification.
+- :class:`acryo.projection.LocalAlignment`: the local alignments of IMOD. The sample is
+  divided into local areas, each of which has increments of the tilt angles, the X-axis tilt
+  angles, the Z factors and an affine refinement of each tilt. The shifts depend on the 3D
+  positions of the points.
+
+A model can have another model as ``base``, which is applied before the model. Any function
+of the projected points is also accepted as ``local_shifts_2d``, but it cannot be serialized.
+
+The rotation of the transformation of each view of IMOD (.xf) is the tilt axis angle, and the
+rest, such as the change of magnification, is read as :class:`AffineShifts2D`. The local
+alignments of IMOD (``LOCALFILE`` of tilt.com) are read with ``local_alignment=True``, so the
+results with and without them can be compared.
+
+.. code-block:: python
+
+    tilt_series = TiltSeries.from_etomo_directory("path/to/etomo", scale=0.266)
+    tilt_series_local = TiltSeries.from_etomo_directory(
+        "path/to/etomo", scale=0.266, local_alignment=True
+    )
+
+:meth:`refine_tilt_series` uses the projection including these models, so the alignment
+can be refined on top of the local alignments of IMOD.
+
 Refining the Alignment of a Tilt Series
 ---------------------------------------
 
@@ -468,7 +500,9 @@ By default, a uniform shift is refined for each tilt image (``sample_translation
 ``grid_shape`` is larger than ``(1, 1)``, the shifts are refined as a smooth field over each
 tilt image, interpolated from a grid of control points (``local_shifts_2d``). The control
 points are optimized to maximize the correlation of the particles with a smoothness prior
-weighted by ``smoothness``.
+weighted by ``smoothness``. The refined shifts are added to the existing local shifts (such
+as :class:`acryo.projection.LocalAlignment`), which are kept as the ``base`` of the refined
+:class:`acryo.projection.LocalShifts2D`.
 
 .. code-block:: python
 
