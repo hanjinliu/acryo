@@ -323,8 +323,9 @@ is installed by ``pip install acryo[torch]``.
 The tilt series is given as a :class:`acryo.projection.TiltSeries` object, which describes
 the alignment of the tilt series in nm. It is a numpy port of ``TiltSeries`` of
 `torch-tilt-series <https://github.com/teamtomo/torch-tilt-series>`_, and the alignment of
-IMOD (``etomofiles`` is required) and AreTomo (``alnfile`` is required) can be read.
-``torch_tilt_series.TiltSeries`` is also accepted and converted. Because the tilt series
+IMOD (``etomofiles`` is required), AreTomo (``alnfile`` is required) and RELION 5
+(``starfile-rs`` is required) can be read. ``torch_tilt_series.TiltSeries`` is also accepted
+and converted. Because the tilt series
 defines the coordinates relative to the tomogram center, the position of the tomogram center
 in the coordinate system of the molecules has to be given as ``tomogram_center`` (in nm).
 Depending on the positive direction of the tilt angles, the handedness of the tomogram may be
@@ -342,11 +343,29 @@ the tomogram center.
     loader = BackProjectionLoader(
         tilt_series,
         molecules,
-        scale=0.868,  # pixel size of the subtomograms in nm
+        binsize=4,  # pixel size of the subtomograms is 0.217 * 4 = 0.868 nm
         output_shape=(32, 32, 32),
         tomogram_center=(D // 2 * s, H // 2 * s, W // 2 * s),  # tomogram of shape (D, H, W)
     )
     avg = loader.average()
+
+The pixel size of the subtomograms (``loader.scale``) is the pixel size of the tilt images
+(``tilt_series.scale``) times ``binsize``, which does not have to be an integer.
+:meth:`binning` returns a loader of a larger ``binsize``.
+
+A tilt series of RELION 5 is read from the STAR file of tilt series (such as
+``tilt_series.star`` of an "Align tilt series" job), with the name of the tilt series. The
+motion-corrected tilt images (``rlnMicrographName``) are read one by one. The paths in the
+STAR files are relative to the RELION project directory, which is found from the parent
+directories of the STAR file (or given as ``project_dir``). The tomogram space of RELION is
+centered, so the centered coordinates of the particles (``rlnCenteredCoordinateXAngst`` etc.)
+can be used with ``tomogram_center=(0, 0, 0)``.
+
+.. code-block:: python
+
+    tilt_series = TiltSeries.from_relion_tilt_series_star(
+        "path/to/AlignTiltSeries/job005/tilt_series.star", "TS_01"
+    )
 
 The tilt images are preprocessed by :class:`acryo.projection.TiltImagePreprocessor`
 (background subtraction, bandpass filtering and normalization of each tilt image). Its

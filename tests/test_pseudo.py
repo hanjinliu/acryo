@@ -2,6 +2,7 @@ import importlib.util
 
 import numpy as np
 from numpy.testing import assert_allclose
+import polars as pl
 import pytest
 from scipy.spatial.transform import Rotation
 
@@ -77,8 +78,11 @@ def blob_tilt_series(tmp_path) -> TiltSeries:
 
 def _loader(ts: TiltSeries, mole: Molecules, **kwargs) -> BackProjectionLoader:
     kwargs.setdefault("output_shape", (13, 13, 13))
-    kwargs.setdefault("scale", IMAGE_SCALE)
-    return BackProjectionLoader(ts, mole, tomogram_center=CENTER, **kwargs)
+    # the pixel size of the subtomograms
+    scale = kwargs.pop("scale", IMAGE_SCALE)
+    return BackProjectionLoader(
+        ts, mole, tomogram_center=CENTER, binsize=scale / IMAGE_SCALE, **kwargs
+    )
 
 
 def _argmax(img: np.ndarray) -> tuple[int, ...]:
@@ -145,8 +149,11 @@ def test_consistent_with_tomogram_reconstruction(blob_tilt_series, scale, tomo_h
         mole,
         tomogram_center=tomo_center,
         tomo_hand=tomo_hand,
-        **kwargs,
+        output_shape=(14, 15, 16),
+        order=1,
+        binsize=scale / IMAGE_SCALE,
     )
+    assert loader.scale == pytest.approx(scale)
     # NOTE: the contrast of the tomogram is not inverted
     tomo = -loader.reconstruct_tomogram(tomo_shape, patch_size=40)
     ref = SubtomogramLoader(tomo, mole, **kwargs).asnumpy()
@@ -261,7 +268,8 @@ def test_dense_molecules_consistent_with_tomogram_reconstruction(
         tomogram_center=tomo_center,
         tomo_hand=tomo_hand,
         padding=padding,
-        **kwargs,
+        output_shape=(9, 9, 9),
+        binsize=scale / IMAGE_SCALE,
     )
     out = loader.asnumpy()
     # NOTE: the contrast of the tomogram is not inverted
@@ -294,7 +302,17 @@ def test_properties(blob_tilt_series):
     assert_allclose(loader.tomogram_center, CENTER)
     assert loader.tilt_series is blob_tilt_series
     binned = loader.binning(2, compute=False)
+    # the pixel size is that of the tilt series by default
+    assert loader.binsize == 1.0
+    assert loader.scale == pytest.approx(blob_tilt_series.scale)
+    assert binned.binsize == pytest.approx(2.0)
     assert binned.scale == pytest.approx(loader.scale * 2)
+    assert loader.replace(scale=1.0).binsize == pytest.approx(1.0 / IMAGE_SCALE)
+    assert loader.replace(binsize=3).binsize == 3
+    assert loader.replace(binsize=3).scale == pytest.approx(IMAGE_SCALE * 3)
+    assert binned.binning(1.5).binsize == 3.0  # exact, not through the scale
+    with pytest.raises(TypeError):
+        loader.replace(scale=1.0, binsize=2)
     assert_allclose(binned.molecules.pos, loader.molecules.pos)
     assert_allclose(binned.tomogram_center, CENTER)
     assert binned.output_shape == loader.output_shape
@@ -308,6 +326,19 @@ def test_properties(blob_tilt_series):
     assert mirrored.tilt_model.tilt_range == (-60.0, 40.0)
     assert mirrored.binning(2).tomo_hand == -1
     repr(loader)
+
+
+def test_groupby(blob_tilt_series):
+    # `groupby` replaces the loaders by `scale`
+    group = pl.Series("group", [0, 0, 1, 1, 1])
+    mole = Molecules(BLOBS + CENTER).with_features(group)
+    loader = _loader(blob_tilt_series, mole, output_shape=(7, 7, 7)).binning(2)
+    out = {key: sub for key, sub in loader.groupby("group")}
+    assert len(out) == 2
+    for sub in out.values():
+        assert isinstance(sub, BackProjectionLoader)
+        assert sub.binsize == pytest.approx(2.0)
+        assert sub.asnumpy().shape[1:] == (7, 7, 7)
 
 
 def test_empty(blob_tilt_series):
@@ -328,6 +359,10 @@ def test_invalid_input(blob_tilt_series):
         BackProjectionLoader(blob_tilt_series, mole, tomo_hand=0)
     with pytest.raises(ValueError):
         BackProjectionLoader(blob_tilt_series, mole, padding=0.5)
+    with pytest.raises(ValueError):
+        BackProjectionLoader(blob_tilt_series, mole, binsize=0)
+    with pytest.raises(ValueError):
+        BackProjectionLoader(blob_tilt_series, mole).binning(-2)
     with pytest.raises(TypeError):
         BackProjectionLoader(blob_tilt_series, mole, preprocess="yes")
     with pytest.raises(TypeError):
@@ -693,7 +728,7 @@ def test_tilt_images_are_loaded_once_per_binsize(blob_tilt_series, monkeypatch):
         loader.head(3).average()
         loader.binning(2).replace(output_shape=(7, 7, 7)).average()
         loader.binning(2).average(output_shape=(7, 7, 7))
-        loader.replace(scale=0.7).average()  # binsize 1 is used again
+        loader.replace(binsize=1.4).average()  # binsize 1 is used again
         assert loaded == [1, 2]
     # the cache is released
     assert loader._images.cache.images == {}
@@ -776,9 +811,9 @@ def test_binned_tilt_images(blob_tilt_series, monkeypatch, scale):
 
     mole = Molecules(BLOBS + CENTER, Rotation.random(len(BLOBS), random_state=10))
     loader = _loader(blob_tilt_series, mole, scale=scale, output_shape=(9, 9, 9))
-    assert loader._images.binsize_for(scale) == round(scale * 2)
+    assert loader._images.binsize_for(loader.binsize) == round(scale * 2)
     binned = loader.asnumpy()
-    monkeypatch.setattr(_TiltSeriesImages, "binsize_for", lambda self, scale: 1)
+    monkeypatch.setattr(_TiltSeriesImages, "binsize_for", lambda self, binsize: 1)
     unbinned = loader.replace().asnumpy()
     for img0, img1 in zip(binned, unbinned):
         assert np.corrcoef(img0.ravel(), img1.ravel())[0, 1] > 0.95

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable, Iterator
+from typing import Iterable, Iterator, Sequence
 import warnings
 
 import numpy as np
@@ -27,6 +27,8 @@ class MrcImageStack:
             self.dtype = data_dtype_from_header(header)
             # the data block follows the main header and the extended header
             self.offset = header.nbytes + int(header.nsymbt)
+            # pixel size in Å (0 if not set)
+            self.voxel_size = float(mrc.voxel_size.x)
         self.path = path
 
     def iter_images(self, indices: Iterable[int]) -> Iterator[NDArray[np.float32]]:
@@ -50,6 +52,69 @@ class MrcImageStack:
         return np.memmap(
             self.path, dtype=self.dtype, mode="r", offset=self.offset, shape=self.shape
         )
+
+
+class TiltImageSource:
+    """The tilt images of a tilt series, read one by one from MRC file(s).
+
+    The images are either in a stack (``image_path`` is a path) or in separate files
+    (``image_path`` is a sequence of paths, one for each tilt). ``image_indices`` are
+    the indices of the images in the stack, or in each file.
+    """
+
+    def __init__(
+        self,
+        image_path: Path | Sequence[Path],
+        image_indices: Sequence[int] | None,
+        ntilts: int,
+    ):
+        if isinstance(image_path, (str, Path)):
+            stack = MrcImageStack(image_path)
+            if image_indices is None:
+                indices = list(range(stack.shape[0]))
+            else:
+                indices = [int(i) for i in image_indices]
+            if len(indices) != ntilts:
+                raise ValueError(
+                    f"The tilt series has {ntilts} tilts, but {len(indices)} images "
+                    f"are found in {image_path}. Set 'image_indices' of the tilt "
+                    "series."
+                )
+            self._stacks = [stack]
+            self._indices = indices
+        else:
+            paths = list(image_path)
+            if len(paths) != ntilts:
+                raise ValueError(
+                    f"The tilt series has {ntilts} tilts, but {len(paths)} image files "
+                    "are given."
+                )
+            self._stacks = [MrcImageStack(path) for path in paths]
+            if image_indices is None:
+                self._indices = [0] * ntilts
+            else:
+                self._indices = [int(i) for i in image_indices]
+            shapes = {stack.shape[1:] for stack in self._stacks}
+            if len(shapes) != 1:
+                raise ValueError(f"Shapes of the tilt images differ: {shapes}.")
+
+    @property
+    def image_shape(self) -> tuple[int, int]:
+        """(H, W) shape of the tilt images."""
+        return self._stacks[0].shape[1:]  # type: ignore
+
+    @property
+    def voxel_size(self) -> float:
+        """Pixel size in Å written in the header of the (first) file."""
+        return self._stacks[0].voxel_size
+
+    def iter_images(self) -> Iterator[NDArray[np.float32]]:
+        """Iterate over the tilt images as float32 arrays."""
+        if len(self._stacks) == 1:
+            yield from self._stacks[0].iter_images(self._indices)
+        else:
+            for stack, index in zip(self._stacks, self._indices):
+                yield from stack.iter_images([index])
 
 
 # MRC modes of the supported data types

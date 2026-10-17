@@ -37,7 +37,7 @@ from acryo.projection import (
     fourier_bin,
     reconstruct_tomogram,
 )
-from acryo.projection._io import MrcImageStack
+from acryo.projection._io import TiltImageSource
 from acryo.tilt import TiltSeriesModel, single_axis
 
 if TYPE_CHECKING:
@@ -54,7 +54,8 @@ class BackProjectionLoader(LoaderBase):
     """A loader that reconstructs subtomograms directly from a tilt series.
 
     No tomogram is needed. Every time subtomograms are requested, they are
-    reconstructed from the tilt series at the pixel size given by ``scale`` by direct
+    reconstructed from the tilt series at the pixel size ``scale``, which is the pixel
+    size of the tilt images (``tilt_series.scale``) times ``binsize``, by direct
     Fourier inversion (insertion of the central slices into the 3D Fourier
     transform), as in ``torch-reconstruct-tomogram``. A cube aligned to the tomogram
     axes is reconstructed around each molecule, and the subtomogram is cropped from
@@ -79,8 +80,6 @@ class BackProjectionLoader(LoaderBase):
         subtomograms.
     order : int, default is 3
         Interpolation order of the rotation of subtomograms.
-    scale : float, default is 1.0
-        Pixel size of the reconstructed subtomograms in nm.
     output_shape : int or tuple of int, optional
         Shape of output subtomogram in pixel. This parameter is not required
         if template (or mask) image is available immediately.
@@ -118,6 +117,11 @@ class BackProjectionLoader(LoaderBase):
         artifacts and the aliasing of the densities around the molecule, such as the
         neighboring molecules. Larger value is more accurate for dense molecules but
         slower.
+    binsize : float, default is 1.0
+        Binning factor of the subtomograms relative to the tilt images. The pixel size
+        of the subtomograms (``scale``) is ``tilt_series.scale * binsize``. It does not
+        have to be an integer. :meth:`binning` returns a loader of a larger binsize,
+        and ``replace(binsize=...)`` returns a loader of the given binsize.
     """
 
     def __init__(
@@ -125,7 +129,6 @@ class BackProjectionLoader(LoaderBase):
         tilt_series: TiltSeries | TorchTiltSeries,
         molecules: Molecules | None = None,
         order: int = 3,
-        scale: nm = 1.0,
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
         corner_safe: bool = False,
         tomogram_center: tuple[nm, nm, nm] = (0.0, 0.0, 0.0),
@@ -134,6 +137,7 @@ class BackProjectionLoader(LoaderBase):
         batch_size: int | None = None,
         tomo_hand: int = 1,
         padding: float = 2.0,
+        binsize: float = 1.0,
     ) -> None:
         tilt_series = _as_tilt_series(tilt_series)
         if tilt_series.image_path is None:
@@ -167,6 +171,8 @@ class BackProjectionLoader(LoaderBase):
             raise ValueError(f"'tomo_hand' must be 1 or -1, got {tomo_hand!r}.")
         if padding < 1:
             raise ValueError(f"'padding' must be >= 1, got {padding!r}.")
+        if binsize <= 0:
+            raise ValueError(f"'binsize' must be positive, got {binsize!r}.")
         if tilt_model is None:
             # mirroring along the z axis inverts the tilt angles
             angles = tilt_series.tilt_angles * tomo_hand
@@ -181,74 +187,19 @@ class BackProjectionLoader(LoaderBase):
         self._batch_size = None if batch_size is None else int(batch_size)
         self._tomo_hand = int(tomo_hand)
         self._padding = float(padding)
-        super().__init__(order=order, scale=scale, output_shape=output_shape)
+        self._binsize = float(binsize)
+        super().__init__(
+            order=order,
+            scale=tilt_series.scale * self._binsize,
+            output_shape=output_shape,
+        )
 
     def __repr__(self) -> str:
         mole_repr = repr(self.molecules)
         return (
             f"{self.__class__.__name__}(tilt_series=<{self.tilt_series.ntilts} tilts>, "
             f"molecules={mole_repr}, output_shape={self.output_shape}, "
-            f"order={self.order}, scale={self.scale:.4f})"
-        )
-
-    @classmethod
-    def from_etomo_directory(
-        cls,
-        path,
-        scale: nm,
-        molecules: Molecules | None = None,
-        order: int = 3,
-        corner_safe: bool = False,
-        tomogram_center: tuple[nm, nm, nm] = (0.0, 0.0, 0.0),
-        preprocess: bool | TiltImagePreprocessor = True,
-        batch_size: int | None = None,
-        tomo_hand: int = 1,
-        padding: float = 2.0,
-    ) -> BackProjectionLoader:
-        """Create a loader from an IMOD etomo directory.
-
-        ``etomofiles`` is required. ``image_scale`` is the pixel size of the raw tilt
-        images in nm. By default, ``scale`` is the same as ``image_scale``.
-        """
-        ts = TiltSeries.from_etomo_directory(path, scale=scale)
-        return BackProjectionLoader(
-            ts,
-            molecules=molecules,
-            order=order,
-            scale=scale,
-            corner_safe=corner_safe,
-            tomogram_center=tomogram_center,
-            preprocess=preprocess,
-            batch_size=batch_size,
-            tomo_hand=tomo_hand,
-            padding=padding,
-        )
-
-    @classmethod
-    def from_tilt_series_json(
-        cls,
-        path,
-        molecules: Molecules | None = None,
-        order: int = 3,
-        corner_safe: bool = False,
-        tomogram_center: tuple[nm, nm, nm] = (0.0, 0.0, 0.0),
-        preprocess: bool | TiltImagePreprocessor = True,
-        batch_size: int | None = None,
-        tomo_hand: int = 1,
-        padding: float = 2.0,
-    ) -> BackProjectionLoader:
-        """Create a loader from a tilt series JSON file."""
-        ts = TiltSeries.from_json(Path(path).read_text())
-        return BackProjectionLoader(
-            ts,
-            molecules=molecules,
-            order=order,
-            corner_safe=corner_safe,
-            tomogram_center=tomogram_center,
-            preprocess=preprocess,
-            batch_size=batch_size,
-            tomo_hand=tomo_hand,
-            padding=padding,
+            f"order={self.order}, binsize={self.binsize:g}, scale={self.scale:.4f})"
         )
 
     @property
@@ -296,6 +247,11 @@ class BackProjectionLoader(LoaderBase):
         """Return the padding factor of the reconstruction."""
         return self._padding
 
+    @property
+    def binsize(self) -> float:
+        """Return the binning factor of the subtomograms relative to the tilt images."""
+        return self._binsize
+
     @contextmanager
     def cache_tilt_images(self) -> Generator[Self, None, None]:
         """Context manager to cache the preprocessed tilt images in memory.
@@ -327,21 +283,32 @@ class BackProjectionLoader(LoaderBase):
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset | None = None,
         order: int | None = None,
         scale: float | None = None,
+        *,
+        binsize: float | None = None,
     ) -> Self:
-        """Return a new instance with different parameter(s)."""
+        """Return a new instance with different parameter(s).
+
+        The pixel size of the subtomograms is changed by ``binsize``, the binning
+        factor relative to the tilt images. ``scale`` (the pixel size in nm) is also
+        accepted for the compatibility with other loaders, such as ``groupby``, and is
+        converted to ``binsize``.
+        """
         if molecules is None:
             molecules = self.molecules
         if output_shape is None:
             output_shape = self.output_shape
         if order is None:
             order = self.order
-        if scale is None:
-            scale = self.scale
+        if scale is not None:
+            if binsize is not None:
+                raise TypeError("Cannot specify both 'scale' and 'binsize'.")
+            binsize = scale / self._images.scale
+        elif binsize is None:
+            binsize = self.binsize
         out = self.__class__(
             self.tilt_series,
             molecules=molecules,
             order=order,
-            scale=scale,
             output_shape=output_shape,
             corner_safe=self.corner_safe,
             tomogram_center=tuple(self.tomogram_center),
@@ -349,6 +316,7 @@ class BackProjectionLoader(LoaderBase):
             batch_size=self.batch_size,
             tomo_hand=self.tomo_hand,
             padding=self.padding,
+            binsize=binsize,
         )
         out._images = self._images  # share the loaded tilt images
         return out
@@ -359,9 +327,11 @@ class BackProjectionLoader(LoaderBase):
         Subtomograms are reconstructed at the binned pixel size, so ``compute`` has
         no effect. It is only for the compatibility with ``SubtomogramLoader``.
         """
+        if binsize <= 0:
+            raise ValueError(f"'binsize' must be positive, got {binsize!r}.")
         if binsize == 1:
             return self.copy()
-        return self.replace(scale=self.scale * binsize)
+        return self.replace(binsize=self.binsize * binsize)
 
     def construct_loading_tasks(
         self,
@@ -456,7 +426,7 @@ class BackProjectionLoader(LoaderBase):
         self, output_shape: tuple[pixel, pixel, pixel]
     ) -> _ReconstructionPlan:
         """Plan the reconstruction of the subtomograms. The tilt images are loaded."""
-        binsize = self._images.binsize_for(self.scale)
+        binsize = self._images.binsize_for(self.binsize)
         sidelength = _cube_sidelength(output_shape, self.order, self.corner_safe)
         reconstructor = self._images.reconstructor(
             binsize, self.scale, sidelength, self.padding
@@ -504,7 +474,7 @@ class BackProjectionLoader(LoaderBase):
 
     def _tilt_images(self) -> tuple[TiltSeries, NDArray[np.float32]]:
         """The tilt series and its images binned to the pixel size of this loader."""
-        binsize = self._images.binsize_for(self.scale)
+        binsize = self._images.binsize_for(self.binsize)
         return self._images.get(binsize)
 
     def reconstruct_tomogram(
@@ -559,7 +529,7 @@ class BackProjectionLoader(LoaderBase):
             The reconstructed tomogram. If ``save_path`` is given, a read-only memory
             map of the file.
         """
-        binsize = self._images.binsize_for(self.scale)
+        binsize = self._images.binsize_for(self.binsize)
         tilt_series, images = self._images.get(binsize)
         if self.tomo_hand == -1:
             # The tomogram of the molecules is mirrored along the z axis.
@@ -747,9 +717,14 @@ class _TiltSeriesImages:
         assert self.tilt_series.scale is not None
         return self.tilt_series.scale
 
-    def binsize_for(self, scale: nm) -> int:
-        """Largest binning factor whose pixel size does not exceed the given one."""
-        return max(math.floor(scale / self.scale + 1e-6), 1)
+    def binsize_for(self, binsize: float) -> int:
+        """Binning factor of the tilt images for the binsize of the subtomograms.
+
+        The images are binned by the largest integer that does not exceed ``binsize``,
+        so that the subtomograms are not affected by binning. The images are cached
+        for each integer binning factor.
+        """
+        return max(math.floor(binsize + 1e-6), 1)
 
     def binned_tilt_series(self, binsize: int) -> TiltSeries:
         """The tilt series whose scale is the binned pixel size."""
@@ -807,17 +782,10 @@ class _TiltSeriesImages:
     def _load(self, binsize: int) -> NDArray[np.float32]:
         tilt_series = self.tilt_series
         assert tilt_series.image_path is not None
-        stack = MrcImageStack(tilt_series.image_path)
-        if tilt_series.image_indices is None:
-            indices = list(range(stack.shape[0]))
-        else:
-            indices = tilt_series.image_indices.tolist()
-        if len(indices) != tilt_series.ntilts:
-            raise ValueError(
-                f"The tilt series has {tilt_series.ntilts} tilts, but {len(indices)} "
-                f"images are found in {tilt_series.image_path}. Set 'image_indices' of "
-                "the tilt series."
-            )
+        source = TiltImageSource(
+            tilt_series.image_path, tilt_series.image_indices, tilt_series.ntilts
+        )
+        ntilts = tilt_series.ntilts
         out: NDArray[np.float32] | None = None
 
         def _process(t: int, image: NDArray[np.float32]):
@@ -834,15 +802,15 @@ class _TiltSeriesImages:
             for future in futures:
                 t, image = future.result()
                 if out is None:
-                    out = np.empty((len(indices),) + image.shape, dtype=np.float32)
+                    out = np.empty((ntilts,) + image.shape, dtype=np.float32)
                 out[t] = image
 
         # The tilt images are read one by one, and processed in parallel. The number
         # of the images being processed is limited to save memory.
-        num_workers = _num_load_workers(stack.shape[1:], self.preprocessor)
+        num_workers = _num_load_workers(source.image_shape, self.preprocessor)
         with ThreadPoolExecutor(num_workers) as executor:
             pending: set[Future] = set()
-            for t, image in enumerate(stack.iter_images(indices)):
+            for t, image in enumerate(source.iter_images()):
                 if len(pending) >= num_workers:
                     done, pending = wait(pending, return_when=FIRST_COMPLETED)
                     _store(done)

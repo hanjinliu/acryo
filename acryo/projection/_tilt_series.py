@@ -4,8 +4,8 @@ import dataclasses
 from dataclasses import dataclass
 from pathlib import Path
 import json
-
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Sequence
+import warnings
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -56,10 +56,13 @@ class TiltSeries:
         Function that maps (N, 3) points in the sample space (nm) to their shifts.
     local_shifts_2d : callable, optional
         Function that maps (N, T, 2) projected points (nm) to their shifts.
-    image_path : str or Path, optional
-        Path to the MRC file of the tilt images.
+    image_path : str, Path or sequence of them, optional
+        Path to the MRC file of the stack of the tilt images, or the paths to the MRC
+        files of each tilt image (such as the motion-corrected tilt images of RELION).
     image_indices : (T,) array of int, optional
-        Indices of the images in the file corresponding to the tilts.
+        Indices of the images in the stack corresponding to the tilts. If
+        ``image_path`` is a sequence, indices of the images in each file (0 by
+        default).
     scale : float, optional
         Pixel size of the tilt images in nm.
     """
@@ -72,7 +75,7 @@ class TiltSeries:
     levelled2tomo: NDArray[np.float64] = None  # type: ignore
     local_shifts: LocalShiftFunction | None = None
     local_shifts_2d: LocalShiftFunction | None = None
-    image_path: Path | None = None
+    image_path: Path | tuple[Path, ...] | None = None
     image_indices: NDArray[np.intp] | None = None
     scale: nm | None = None
 
@@ -108,7 +111,7 @@ class TiltSeries:
                 raise ValueError(f"Shape of '{name}' must be (4, 4), got {mtx.shape}.")
             _set(self, name, _readonly(mtx))
         if self.image_path is not None:
-            _set(self, "image_path", Path(self.image_path))
+            _set(self, "image_path", _normalize_image_path(self.image_path, ntilts))
         if self.image_indices is not None:
             indices = np.asarray(self.image_indices)
             if indices.shape != (ntilts,) or not np.issubdtype(
@@ -126,9 +129,15 @@ class TiltSeries:
 
     def __repr__(self) -> str:
         angles = self.tilt_angles
+        if isinstance(self.image_path, tuple):
+            image_path = (
+                f"<{len(self.image_path)} files in {self.image_path[0].parent}>"
+            )
+        else:
+            image_path = str(self.image_path)
         return (
             f"{type(self).__name__}(ntilts={self.ntilts}, tilt_range=({angles.min():.1f}, "
-            f"{angles.max():.1f}), scale={self.scale}, image_path={self.image_path})"
+            f"{angles.max():.1f}), scale={self.scale}, image_path={image_path})"
         )
 
     @property
@@ -231,9 +240,17 @@ class TiltSeries:
         )
 
     def to_torch(self, device="cpu") -> TorchTiltSeries:
-        """Convert to a ``torch_tilt_series.TiltSeries`` (in Å)."""
+        """Convert to a ``torch_tilt_series.TiltSeries`` (in Å).
+
+        If the tilt images are in separate files, ``image_path`` is not converted,
+        because ``torch_tilt_series.TiltSeries`` only supports a stack.
+        """
         from torch_tilt_series import TiltSeries as TorchTiltSeries
 
+        if isinstance(self.image_path, tuple):
+            image_path, image_indices = None, None
+        else:
+            image_path, image_indices = self.image_path, self.image_indices
         return TorchTiltSeries(
             tilt_angles=self.tilt_angles,
             tilt_axis_angle=self.tilt_axis_angle,
@@ -243,8 +260,8 @@ class TiltSeries:
             levelled2tomo=_affine_to_angstrom(self.levelled2tomo),
             local_shifts=_shift_function_to_torch(self.local_shifts),
             local_shifts_2d=_shift_function_to_torch(self.local_shifts_2d),
-            image_path=self.image_path,
-            image_indices=self.image_indices,
+            image_path=image_path,
+            image_indices=image_indices,
             pixel_spacing=None if self.scale is None else self.scale * _ANGSTROM_PER_NM,
             device=device,
         )
@@ -325,9 +342,128 @@ class TiltSeries:
         )
 
     @classmethod
+    def from_relion_tilt_series_star(
+        cls,
+        path: str | Path,
+        tomo_name: str | None = None,
+        *,
+        project_dir: str | Path | None = None,
+        scale: nm | None = None,
+    ) -> TiltSeries:
+        """Read a tilt series of RELION 5.
+
+        The alignment (``rlnTomoXTilt``, ``rlnTomoYTilt``, ``rlnTomoZRot``,
+        ``rlnTomoXShiftAngst`` and ``rlnTomoYShiftAngst``) and the motion-corrected
+        tilt images (``rlnMicrographName``) of each tilt are read. RELION projects a
+        point by the rotations around the x, y and z axes in this order, followed by
+        the shift, which is the same as this class. The tomogram space is centered,
+        so the centered coordinates of RELION (such as
+        ``rlnCenteredCoordinateXAngst``) are the coordinates of this class. Tilt
+        series that are not aligned yet are read with the nominal tilt angles and
+        tilt axis angle. ``starfile-rs`` is required.
+
+        Parameters
+        ----------
+        path : str or Path
+            STAR file of tilt series with the "global" data block that lists the tilt
+            series (such as ``tilt_series.star`` or ``tomograms.star``), or the STAR
+            file of a single tilt series (such as ``tilt_series/TS_01.star``).
+        tomo_name : str, optional
+            Name of the tilt series (``rlnTomoName``) to read. It is required if the
+            STAR file lists more than one tilt series.
+        project_dir : str or Path, optional
+            The RELION project directory, to which the paths in the STAR files are
+            relative. By default, the nearest parent directory of the STAR file where
+            the paths are found.
+        scale : float, optional
+            Pixel size of the tilt images in nm. By default,
+            ``rlnTomoTiltSeriesPixelSize`` of the global data block, or the pixel
+            size in the header of the first tilt image.
+        """
+        from starfile_rs import read_star
+
+        path = Path(path)
+        star = read_star(path)
+        if (block := star.get("global")) is not None and (
+            "rlnTomoTiltSeriesStarFile" in block.columns
+        ):
+            series = _select_relion_tilt_series(block.to_polars(), tomo_name, path)
+            ts_path = Path(series["rlnTomoTiltSeriesStarFile"])
+            project_dir = _relion_project_dir(path, ts_path, project_dir)
+            if not ts_path.is_absolute():
+                ts_path = project_dir / ts_path
+            if scale is None and series.get("rlnTomoTiltSeriesPixelSize") is not None:
+                scale = float(series["rlnTomoTiltSeriesPixelSize"]) / _ANGSTROM_PER_NM
+            tomo_name = str(series["rlnTomoName"])
+            star = read_star(ts_path)
+        df = _select_relion_tilt_block(star, tomo_name, path).to_polars()
+
+        image_paths: list[Path] = []
+        image_indices: list[int] = []
+        for name in df["rlnMicrographName"].cast(str).to_list():
+            if "@" in name:
+                # "N@file" is the N-th (1-based) image in the file
+                index, name = name.split("@", 1)
+                image_indices.append(int(index) - 1)
+            else:
+                image_indices.append(0)
+            image_paths.append(Path(name))
+        project_dir = _relion_project_dir(path, image_paths[0], project_dir)
+        image_paths = [p if p.is_absolute() else project_dir / p for p in image_paths]
+
+        columns = df.columns
+        if all(c in columns for c in _RELION_ALIGNMENT_COLUMNS):
+            x_tilts = df["rlnTomoXTilt"].to_numpy()
+            tilt_angles = df["rlnTomoYTilt"].to_numpy()
+            tilt_axis_angle = df["rlnTomoZRot"].to_numpy()
+            shifts_xy = df[["rlnTomoXShiftAngst", "rlnTomoYShiftAngst"]].to_numpy()
+            # (y, x) in nm
+            translations = shifts_xy[:, ::-1].astype(np.float64) / _ANGSTROM_PER_NM
+        else:
+            warnings.warn(
+                f"The tilt series in {path} is not aligned. The nominal tilt angles "
+                "and tilt axis angle are used.",
+                UserWarning,
+                stacklevel=2,
+            )
+            x_tilts = 0.0
+            tilt_angles = df["rlnTomoNominalStageTiltAngle"].to_numpy()
+            tilt_axis_angle = df["rlnTomoNominalTiltAxisAngle"].to_numpy()
+            translations = np.zeros((len(df), 2))
+
+        first_image = image_paths[0]
+        if first_image.exists():
+            from acryo.projection._io import MrcImageStack
+
+            stack = MrcImageStack(first_image)
+            if scale is None and stack.voxel_size > 0:
+                scale = stack.voxel_size / _ANGSTROM_PER_NM
+            if scale is not None:
+                # The origin of the detector is at size / 2 (pixel) of the images in
+                # RELION, but at size // 2 in this class.
+                ny, nx = stack.shape[1:]
+                translations = translations + np.array([ny % 2, nx % 2]) * scale / 2
+        if scale is None:
+            raise ValueError(
+                f"The pixel size of the tilt images is not found in {path}. Give "
+                "'scale' explicitly."
+            )
+        return cls(
+            tilt_angles=tilt_angles,
+            tilt_axis_angle=tilt_axis_angle,
+            sample_translations=translations,
+            x_tilts=x_tilts,
+            image_path=tuple(image_paths),
+            image_indices=None if not any(image_indices) else image_indices,
+            scale=scale,
+        )
+
+    @classmethod
     def from_json(cls, json_str: str) -> TiltSeries:
         data = json.loads(json_str)
         image_path = data["image_path"]
+        if isinstance(image_path, list):
+            image_path = tuple(image_path)
         image_indices = (
             np.array(data["image_indices"], dtype=np.int64)
             if data["image_indices"] is not None
@@ -357,7 +493,12 @@ class TiltSeries:
         )
 
     def dump_json(self) -> str:
-        image_path = str(self.image_path) if self.image_path is not None else None
+        if isinstance(self.image_path, tuple):
+            image_path: str | list[str] | None = [str(p) for p in self.image_path]
+        elif self.image_path is not None:
+            image_path = str(self.image_path)
+        else:
+            image_path = None
         image_indices = (
             self.image_indices.tolist() if self.image_indices is not None else None
         )
@@ -438,6 +579,91 @@ class LocalShifts2D:
         if self.base is not None:
             shifts = shifts + self.base(projected)
         return shifts
+
+
+_RELION_ALIGNMENT_COLUMNS = (
+    "rlnTomoXTilt",
+    "rlnTomoYTilt",
+    "rlnTomoZRot",
+    "rlnTomoXShiftAngst",
+    "rlnTomoYShiftAngst",
+)
+
+
+def _normalize_image_path(
+    image_path: str | Path | Sequence[str | Path], ntilts: int
+) -> Path | tuple[Path, ...]:
+    if isinstance(image_path, (str, Path)):
+        return Path(image_path)
+    paths = tuple(Path(p) for p in image_path)
+    if len(paths) != ntilts:
+        raise ValueError(
+            f"'image_path' must be a path or {ntilts} paths of each tilt, got "
+            f"{len(paths)} paths."
+        )
+    return paths
+
+
+def _same_relion_name(value: Any, name: str) -> bool:
+    """Whether the rlnTomoName value (possibly parsed as a number) is the name."""
+    if str(value) == name:
+        return True
+    try:
+        return float(value) == float(name)
+    except (TypeError, ValueError):
+        return False
+
+
+def _select_relion_tilt_series(df, tomo_name: str | None, path: Path) -> dict:
+    """Select the row of the tilt series from the global data block."""
+    names = df["rlnTomoName"].to_list()
+    if tomo_name is None:
+        if len(names) != 1:
+            raise ValueError(
+                f"{path} has {len(names)} tilt series. Specify one by 'tomo_name' from "
+                f"{[str(n) for n in names]}."
+            )
+        return df.row(0, named=True)
+    for i, name in enumerate(names):
+        if _same_relion_name(name, tomo_name):
+            return df.row(i, named=True)
+    raise ValueError(
+        f"Tilt series {tomo_name!r} is not found in {path}. Tilt series are "
+        f"{[str(n) for n in names]}."
+    )
+
+
+def _select_relion_tilt_block(star, tomo_name: str | None, path: Path):
+    """Select the data block of a tilt series in its STAR file."""
+    if tomo_name is not None:
+        for name, block in star.items():
+            if _same_relion_name(name, tomo_name):
+                return block
+    for block in star.values():
+        if "rlnMicrographName" in block.columns:
+            return block
+    raise ValueError(f"No tilt images (rlnMicrographName) are found in {path}.")
+
+
+def _relion_project_dir(
+    star_path: Path, relative: Path, project_dir: str | Path | None
+) -> Path:
+    """The RELION project directory, to which the paths in the STAR files are relative.
+
+    If not given, the nearest parent directory of the STAR file where ``relative``
+    exists is used.
+    """
+    if project_dir is not None:
+        return Path(project_dir)
+    if relative.is_absolute():
+        return star_path.parent
+    for parent in star_path.resolve().parents:
+        if (parent / relative).exists():
+            return parent
+    raise ValueError(
+        f"{relative} referred in {star_path} is not found in the parent directories. "
+        "Give 'project_dir' explicitly."
+    )
 
 
 def _readonly(arr: NDArray) -> NDArray:
