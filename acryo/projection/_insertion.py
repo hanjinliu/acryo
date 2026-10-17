@@ -133,7 +133,8 @@ class CentralSliceInsertion:
         # (T * nkeep, batch) matrix of the values to be inserted
         values = values[:, :, self._keep].reshape(values.shape[0], -1).T
         values = values.astype(np.complex64, copy=False)
-        dft = self._direct @ values + self._conjugate @ values.conj()
+        dft = self._direct @ values
+        dft += self._conjugate @ values.conj()
         dft *= self._normalizer[:, np.newaxis]
         return np.moveaxis(dft, -1, 0).reshape(batch_shape + self._dft_shape)
 
@@ -163,13 +164,17 @@ class CentralSliceInsertion:
         if output_shape is None:
             output_shape = vshape
         output_shape = _normalize_shape(output_shape, 3)
-        volume = sfft.irfftn(self.insert(slices), s=vshape, axes=(-3, -2, -1))
-        # move the origin to the center and crop
+        # indices of the output, whose origin is moved to the center
         indices = [
             (np.arange(size) - size // 2) % length
             for size, length in zip(output_shape, vshape)
         ]
-        volume = volume[(...,) + np.ix_(*indices)]
+        # The inverse transform is computed axis by axis, and each axis is cropped
+        # right after the transform, so the later transforms are smaller.
+        volume = sfft.ifft(self.insert(slices), axis=-3, overwrite_x=True)
+        volume = sfft.ifft(volume[..., indices[0], :, :], axis=-2, overwrite_x=True)
+        volume = sfft.irfft(volume[..., indices[1], :], n=vshape[2], overwrite_x=True)
+        volume = volume[..., indices[2]]
         correction = _gridding_correction(vshape, output_shape)
         return (volume / correction).astype(np.float32)
 

@@ -1,36 +1,56 @@
 # pyright: reportPrivateImportUsage=false
 from __future__ import annotations
 
-import copy
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from contextlib import contextmanager
 import math
+import os
+from pathlib import Path
 import threading
-from typing import TYPE_CHECKING, Any, Iterable, Iterator, Sequence, SupportsIndex
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Iterable,
+    Iterator,
+    Generator,
+    Sequence,
+    SupportsIndex,
+)
 import uuid
 import warnings
 
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import DTypeLike, NDArray
 from dask import array as da
 from dask.highlevelgraph import HighLevelGraph
 
 from acryo._types import nm, pixel
 from acryo._dask import DaskArrayList
 from acryo.backend import Backend
-from acryo.loader import _misc
 from acryo.loader._base import LoaderBase, Unset, _ShapeType, TemplateInputType
 from acryo.molecules import Molecules
-from acryo.projection import DirectFourierReconstructor
+from acryo.projection import (
+    DirectFourierReconstructor,
+    LocalShifts2D,
+    TiltImagePreprocessor,
+    TiltSeries,
+    fourier_bin,
+    reconstruct_tomogram,
+)
+from acryo.projection._io import MrcImageStack
 from acryo.tilt import TiltSeriesModel, single_axis
 
 if TYPE_CHECKING:
-    import torch
     from typing_extensions import Self
-    from torch_tilt_series import TiltSeries
+    from torch_tilt_series import TiltSeries as TorchTiltSeries
 
 _ANGSTROM_PER_NM = 10.0
+# Memory budget (bytes) of the tilt images being preprocessed in parallel. Each
+# thread needs about five times the size of the (padded) tilt image.
+_LOAD_MEMORY_BUDGET = 2e9
 
 
-class PseudoSubtomogramLoader(LoaderBase):
+class BackProjectionLoader(LoaderBase):
     """A loader that reconstructs subtomograms directly from a tilt series.
 
     No tomogram is needed. Every time subtomograms are requested, they are
@@ -39,20 +59,21 @@ class PseudoSubtomogramLoader(LoaderBase):
     transform), as in ``torch-reconstruct-tomogram``. A cube aligned to the tomogram
     axes is reconstructed around each molecule, and the subtomogram is cropped from
     the cube in the same way as ``SubtomogramLoader``. Subtomograms are reconstructed
-    lazily in dask tasks. CTF is not corrected. The tilt series is given as a
-    ``TiltSeries`` of
-    `torch-tilt-series <https://github.com/teamtomo/torch-tilt-series>`_ (install by
-    ``pip install acryo[torch]``).
+    lazily in dask tasks. CTF can be corrected in preprocessing (see ``preprocess``).
+    Reading the tilt images requires ``mrcfile``. :meth:`refine_tilt_series` requires
+    ``torch-reconstruct-tomogram`` (install by ``pip install acryo[torch]``).
 
     Parameters
     ----------
-    tilt_series : torch_tilt_series.TiltSeries
-        Tilt series with the alignment parameters. ``image_path`` and
-        ``pixel_spacing`` must be set. The tilt images are loaded only once when they
-        are needed for the first time. They are read from the file tilt by tilt,
-        preprocessed at the original pixel spacing, binned by the largest integer
-        factor whose pixel spacing does not exceed ``scale``, and cached in memory.
-        The raw tilt series is never in memory all at once.
+    tilt_series : acryo.projection.TiltSeries
+        Tilt series with the alignment parameters. ``image_path`` and ``scale`` must
+        be set. ``torch_tilt_series.TiltSeries`` is also accepted and converted. The
+        tilt images are read from the file tilt by tilt, preprocessed at the original
+        pixel size and binned by the largest integer factor whose pixel size does not
+        exceed ``scale``, so the raw tilt series is never in memory all at once. A few
+        tilt images are preprocessed in parallel, as many as fit in about 2 GB of
+        memory. The preprocessed images are released after each computation. Use
+        :meth:`cache_tilt_images` to reuse them in repeated computations.
     molecules : Molecules
         Molecules object that represents positions and orientations of
         subtomograms.
@@ -72,17 +93,18 @@ class PseudoSubtomogramLoader(LoaderBase):
         coordinate system as the molecules. The tomogram center is the origin of the
         tomogram space of the tilt series. For example, if the molecules were picked
         in a tomogram of shape ``(D, H, W)`` with pixel size ``s`` nm reconstructed
-        by ``torch_reconstruct_tomogram.reconstruct_tomogram``, this is
+        by :meth:`reconstruct_tomogram` (or ``torch-reconstruct-tomogram``), this is
         ``(D // 2 * s, H // 2 * s, W // 2 * s)``.
     tilt_model : TiltSeriesModel, optional
         Tilt series model used for alignment. By default, a single-axis model around
         the y-axis is created from the tilt angles of the tilt series (and
         ``tomo_hand``).
-    preprocess : bool, default is True
-        If true, tilt images are preprocessed by
-        ``torch_tilt_series.preprocess_tilt_series_images`` before reconstruction.
-    preprocess_kwargs : dict, optional
-        Keyword arguments passed to ``preprocess_tilt_series_images``.
+    preprocess : bool or TiltImagePreprocessor, default is True
+        Preprocessing of the tilt images. If true, the tilt images are preprocessed by
+        the default ``TiltImagePreprocessor()``. Give a ``TiltImagePreprocessor`` to
+        change the parameters or to add filters such as CTF correction (see
+        ``TiltImagePreprocessor.with_ctf``). If false, the tilt images are not
+        preprocessed.
     batch_size : int, optional
         Number of subtomograms reconstructed in one dask task. Default is 1.
     tomo_hand : int, default is 1
@@ -100,24 +122,36 @@ class PseudoSubtomogramLoader(LoaderBase):
 
     def __init__(
         self,
-        tilt_series: TiltSeries,
-        molecules: Molecules,
+        tilt_series: TiltSeries | TorchTiltSeries,
+        molecules: Molecules | None = None,
         order: int = 3,
         scale: nm = 1.0,
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
         corner_safe: bool = False,
         tomogram_center: tuple[nm, nm, nm] = (0.0, 0.0, 0.0),
         tilt_model: TiltSeriesModel | None = None,
-        preprocess: bool = True,
-        preprocess_kwargs: dict[str, Any] | None = None,
+        preprocess: bool | TiltImagePreprocessor = True,
         batch_size: int | None = None,
         tomo_hand: int = 1,
         padding: float = 2.0,
     ) -> None:
+        tilt_series = _as_tilt_series(tilt_series)
         if tilt_series.image_path is None:
             raise ValueError("'image_path' of the tilt series is not set.")
-        tilt_series.pixel_spacing  # raises if not set
-        if not isinstance(molecules, Molecules):
+        if tilt_series.scale is None:
+            raise ValueError("'scale' of the tilt series is not set.")
+        if isinstance(preprocess, TiltImagePreprocessor):
+            preprocessor = preprocess
+        elif isinstance(preprocess, bool):
+            preprocessor = TiltImagePreprocessor() if preprocess else None
+        else:
+            raise TypeError(
+                "'preprocess' must be a bool or a TiltImagePreprocessor, got "
+                f"{type(preprocess)}."
+            )
+        if molecules is None:
+            molecules = Molecules.empty()
+        elif not isinstance(molecules, Molecules):
             raise TypeError(
                 "The second argument 'molecules' must be a Molecules object, got"
                 f"{type(molecules)}."
@@ -139,7 +173,7 @@ class PseudoSubtomogramLoader(LoaderBase):
             tilt_model = single_axis(
                 (float(angles.min()), float(angles.max())), axis="y"
             )
-        self._images = _TiltSeriesImages(tilt_series, preprocess, preprocess_kwargs)
+        self._images = _TiltSeriesImages(tilt_series, preprocessor)
         self._molecules = molecules
         self._corner_safe = corner_safe
         self._tomogram_center = _center
@@ -150,10 +184,9 @@ class PseudoSubtomogramLoader(LoaderBase):
         super().__init__(order=order, scale=scale, output_shape=output_shape)
 
     def __repr__(self) -> str:
-        ntilts = self.tilt_series.tilt_angles.shape[0]
         mole_repr = repr(self.molecules)
         return (
-            f"{self.__class__.__name__}(tilt_series=<{ntilts} tilts>, "
+            f"{self.__class__.__name__}(tilt_series=<{self.tilt_series.ntilts} tilts>, "
             f"molecules={mole_repr}, output_shape={self.output_shape}, "
             f"order={self.order}, scale={self.scale:.4f})"
         )
@@ -162,26 +195,23 @@ class PseudoSubtomogramLoader(LoaderBase):
     def from_etomo_directory(
         cls,
         path,
-        molecules: Molecules,
+        scale: nm,
+        molecules: Molecules | None = None,
         order: int = 3,
-        scale: nm = 1.0,
         corner_safe: bool = False,
-        device: torch.device | str = "cpu",
         tomogram_center: tuple[nm, nm, nm] = (0.0, 0.0, 0.0),
-        preprocess: bool = True,
-        preprocess_kwargs: dict[str, Any] | None = None,
+        preprocess: bool | TiltImagePreprocessor = True,
         batch_size: int | None = None,
         tomo_hand: int = 1,
         padding: float = 2.0,
-    ) -> PseudoSubtomogramLoader:
-        from torch_tilt_series.io import from_etomo_directory
+    ) -> BackProjectionLoader:
+        """Create a loader from an IMOD etomo directory.
 
-        ts = from_etomo_directory(
-            path,
-            pixel_spacing=scale * _ANGSTROM_PER_NM,
-            device=device,
-        )
-        return PseudoSubtomogramLoader(
+        ``etomofiles`` is required. ``image_scale`` is the pixel size of the raw tilt
+        images in nm. By default, ``scale`` is the same as ``image_scale``.
+        """
+        ts = TiltSeries.from_etomo_directory(path, scale=scale)
+        return BackProjectionLoader(
             ts,
             molecules=molecules,
             order=order,
@@ -189,7 +219,33 @@ class PseudoSubtomogramLoader(LoaderBase):
             corner_safe=corner_safe,
             tomogram_center=tomogram_center,
             preprocess=preprocess,
-            preprocess_kwargs=preprocess_kwargs,
+            batch_size=batch_size,
+            tomo_hand=tomo_hand,
+            padding=padding,
+        )
+
+    @classmethod
+    def from_tilt_series_json(
+        cls,
+        path,
+        molecules: Molecules | None = None,
+        order: int = 3,
+        corner_safe: bool = False,
+        tomogram_center: tuple[nm, nm, nm] = (0.0, 0.0, 0.0),
+        preprocess: bool | TiltImagePreprocessor = True,
+        batch_size: int | None = None,
+        tomo_hand: int = 1,
+        padding: float = 2.0,
+    ) -> BackProjectionLoader:
+        """Create a loader from a tilt series JSON file."""
+        ts = TiltSeries.from_json(Path(path).read_text())
+        return BackProjectionLoader(
+            ts,
+            molecules=molecules,
+            order=order,
+            corner_safe=corner_safe,
+            tomogram_center=tomogram_center,
+            preprocess=preprocess,
             batch_size=batch_size,
             tomo_hand=tomo_hand,
             padding=padding,
@@ -199,6 +255,11 @@ class PseudoSubtomogramLoader(LoaderBase):
     def tilt_series(self) -> TiltSeries:
         """Return the tilt series."""
         return self._images.tilt_series
+
+    @property
+    def preprocessor(self) -> TiltImagePreprocessor | None:
+        """Return the preprocessor of the tilt images."""
+        return self._images.preprocessor
 
     @property
     def molecules(self) -> Molecules:
@@ -234,6 +295,31 @@ class PseudoSubtomogramLoader(LoaderBase):
     def padding(self) -> float:
         """Return the padding factor of the reconstruction."""
         return self._padding
+
+    @contextmanager
+    def cache_tilt_images(self) -> Generator[Self, None, None]:
+        """Context manager to cache the preprocessed tilt images in memory.
+
+        By default, the tilt images are read, preprocessed and binned every time
+        subtomograms are requested, and released after that. In this context, the
+        preprocessed tilt images (of each binning factor) and the reconstructors are
+        cached, and reused by this loader and the loaders created from it, such as the
+        results of :meth:`replace`, :meth:`binning`, :meth:`align` and
+        :meth:`refine_tilt_series`. The cache is released when the outermost context
+        exits. Lazy arrays created in the context can still be computed after that.
+
+        Examples
+        --------
+        >>> with loader.cache_tilt_images():
+        ...     aligned = loader.align(template, max_shifts=1.0)
+        ...     avg = aligned.average()
+        """
+        cache = self._images.cache
+        cache.enter()
+        try:
+            yield self
+        finally:
+            cache.exit()
 
     def replace(
         self,
@@ -370,27 +456,18 @@ class PseudoSubtomogramLoader(LoaderBase):
         self, output_shape: tuple[pixel, pixel, pixel]
     ) -> _ReconstructionPlan:
         """Plan the reconstruction of the subtomograms. The tilt images are loaded."""
-        import torch
-
-        binsize = self._images.binsize_for(self.scale * _ANGSTROM_PER_NM)
-        tilt_series, images = self._images.get(binsize)
+        binsize = self._images.binsize_for(self.scale)
         sidelength = _cube_sidelength(output_shape, self.order, self.corner_safe)
         reconstructor = self._images.reconstructor(
-            binsize, self.scale * _ANGSTROM_PER_NM, sidelength, self.padding
+            binsize, self.scale, sidelength, self.padding
         )
+        tilt_series = self._images.binned_tilt_series(binsize)
         pos, rotations = self._to_tilt_series_frame(self.molecules)
-        points = (pos - self.tomogram_center) * _ANGSTROM_PER_NM
         # the projection of the molecules, including the local shifts
-        with torch.no_grad():
-            projected = tilt_series.project_points(
-                torch.as_tensor(points, dtype=torch.float32)
-            )
-        # (Å from the detector center) -> (pixels of the tilt images)
-        image_center = np.array(images.shape[1:]) // 2
-        positions = (
-            projected.cpu().numpy().astype(np.float64) / tilt_series.pixel_spacing
-            + image_center
-        )
+        projected = tilt_series.project_points(pos - self.tomogram_center)
+        # (nm from the detector center) -> (pixels of the tilt images)
+        image_center = np.array(reconstructor.images.shape[1:]) // 2
+        positions = projected / tilt_series.scale + image_center
         # The molecules are at the center of the cubes (sidelength // 2). Crop the
         # rotated subtomograms from the cubes, similar to `SubtomogramLoader`.
         nmole = rotations.shape[0]
@@ -427,85 +504,88 @@ class PseudoSubtomogramLoader(LoaderBase):
 
     def _tilt_images(self) -> tuple[TiltSeries, NDArray[np.float32]]:
         """The tilt series and its images binned to the pixel size of this loader."""
-        binsize = self._images.binsize_for(self.scale * _ANGSTROM_PER_NM)
+        binsize = self._images.binsize_for(self.scale)
         return self._images.get(binsize)
 
     def reconstruct_tomogram(
         self,
-        shape: pixel | tuple[pixel, pixel, pixel],
+        shape: tuple[pixel, pixel, pixel],
         *,
         patch_size: pixel = 64,
         blend_margin: pixel | None = None,
-        batch_size: int | None = 4,
-    ) -> NDArray[np.float32]:
+        save_path: str | Path | None = None,
+        overwrite: bool = False,
+        num_workers: int | None = None,
+        dtype: DTypeLike = np.float16,
+    ) -> NDArray[np.floating]:
         """Reconstruct the tomogram from the tilt series.
 
-        The tomogram is reconstructed at the pixel size of ``scale`` using
-        ``torch_reconstruct_tomogram.reconstruct_tomogram``. The tomogram is centered
-        at ``tomogram_center``, that is, the voxel ``(i, j, k)`` is at
+        The tomogram is reconstructed at the pixel size of ``scale`` from the
+        preprocessed tilt images, by direct Fourier inversion of patches (see
+        :func:`acryo.projection.reconstruct_tomogram`). The tomogram is centered at
+        ``tomogram_center``, that is, the voxel ``(i, j, k)`` is at
         ``tomogram_center + ((i, j, k) - shape // 2) * scale`` nm in the coordinate
         system of the molecules. If ``tomogram_center`` is ``shape // 2 * scale``,
         ``SubtomogramLoader(tomogram, loader.molecules, scale=loader.scale)`` loads
         the same subtomograms as this loader. If ``tomo_hand`` is -1, the tomogram is
-        mirrored along the z axis around the center.
+        mirrored along the z axis around the center. The contrast of the tilt images
+        is kept (not inverted).
 
         Parameters
         ----------
         shape : int or tuple of int
             Shape of the tomogram in pixel.
         patch_size : int, default is 64
-            Distance between the centers of the reconstructed patches in pixel. Must
-            be even.
+            Distance between the centers of the reconstructed patches in pixel.
         blend_margin : int, optional
             Margin of each patch in pixel, which is blended with the neighboring
-            patches. Default is ``patch_size // 4``. This value may be slightly
-            changed to avoid odd-sized crops of the tilt images, which shift the
-            patches by one pixel in ``torch-reconstruct-tomogram``.
-        batch_size : int, default is 4
-            Number of patches reconstructed at once. Larger value is faster but uses
-            more memory. If None, all the patches are reconstructed at once.
+            patches. Default is ``patch_size // 4``.
+        save_path : str or Path, optional
+            If given, the tomogram is written to this MRC file, which is allocated
+            beforehand, and the tomogram is never in memory all at once.
+        overwrite : bool, default is False
+            Whether to overwrite the existing file at ``save_path``.
+        num_workers : int, optional
+            Number of threads to reconstruct the patches. Default is the number of
+            the CPUs. Each thread needs memory for a padded patch, so a smaller value
+            uses less memory.
+        dtype : float16 or float32, default is float16
+            Data type of the tomogram. If ``save_path`` is given, the MRC file is of
+            mode 12 (float16) or mode 2 (float32).
 
         Returns
         -------
         np.ndarray
-            The reconstructed tomogram.
+            The reconstructed tomogram. If ``save_path`` is given, a read-only memory
+            map of the file.
         """
-        from torch_reconstruct_tomogram import reconstruct_tomogram
-
-        shape = _misc.normalize_shape(shape, ndim=3)
-        if patch_size <= 0 or patch_size % 2 == 1:
-            raise ValueError(
-                f"'patch_size' must be positive and even, got {patch_size}."
+        binsize = self._images.binsize_for(self.scale)
+        tilt_series, images = self._images.get(binsize)
+        if self.tomo_hand == -1:
+            # The tomogram of the molecules is mirrored along the z axis.
+            tilt_series = tilt_series.replace(
+                levelled2tomo=np.diag([-1.0, 1.0, 1.0, 1.0]) @ tilt_series.levelled2tomo
             )
-        if blend_margin is None:
-            blend_margin = patch_size // 4
-        if blend_margin < 0:
-            raise ValueError(f"'blend_margin' must be >= 0, got {blend_margin}.")
-        output_spacing = self.scale * _ANGSTROM_PER_NM
-        blend_margin = _even_crop_margin(
-            patch_size,
-            blend_margin,
-            output_spacing=output_spacing,
-            input_spacing=self.tilt_series.pixel_spacing,
-        )
-        depth = shape[0]
-        if self.tomo_hand == -1:
-            # The center (depth // 2) must be the center of the mirrored tomogram, so
-            # the depth is made odd before mirroring.
-            shape = (2 * (depth // 2) + 1,) + shape[1:]
-        tomogram = reconstruct_tomogram(
-            self.tilt_series,
-            shape,
-            sidelength=patch_size,
-            batch_size=batch_size,
-            output_pixel_spacing=output_spacing,
-            preprocess=self._images.preprocess,
+        nz, ny, nx = shape
+        if nz < 0:
+            raise ValueError(f"'nz' must be non-negative, got {nz}.")
+        if ny < 0:
+            ny = images.shape[1]
+        if nx < 0:
+            nx = images.shape[2]
+        return reconstruct_tomogram(
+            tilt_series,
+            images,
+            (nz, ny, nx),
+            scale=self.scale,
+            patch_size=patch_size,
             blend_margin=blend_margin,
-            **self._images.preprocess_kwargs,
+            padding=self.padding,
+            save_path=save_path,
+            overwrite=overwrite,
+            num_workers=num_workers,
+            dtype=dtype,
         )
-        if self.tomo_hand == -1:
-            tomogram = tomogram.flip(0)[:depth]
-        return tomogram.cpu().numpy()
 
     def refine_tilt_series(
         self,
@@ -548,7 +628,7 @@ class PseudoSubtomogramLoader(LoaderBase):
 
         Returns
         -------
-        PseudoSubtomogramLoader
+        BackProjectionLoader
             A new loader with the refined tilt series. ``sample_translations`` of the
             tilt series are updated, and the local shifts are set to
             ``local_shifts_2d`` if ``grid_shape`` is larger than ``(1, 1)``.
@@ -571,9 +651,9 @@ class PseudoSubtomogramLoader(LoaderBase):
             # The cached images are read-only, but they are not modified, so they are
             # not copied.
             warnings.filterwarnings("ignore", message=".*not writable.*")
-            images_tensor = torch.as_tensor(images, device=tilt_series.device)
+            images_tensor = torch.as_tensor(images)
         refined = refine_tilt_series(
-            tilt_series,
+            tilt_series.to_torch(),
             images_tensor,
             particle_sets,
             pixel_spacing=self.scale * _ANGSTROM_PER_NM,
@@ -583,10 +663,18 @@ class PseudoSubtomogramLoader(LoaderBase):
             niter=niter,
             batch_size=batch_size,
         )
-        # the geometry is in Å, so it does not depend on the binning of the images
-        tilt_series = copy.copy(self.tilt_series)
-        tilt_series.sample_translations = refined.sample_translations
-        tilt_series.local_shifts_2d = refined.local_shifts_2d
+        # the geometry is in nm, so it does not depend on the binning of the images
+        translations = refined.sample_translations.cpu().numpy() / _ANGSTROM_PER_NM
+        local_shifts_2d = self.tilt_series.local_shifts_2d
+        if tuple(grid_shape) != (1, 1):
+            local_shifts_2d = LocalShifts2D(
+                refined.local_shifts_2d.control_points.cpu().numpy() / _ANGSTROM_PER_NM,
+                refined.local_shifts_2d.half_extent.cpu().numpy() / _ANGSTROM_PER_NM,
+                base=local_shifts_2d,
+            )
+        tilt_series = self.tilt_series.replace(
+            sample_translations=translations, local_shifts_2d=local_shifts_2d
+        )
         out = self.replace()
         out._images = self._images.with_tilt_series(tilt_series)
         return out
@@ -596,250 +684,192 @@ class PseudoSubtomogramLoader(LoaderBase):
         return {"tilt": self.tilt_model}
 
 
-class _TiltSeriesImages:
-    """Tilt series and its images that are loaded only once on demand.
+class _ImageCache:
+    """Cache of the preprocessed tilt images, which is enabled only in the context.
 
-    The images are read from the file tilt by tilt, preprocessed at the original pixel
-    spacing and binned by an integer factor. The images of each binning factor are
-    cached in memory. The reconstructors of the latest geometries of cubes are also
-    cached.
+    The cache is shared by the loaders created from the same loader. The images and
+    the reconstructors are released when the outermost context exits.
     """
 
     _MAX_RECONSTRUCTORS = 2
 
+    def __init__(self):
+        self.lock = threading.RLock()
+        self._depth = 0
+        self.images: dict[int, NDArray[np.float32]] = {}
+        self.reconstructors: dict[tuple[Any, ...], DirectFourierReconstructor] = {}
+
+    @property
+    def enabled(self) -> bool:
+        """Whether the cache is enabled."""
+        return self._depth > 0
+
+    def enter(self) -> None:
+        with self.lock:
+            self._depth += 1
+
+    def exit(self) -> None:
+        with self.lock:
+            self._depth -= 1
+            if self._depth == 0:
+                self.images.clear()
+                self.reconstructors.clear()
+
+    def add_reconstructor(
+        self, key: tuple[Any, ...], reconstructor: DirectFourierReconstructor
+    ) -> None:
+        self.reconstructors[key] = reconstructor
+        while len(self.reconstructors) > self._MAX_RECONSTRUCTORS:
+            self.reconstructors.pop(next(iter(self.reconstructors)))
+
+
+class _TiltSeriesImages:
+    """Tilt series and its preprocessed images.
+
+    The images are read from the file tilt by tilt, preprocessed at the original pixel
+    size and binned by an integer factor. They are cached only while the cache is
+    enabled.
+    """
+
     def __init__(
         self,
         tilt_series: TiltSeries,
-        preprocess: bool,
-        preprocess_kwargs: dict[str, Any] | None,
+        preprocessor: TiltImagePreprocessor | None,
+        cache: _ImageCache | None = None,
     ):
         self.tilt_series = tilt_series
-        self.preprocess = preprocess
-        self.preprocess_kwargs = dict(preprocess_kwargs or {})
-        self._images: dict[int, NDArray[np.float32]] = {}
-        self._lock = threading.Lock()
-        # reconstructors depend on the geometry, so they are not shared with the
-        # instances of other tilt series
-        self._reconstructors: dict[
-            tuple[int, float, int, float], DirectFourierReconstructor
-        ] = {}
+        self.preprocessor = preprocessor
+        self.cache = cache if cache is not None else _ImageCache()
 
-    def binsize_for(self, pixel_spacing: float) -> int:
-        """Largest binning factor whose pixel spacing does not exceed the given one."""
-        ratio = pixel_spacing / self.tilt_series.pixel_spacing
-        return max(math.floor(ratio + 1e-6), 1)
+    @property
+    def scale(self) -> nm:
+        """Pixel size of the raw tilt images in nm."""
+        assert self.tilt_series.scale is not None
+        return self.tilt_series.scale
+
+    def binsize_for(self, scale: nm) -> int:
+        """Largest binning factor whose pixel size does not exceed the given one."""
+        return max(math.floor(scale / self.scale + 1e-6), 1)
+
+    def binned_tilt_series(self, binsize: int) -> TiltSeries:
+        """The tilt series whose scale is the binned pixel size."""
+        if binsize == 1:
+            return self.tilt_series
+        return self.tilt_series.replace(scale=self.scale * binsize)
 
     def get(self, binsize: int = 1) -> tuple[TiltSeries, NDArray[np.float32]]:
         """Get the tilt series and the (preprocessed) tilt images binned by binsize.
 
-        The returned tilt series is a shallow copy with the binned pixel spacing.
+        The scale of the returned tilt series is the binned pixel size.
         """
-        with self._lock:
-            if binsize not in self._images:
-                self._images[binsize] = self._load(binsize)
-            images = self._images[binsize]
-        if binsize == 1:
-            return self.tilt_series, images
-        tilt_series = copy.copy(self.tilt_series)
-        tilt_series.pixel_spacing = self.tilt_series.pixel_spacing * binsize
-        return tilt_series, images
+        cache = self.cache
+        with cache.lock:
+            images = cache.images.get(binsize)
+            if images is None:
+                images = self._load(binsize)
+                if cache.enabled:
+                    cache.images[binsize] = images
+        return self.binned_tilt_series(binsize), images
 
     def reconstructor(
-        self, binsize: int, output_spacing: float, sidelength: int, padding: float
+        self, binsize: int, output_scale: nm, sidelength: int, padding: float
     ) -> DirectFourierReconstructor:
         """Get the reconstructor of cubes from the tilt images binned by binsize."""
-        key = (binsize, round(output_spacing, 6), sidelength, padding)
-        if (out := self._reconstructors.get(key)) is not None:
-            return out
-        tilt_series, images = self.get(binsize)
-        # from the detector to the tomogram space
-        matrices = tilt_series.projection_matrices @ tilt_series.tomo2sample
-        rotations = np.linalg.pinv(
-            matrices[:, :3, :3].detach().cpu().numpy().astype(np.float64)
+        rotations = self.tilt_series.detector2tomo
+        key = (
+            binsize,
+            round(output_scale, 8),
+            sidelength,
+            padding,
+            rotations.tobytes(),
         )
-        out = DirectFourierReconstructor(
-            images,
-            rotations,
-            input_spacing=tilt_series.pixel_spacing,
-            output_spacing=output_spacing,
-            sidelength=sidelength,
-            padding=padding,
-        )
-        with self._lock:
-            self._reconstructors[key] = out
-            while len(self._reconstructors) > self._MAX_RECONSTRUCTORS:
-                self._reconstructors.pop(next(iter(self._reconstructors)))
+        cache = self.cache
+        with cache.lock:
+            if (out := cache.reconstructors.get(key)) is not None:
+                return out
+            _, images = self.get(binsize)
+            out = DirectFourierReconstructor(
+                images,
+                rotations,
+                input_spacing=self.scale * binsize,
+                output_spacing=output_scale,
+                sidelength=sidelength,
+                padding=padding,
+            )
+            if cache.enabled:
+                cache.add_reconstructor(key, out)
         return out
 
     def with_tilt_series(self, tilt_series: TiltSeries) -> _TiltSeriesImages:
         """Return a new instance of another geometry for the same tilt images."""
-        out = _TiltSeriesImages(tilt_series, self.preprocess, self.preprocess_kwargs)
-        out._images = self._images
-        out._lock = self._lock
-        return out
+        return _TiltSeriesImages(tilt_series, self.preprocessor, cache=self.cache)
 
     def _load(self, binsize: int) -> NDArray[np.float32]:
-        import torch
-
         tilt_series = self.tilt_series
-        device = tilt_series.device
-        stack = _MrcImageStack(tilt_series.image_path)
+        assert tilt_series.image_path is not None
+        stack = MrcImageStack(tilt_series.image_path)
         if tilt_series.image_indices is None:
             indices = list(range(stack.shape[0]))
         else:
             indices = tilt_series.image_indices.tolist()
+        if len(indices) != tilt_series.ntilts:
+            raise ValueError(
+                f"The tilt series has {tilt_series.ntilts} tilts, but {len(indices)} "
+                f"images are found in {tilt_series.image_path}. Set 'image_indices' of "
+                "the tilt series."
+            )
         out: NDArray[np.float32] | None = None
-        preprocessor: _TiltPreprocessor | None = None
-        for t, raw in enumerate(stack.iter_images(indices)):
-            image = torch.as_tensor(raw, device=device)
-            if self.preprocess:
-                if preprocessor is None:
-                    preprocessor = _TiltPreprocessor(
-                        tuple(image.shape), device, **self.preprocess_kwargs
-                    )
-                image = preprocessor(image)
-            image = _fourier_bin(image, binsize).cpu().numpy()
-            if out is None:
-                out = np.empty((len(indices),) + image.shape, dtype=np.float32)
-            out[t] = image
+
+        def _process(t: int, image: NDArray[np.float32]):
+            if self.preprocessor is not None:
+                image = self.preprocessor(
+                    image, index=t, scale=self.scale, binsize=binsize
+                )
+            else:
+                image = fourier_bin(image, binsize)
+            return t, image
+
+        def _store(futures: Iterable[Future]):
+            nonlocal out
+            for future in futures:
+                t, image = future.result()
+                if out is None:
+                    out = np.empty((len(indices),) + image.shape, dtype=np.float32)
+                out[t] = image
+
+        # The tilt images are read one by one, and processed in parallel. The number
+        # of the images being processed is limited to save memory.
+        num_workers = _num_load_workers(stack.shape[1:], self.preprocessor)
+        with ThreadPoolExecutor(num_workers) as executor:
+            pending: set[Future] = set()
+            for t, image in enumerate(stack.iter_images(indices)):
+                if len(pending) >= num_workers:
+                    done, pending = wait(pending, return_when=FIRST_COMPLETED)
+                    _store(done)
+                pending.add(executor.submit(_process, t, image))
+            _store(pending)
         assert out is not None
-        # the cache is shared by the loaders
+        # the images may be cached and shared by the loaders
         out.setflags(write=False)
         return out
 
 
-class _MrcImageStack:
-    """An MRC file of a stack of 2D images, such as a tilt series.
-
-    Images are read one by one from the file, so the whole stack is never read nor
-    memory-mapped.
-    """
-
-    def __init__(self, path):
-        import mrcfile
-        from mrcfile.utils import data_dtype_from_header
-
-        with mrcfile.open(path, mode="r", header_only=True, permissive=True) as mrc:
-            header = mrc.header
-            self.shape = (int(header.nz), int(header.ny), int(header.nx))
-            self.dtype = data_dtype_from_header(header)
-            # the data block follows the main header and the extended header
-            self.offset = header.nbytes + int(header.nsymbt)
-        self.path = path
-
-    def iter_images(self, indices: Iterable[int]) -> Iterator[NDArray[np.float32]]:
-        """Iterate over the images of given indices as float32 arrays."""
-        nimages, ny, nx = self.shape
-        with open(self.path, "rb") as f:
-            for index in indices:
-                if not -nimages <= index < nimages:
-                    raise IndexError(
-                        f"Index {index} is out of range of {nimages} images in "
-                        f"{self.path}."
-                    )
-                f.seek(self.offset + (index % nimages) * ny * nx * self.dtype.itemsize)
-                image = np.fromfile(f, dtype=self.dtype, count=ny * nx)
-                if image.size != ny * nx:
-                    raise ValueError(f"The data block of {self.path} is truncated.")
-                yield image.reshape(ny, nx).astype(np.float32)
+def _num_load_workers(
+    image_shape: tuple[int, int], preprocessor: TiltImagePreprocessor | None
+) -> int:
+    """Number of threads to preprocess tilt images within the memory budget."""
+    pad = 0 if preprocessor is None else preprocessor.padding
+    image_bytes = (image_shape[0] + 2 * pad) * (image_shape[1] + 2 * pad) * 4
+    by_memory = int(_LOAD_MEMORY_BUDGET // (5 * image_bytes))
+    return max(min(by_memory, os.cpu_count() or 1), 1)
 
 
-class _TiltPreprocessor:
-    """Preprocess tilt images one by one.
-
-    This is the same as ``torch_tilt_series.preprocess_tilt_series_images``, but the
-    plane fitting and the filters are computed only once for all the tilt images.
-    """
-
-    def __init__(
-        self,
-        shape: tuple[int, int],
-        device,
-        low: float = 0.0,
-        high: float = 0.5,
-        falloff: float = 0.0,
-        bandpass_padding: int = 128,
-        subtract_background: bool = True,
-        normalize: bool = True,
-    ):
-        import torch
-        from torch_fourier_filter.bandpass import bandpass_filter
-        from torch_grid_utils.shapes_2d import rectangle
-
-        h, w = shape
-        self.shape = shape
-        self.subtract_background = subtract_background
-        self.normalize = normalize
-        if subtract_background:
-            y, x = torch.meshgrid(
-                torch.arange(h, device=device, dtype=torch.float32),
-                torch.arange(w, device=device, dtype=torch.float32),
-                indexing="ij",
-            )
-            ones = torch.ones(h * w, device=device, dtype=torch.float32)
-            self.design = torch.stack([y.reshape(-1), x.reshape(-1), ones], dim=-1)
-            self.pinv = torch.linalg.pinv(self.design)
-        self.pad = pad = max(0, min(bandpass_padding, h - 1, w - 1))
-        padded_shape = (h + 2 * pad, w + 2 * pad)
-        self.mask = rectangle(
-            dimensions=(h, w),
-            image_shape=padded_shape,
-            smoothing_radius=pad,
-            device=device,
-        )
-        self.filter = bandpass_filter(
-            low=low,
-            high=high,
-            falloff=falloff,
-            image_shape=padded_shape,
-            rfft=True,
-            fftshift=False,
-            device=device,
-        )
-
-    def __call__(self, image: torch.Tensor) -> torch.Tensor:
-        import torch
-        import torch.nn.functional as F
-        from torch_tilt_series.utils import normalize_on_central_crop
-
-        h, w = self.shape
-        if self.subtract_background:
-            coeffs = image.reshape(1, h * w) @ self.pinv.T
-            image = image - (coeffs @ self.design.T).reshape(h, w)
-        pad = self.pad
-        padded = F.pad(image[None], [pad, pad, pad, pad], mode="reflect")
-        padded = padded * self.mask
-        padded = torch.fft.irfft2(
-            torch.fft.rfft2(padded) * self.filter, s=padded.shape[-2:]
-        )
-        image = padded[0, pad : pad + h, pad : pad + w]
-        if self.normalize:
-            image = normalize_on_central_crop(image)
-        return image
-
-
-def _fourier_bin(image: torch.Tensor, binsize: int) -> torch.Tensor:
-    """Bin a 2D image by Fourier cropping, keeping the position of the image center.
-
-    The image center (``size // 2``) is the origin of the detector, so the image is
-    first cropped symmetrically around the center to a multiple of ``2 * binsize``.
-    The pixel spacing of the output is exactly ``binsize`` times larger.
-    """
-    from torch_fourier_rescale import fourier_rescale_2d
-
-    if binsize == 1:
-        return image
-    slices: list[slice] = []
-    target_shape: list[int] = []
-    for size in image.shape[-2:]:
-        cropped = size - size % (2 * binsize)
-        start = size // 2 - cropped // 2
-        slices.append(slice(start, start + cropped))
-        target_shape.append(cropped // binsize)
-    binned, _ = fourier_rescale_2d(
-        image[..., slices[0], slices[1]], target_shape=tuple(target_shape)
-    )
-    return binned
+def _as_tilt_series(tilt_series: TiltSeries | TorchTiltSeries) -> TiltSeries:
+    if isinstance(tilt_series, TiltSeries):
+        return tilt_series
+    if type(tilt_series).__module__.startswith("torch_tilt_series"):
+        return TiltSeries.from_torch(tilt_series)  # type: ignore
+    raise TypeError(f"Expected a TiltSeries, got {type(tilt_series)}.")
 
 
 def _cube_sidelength(
@@ -927,34 +957,3 @@ class _ReconstructionTask:
             for cube, matrix in zip(cubes, matrices)
         ]
         return xp.stack(subvolumes, axis=0)
-
-
-_PAD_FACTOR = 2.0
-
-
-def _even_crop_margin(
-    patch_size: int,
-    blend_margin: int,
-    output_spacing: float,
-    input_spacing: float,
-) -> int:
-    """Find the blend margin closest to the given one with even-sized crops.
-
-    In ``torch_reconstruct_tomogram.reconstruct_tomogram``, the tilt images are
-    cropped for each patch of size ``patch_size + 2 * blend_margin``. Odd-sized crops
-    are shifted by one pixel, so the blend margin is changed to avoid them.
-    """
-    for diff in range(max(blend_margin, 8) + 1):
-        for margin in (blend_margin + diff, blend_margin - diff):
-            if margin < 0:
-                continue
-            padded = int(_PAD_FACTOR * (patch_size + 2 * margin))
-            if round(padded * output_spacing / input_spacing) % 2 == 0:
-                return margin
-    warnings.warn(
-        "Could not avoid odd-sized crops of the tilt images. The tomogram may be "
-        "shifted by up to one pixel.",
-        UserWarning,
-        stacklevel=3,
-    )
-    return blend_margin

@@ -4,7 +4,7 @@ from acryo.loader import (
     SubtomogramLoader,
     BatchLoader,
     MockLoader,
-    PseudoSubtomogramLoader,
+    BackProjectionLoader,
 )
 from acryo.molecules import Molecules
 from acryo.simulator import TomogramSimulator
@@ -16,7 +16,7 @@ __all__ = [
     "SubtomogramLoader",
     "BatchLoader",
     "MockLoader",
-    "PseudoSubtomogramLoader",
+    "BackProjectionLoader",
     "TomogramSimulator",
     "imread",
 ]
