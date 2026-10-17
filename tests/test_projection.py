@@ -218,17 +218,3 @@ def test_volume_projector_background():
         VolumeProjector(np.zeros((8, 8, 8)), padding=0.5)
     with pytest.raises(ValueError):
         VolumeProjector(np.zeros((8, 8, 8)))(np.eye(4))
-
-
-def test_volume_projector_matches_torch():
-    torch = pytest.importorskip("torch")
-    fourier_slice = pytest.importorskip("torch_fourier_slice")
-    from scipy.spatial.transform import Rotation
-
-    vol = _blobs(16, BLOB_OFFSETS)
-    rotations = Rotation.random(20, random_state=1).as_matrix()
-    out = VolumeProjector(vol)(rotations)
-    ref = fourier_slice.project_3d_to_2d(
-        torch.as_tensor(vol), torch.as_tensor(rotations).float(), zyx_matrices=True
-    ).numpy()
-    assert np.abs(out - ref).max() < 3e-3 * np.abs(ref).max()

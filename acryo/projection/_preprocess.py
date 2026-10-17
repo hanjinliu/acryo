@@ -138,8 +138,9 @@ class TiltImagePreprocessor:
     4. The padding is cropped, and the image is normalized to zero mean and unit
        variance on the central crop (if ``normalize``).
 
-    Without ``filters``, this is the same as
-    ``torch_tilt_series.preprocess_tilt_series_images``.
+    The preprocessing is ported from ``preprocess_tilt_series_images`` of
+    `torch-tilt-series <https://github.com/teamtomo/torch-tilt-series>`_, with the
+    additional ``filters``.
 
     Parameters
     ----------
@@ -275,7 +276,8 @@ def fourier_bin(image: NDArray[np.floating], binsize: int) -> NDArray[np.float32
     The image center (``size // 2``) is the origin of the detector, so the image is
     first cropped symmetrically around the center to a multiple of ``2 * binsize``.
     The pixel size of the output is exactly ``binsize`` times larger, and the mean
-    is preserved. This is the same as ``torch_fourier_rescale.fourier_rescale_2d``.
+    is preserved. This is ported from ``fourier_rescale_2d`` of
+    `torch-fourier-rescale <https://github.com/teamtomo/torch-fourier-rescale>`_.
     """
     image = np.asarray(image, dtype=np.float32)
     if binsize == 1:
@@ -373,7 +375,7 @@ def _central_crop_stats(image: NDArray[np.float32]) -> tuple[np.float32, np.floa
 def _soft_rectangle(shape: tuple[int, int], pad: int) -> NDArray[np.float32]:
     """The mask of the image region in the padded image, with a cosine soft edge.
 
-    Same as ``torch_grid_utils.rectangle`` with ``smoothing_radius=pad``.
+    Ported from ``rectangle`` of torch-grid-utils with ``smoothing_radius=pad``.
     """
     distances = []
     for size in shape:
@@ -399,7 +401,7 @@ def _bandpass(
 ) -> NDArray[np.float32]:
     """Bandpass filter for the rfft of an image of the shape.
 
-    Same as ``torch_fourier_filter.bandpass.bandpass_filter``: 1 on ``(low, high]``
+    Ported from ``bandpass_filter`` of torch-fourier-filter: 1 on ``(low, high]``
     with cosine falloff of the width ``falloff`` outside.
     """
     freq_y = sfft.fftfreq(shape[0]).astype(np.float32)[:, np.newaxis]

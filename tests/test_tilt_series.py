@@ -180,76 +180,9 @@ def test_invalid_input(kwargs):
         TiltSeries(**params)
 
 
-def test_project_points_matches_torch():
-    torch = pytest.importorskip("torch")
-    pytest.importorskip("torch_tilt_series")
-    ts = _random_tilt_series()
-    torch_ts = ts.to_torch()
-    points = np.random.default_rng(3).uniform(-300, 300, size=(50, 3))
-    ref = torch_ts.project_points(torch.as_tensor(points * 10)).numpy() / 10
-    assert_allclose(ts.project_points(points), ref, atol=1e-3)
-    assert_allclose(
-        ts.detector2tomo,
-        torch.linalg.pinv(
-            torch_ts.projection_matrices[:, :3, :3] @ torch_ts.tomo2sample[:3, :3]
-        ).numpy(),
-        atol=1e-5,
-    )
-
-
-def test_torch_roundtrip():
-    torch = pytest.importorskip("torch")
-    pytest.importorskip("torch_tilt_series")
-
-    def _shift(p):
-        return 0.01 * p
-
-    ts = _random_tilt_series(local_shifts=_shift)
-    torch_ts = ts.to_torch()
-    assert torch_ts.pixel_spacing == pytest.approx(2.5)
-    back = TiltSeries.from_torch(torch_ts)
-    for name in [
-        "tilt_angles",
-        "tilt_axis_angle",
-        "sample_translations",
-        "x_tilts",
-        "sample2levelled",
-        "levelled2tomo",
-        "image_indices",
-    ]:
-        assert_allclose(getattr(back, name), getattr(ts, name), atol=1e-5)
-    assert back.scale == pytest.approx(ts.scale)
-    assert back.image_path == ts.image_path
-    assert back.local_shifts is _shift  # unwrapped
-    assert isinstance(back.local_shifts_2d, LocalShifts2D)
-    assert_allclose(
-        back.local_shifts_2d.control_points,
-        ts.local_shifts_2d.control_points,
-        atol=1e-5,
-    )
-    # numpy local shifts are used in the (z, y, x, w) output of torch
-    points = torch.as_tensor(np.random.default_rng(4).uniform(-300, 300, (5, 3)))
-    plain = ts.replace(local_shifts_2d=lambda p: np.full_like(p, 1.0)).to_torch()
-    zyxw = plain.project_points(points, output_zyxw=True)
-    assert_allclose(
-        zyxw[..., 1:3].numpy(), plain.project_points(points).numpy(), atol=1e-3
-    )
-    # torch functions are wrapped
-    torch_ts.local_shifts_2d = lambda p: torch.full_like(p, 10.0)
-    wrapped = TiltSeries.from_torch(torch_ts)
-    assert_allclose(
-        wrapped.project_points(points.numpy() / 10),
-        wrapped.replace(local_shifts_2d=None).project_points(points.numpy() / 10) + 1.0,
-        atol=1e-4,
-    )
-    assert TiltSeries.from_torch(wrapped.to_torch()).local_shifts_2d is not None
-
-
 def test_from_aretomo_output(tmp_path, monkeypatch):
     alnfile = pytest.importorskip("alnfile")
     pd = pytest.importorskip("pandas")
-    pytest.importorskip("torch")
-    from torch_tilt_series.io import from_aretomo_output
 
     rng = np.random.default_rng(7)
     n = 5
@@ -265,8 +198,10 @@ def test_from_aretomo_output(tmp_path, monkeypatch):
     monkeypatch.setattr(alnfile, "read", lambda path: df.copy())
     path = tmp_path / "TS_01.aln"
     ts = TiltSeries.from_aretomo_output(path, scale=0.2)
-    ref = TiltSeries.from_torch(from_aretomo_output(path, pixel_spacing=2.0))
     assert ts.image_path == tmp_path / "TS_01.mrc"
-    assert_allclose(ts.image_indices, [0, 1, 3, 4, 5])
-    points = rng.uniform(-100, 100, size=(10, 3))
-    assert_allclose(ts.project_points(points), ref.project_points(points), atol=1e-4)
+    assert ts.scale == pytest.approx(0.2)
+    assert_allclose(ts.image_indices, [0, 1, 3, 4, 5])  # 1-based sections
+    assert_allclose(ts.tilt_angles, df["tilt"])
+    assert_allclose(ts.tilt_axis_angle, df["rot"])
+    # (y, x) shifts in pixels to nm
+    assert_allclose(ts.sample_translations, df[["ty", "tx"]].to_numpy() * 0.2)

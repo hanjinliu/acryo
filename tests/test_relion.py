@@ -253,14 +253,3 @@ def test_image_path_length():
         TiltSeries(tilt_angles=[0.0, 1.0], tilt_axis_angle=0.0, image_path=["a.mrc"])
     ts = TiltSeries(tilt_angles=[0.0], tilt_axis_angle=0.0, image_path=["a.mrc"])
     assert ts.image_path == (Path("a.mrc"),)
-
-
-def test_to_torch_with_image_files(tmp_path):
-    pytest.importorskip("torch_tilt_series")
-    _make_project(tmp_path)
-    ts = TiltSeries.from_relion_tilt_series_star(
-        tmp_path / "AlignTiltSeries/job005/tilt_series.star"
-    )
-    torch_ts = ts.to_torch()
-    assert torch_ts.image_path is None
-    assert torch_ts.pixel_spacing == pytest.approx(PIXEL_SIZE)

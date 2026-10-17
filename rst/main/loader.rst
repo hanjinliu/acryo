@@ -319,11 +319,12 @@ direct Fourier inversion (insertion of the central slices into the 3D Fourier tr
 Reading the tilt images requires ``mrcfile``.
 
 The tilt series is given as a :class:`acryo.projection.TiltSeries` object, which describes
-the alignment of the tilt series in nm. It is a numpy port of ``TiltSeries`` of
-`torch-tilt-series <https://github.com/teamtomo/torch-tilt-series>`_, and the alignment of
-IMOD (``etomofiles`` is required), AreTomo (``alnfile`` is required) and RELION 5
-(``starfile-rs`` is required) can be read. ``torch_tilt_series.TiltSeries`` is also accepted
-and converted (``pip install acryo[torch]``). Because the tilt series
+the alignment of the tilt series in nm. The alignment of IMOD (``etomofiles`` is required),
+AreTomo (``alnfile`` is required) and RELION 5 (``starfile-rs`` is required) can be read.
+The tilt series and the reconstruction are ported from
+`torch-reconstruct-tomogram <https://github.com/teamtomo/torch-reconstruct-tomogram>`_ and
+`torch-tilt-series <https://github.com/teamtomo/torch-tilt-series>`_ in numpy and scipy, so
+``torch`` is not needed. Because the tilt series
 defines the coordinates relative to the tomogram center, the position of the tomogram center
 in the coordinate system of the molecules has to be given as ``tomogram_center`` (in nm).
 Depending on the positive direction of the tilt angles, the handedness of the tomogram may be
@@ -416,7 +417,7 @@ cube. If the molecules are densely packed, a larger ``padding`` (such as 3) give
 closer to those from a reconstructed tomogram, at the cost of speed.
 
 The functions for reconstruction and projection (:class:`acryo.projection.VolumeProjector`)
-are available in :mod:`acryo.projection`, and they do not depend on ``torch``.
+are available in :mod:`acryo.projection`.
 
 The full tomogram can also be reconstructed at the pixel size of ``scale`` from the
 preprocessed tilt images. The tomogram is tiled by patches, which are reconstructed by direct

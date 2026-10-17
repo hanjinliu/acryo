@@ -249,23 +249,6 @@ def test_local_alignment_needs_points():
         ts.project_points(np.zeros(3))
 
 
-def test_to_torch():
-    torch = pytest.importorskip("torch")
-    pytest.importorskip("torch_tilt_series")
-    ts = _tilt_series()
-    rng = np.random.default_rng(8)
-    affine = AffineShifts2D(np.eye(2) + rng.normal(scale=0.01, size=(NTILTS, 2, 2)))
-    points = _points()
-    torch_ts = ts.replace(local_shifts_2d=affine).to_torch()
-    ref = torch_ts.project_points(torch.as_tensor(points * 10)).numpy() / 10
-    out = ts.replace(local_shifts_2d=affine).project_points(points)
-    assert_allclose(out, ref, atol=1e-3)
-    back = TiltSeries.from_torch(torch_ts)
-    assert back.local_shifts_2d is affine
-    with pytest.raises(NotImplementedError):
-        ts.replace(local_shifts_2d=_uniform_alignment()).to_torch()
-
-
 # --- IMOD ---------------------------------------------------------------------------
 
 

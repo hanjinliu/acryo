@@ -29,22 +29,20 @@ def test_bicubic_gradient():
     assert_allclose(value, maps[np.arange(20), iy, ix], atol=1e-12)
 
 
-def test_bicubic_matches_torch():
-    torch = pytest.importorskip("torch")
-    import torch.nn.functional as F
-
+def test_bicubic_properties():
     rng = np.random.default_rng(1)
-    maps = rng.normal(size=(20, 9, 9))
-    y, x = rng.uniform(0, 8, size=(2, 20))
-    grid = np.stack([x, y], axis=-1) / 8 * 2 - 1  # normalized (x, y)
-    ref = F.grid_sample(
-        torch.as_tensor(maps)[:, None],
-        torch.as_tensor(grid)[:, None, None],
-        mode="bicubic",
-        align_corners=True,
-        padding_mode="border",
-    )
-    assert_allclose(_bicubic(maps, y, x)[0], ref.numpy().ravel(), atol=1e-10)
+    y, x = rng.uniform(1, 7, size=(2, 20))
+    # constants are reproduced (partition of unity)
+    value, grad_y, grad_x = _bicubic(np.full((20, 9, 9), 2.5), y, x)
+    assert_allclose(value, 2.5, atol=1e-12)
+    assert_allclose(grad_y, 0.0, atol=1e-12)
+    assert_allclose(grad_x, 0.0, atol=1e-12)
+    # the weights are symmetric, so linear functions are exact at half pixels
+    a, b, c = rng.normal(size=3)
+    yy, xx = np.indices((9, 9), dtype=np.float64)
+    maps = np.broadcast_to(a * yy + b * xx + c, (20, 9, 9))
+    yh, xh = np.floor(y) + 0.5, np.floor(x) + 0.5
+    assert_allclose(_bicubic(maps, yh, xh)[0], a * yh + b * xh + c, atol=1e-10)
 
 
 def test_smoothness_penalty_gradient():

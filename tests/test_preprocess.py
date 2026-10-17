@@ -26,6 +26,25 @@ def test_subtract_plane():
     assert_allclose(_subtract_plane(image), expected, atol=1e-5)
 
 
+def _reference_preprocess(image: np.ndarray, pre: TiltImagePreprocessor) -> np.ndarray:
+    """Preprocessing written step by step in numpy (float64)."""
+    image = image.astype(np.float64)
+    h, w = image.shape
+    if pre.subtract_background:
+        y, x = np.indices(image.shape)
+        design = np.stack([y.ravel(), x.ravel(), np.ones(h * w)], axis=1)
+        coef = np.linalg.lstsq(design, image.ravel(), rcond=None)[0]
+        image = image - (design @ coef).reshape(h, w)
+    pad = max(0, min(pre.padding, h - 1, w - 1))
+    padded = np.pad(image, pad, mode="reflect") * _soft_rectangle((h, w), pad)
+    ft = np.fft.rfft2(padded) * _bandpass(padded.shape, pre.low, pre.high, pre.falloff)
+    out = np.fft.irfft2(ft, s=padded.shape)[pad : pad + h, pad : pad + w]
+    if pre.normalize:
+        crop = out[int(0.375 * h) : int(0.625 * h), int(0.375 * w) : int(0.625 * w)]
+        out = (out - crop.mean()) / crop.std()
+    return out
+
+
 @pytest.mark.parametrize("shape", [(60, 70), (61, 73)])
 @pytest.mark.parametrize(
     "kwargs",
@@ -37,47 +56,62 @@ def test_subtract_plane():
         {"padding": 8},
     ],
 )
-def test_same_as_torch(shape, kwargs):
-    torch = pytest.importorskip("torch")
-    pytest.importorskip("torch_tilt_series")
-    from torch_tilt_series import preprocess_tilt_series_images
-
+def test_preprocess(shape, kwargs):
     image = _image(shape)
     preprocessor = TiltImagePreprocessor(**kwargs)
-    torch_kwargs = {
-        ("bandpass_padding" if k == "padding" else k): v for k, v in kwargs.items()
-    }
-    if preprocessor.subtract_background:
-        # the plane fitting of torch is less accurate in float32
-        torch_kwargs["subtract_background"] = False
-        torch_input = _subtract_plane(image)
-    else:
-        torch_input = image
-    ref = preprocess_tilt_series_images(torch.as_tensor(torch_input), **torch_kwargs)
-    assert_allclose(preprocessor(image), ref.numpy(), atol=1e-5)
+    ref = _reference_preprocess(image, preprocessor)
+    assert_allclose(preprocessor(image), ref, atol=1e-4)
 
 
 @pytest.mark.parametrize("shape", [(30, 40), (31, 43)])
 @pytest.mark.parametrize("pad", [0, 5])
-def test_soft_rectangle_same_as_torch(shape, pad):
-    pytest.importorskip("torch")
-    from torch_grid_utils.shapes_2d import rectangle
-
-    padded = (shape[0] + 2 * pad, shape[1] + 2 * pad)
-    ref = rectangle(dimensions=shape, image_shape=padded, smoothing_radius=pad)
-    assert_allclose(_soft_rectangle(shape, pad), ref.numpy(), atol=1e-6)
+def test_soft_rectangle(shape, pad):
+    mask = _soft_rectangle(shape, pad)
+    assert mask.shape == (shape[0] + 2 * pad, shape[1] + 2 * pad)
+    # symmetric around the center (size // 2) of the padded image
+    cy, cx = np.array(mask.shape) // 2
+    ny = min(cy, mask.shape[0] - 1 - cy)
+    nx = min(cx, mask.shape[1] - 1 - cx)
+    sub = mask[cy - ny : cy + ny + 1, cx - nx : cx + nx + 1]
+    assert_allclose(sub, sub[::-1, ::-1])
+    # 1 strictly within half the size from the center, cosine edge of the width pad
+    for axis, size in enumerate(shape):
+        line = mask[:, cx] if axis == 0 else mask[cy, :]
+        coords = np.arange(line.size) - line.size // 2
+        inside = np.abs(coords) < size / 2
+        assert_allclose(line[inside], 1.0)
+        dist = np.abs(coords) - np.abs(coords[inside]).max()
+        edge = ~inside & (dist <= pad)
+        assert_allclose(line[edge], np.cos(np.pi / 2 * dist[edge] / pad), atol=1e-6)
+        assert_allclose(line[dist > pad], 0.0)
+    if shape[0] % 2 == 1 and shape[1] % 2 == 1:
+        # odd-sized images are exactly the region of the value 1
+        assert_allclose(mask[pad : pad + shape[0], pad : pad + shape[1]], 1.0)
 
 
 @pytest.mark.parametrize("shape", [(30, 40), (31, 43)])
 @pytest.mark.parametrize(
     "low, high, falloff", [(0.0, 0.5, 0.0), (0.05, 0.3, 0.0), (0.05, 0.3, 0.04)]
 )
-def test_bandpass_same_as_torch(shape, low, high, falloff):
-    pytest.importorskip("torch")
-    from torch_fourier_filter.bandpass import bandpass_filter
-
-    ref = bandpass_filter(low, high, falloff, shape, rfft=True, fftshift=False)
-    assert_allclose(_bandpass(shape, low, high, falloff), ref.numpy(), atol=1e-5)
+def test_bandpass(shape, low, high, falloff):
+    out = _bandpass(shape, low, high, falloff)
+    assert out.shape == (shape[0], shape[1] // 2 + 1)
+    freq = np.hypot(
+        np.fft.fftfreq(shape[0])[:, np.newaxis], np.fft.rfftfreq(shape[1])[np.newaxis]
+    )
+    # frequencies at the edges of the band are ambiguous in float32
+    edge = np.isclose(freq, low, atol=1e-6) | np.isclose(freq, high, atol=1e-6)
+    band = (freq > low) & (freq <= high) & ~edge
+    out_band = (~band) & ~edge
+    assert out[0, 0] == 0.0  # the mean is removed
+    assert_allclose(out[band], 1.0)
+    if falloff == 0:
+        assert_allclose(out[out_band], 0.0)
+    else:
+        dist = np.maximum(low - freq, freq - high)
+        soft = out_band & (dist < falloff)
+        assert_allclose(out[soft], np.cos(np.pi / 2 * dist[soft] / falloff), atol=1e-5)
+        assert_allclose(out[out_band & (dist > falloff)], 0.0)
 
 
 @pytest.mark.parametrize("shape", [(64, 80), (63, 81), (66, 70)])
@@ -101,24 +135,25 @@ def test_fourier_bin_keeps_center(shape, binsize):
 
 @pytest.mark.parametrize("shape", [(64, 80), (63, 81)])
 @pytest.mark.parametrize("binsize", [2, 3])
-def test_fourier_bin_same_as_torch(shape, binsize):
-    torch = pytest.importorskip("torch")
-    pytest.importorskip("torch_fourier_rescale")
-    from torch_fourier_rescale import fourier_rescale_2d
+def test_fourier_bin_band_limited(shape, binsize):
+    # periodic in the cropped image and band-limited below the binned Nyquist
+    cropped = [size - size % (2 * binsize) for size in shape]
+    target = [c // binsize for c in cropped]
 
-    image = _image(shape)
-    slices = []
-    for size in shape:
-        cropped = size - size % (2 * binsize)
-        start = size // 2 - cropped // 2
-        slices.append(slice(start, start + cropped))
-    cropped = image[tuple(slices)]
-    target = tuple(s // binsize for s in cropped.shape)
-    ref, _ = fourier_rescale_2d(torch.as_tensor(cropped), target_shape=target)
-    assert_allclose(fourier_bin(image, binsize), ref.numpy(), atol=1e-5)
-    assert fourier_bin(image, 1) is not None
+    def func(y, x):
+        out = np.cos(2 * np.pi * (2 * y / cropped[0] + 0.3))
+        out += 0.5 * np.sin(2 * np.pi * (3 * x / cropped[1] - y / cropped[0]))
+        return out
+
+    # coordinates relative to the center (size // 2), which is kept
+    yy, xx = np.indices(shape) - (np.array(shape) // 2)[:, None, None]
+    binned = fourier_bin(func(yy, xx).astype(np.float32), binsize)
+    assert binned.shape == tuple(target)
+    yb, xb = (np.indices(target) - (np.array(target) // 2)[:, None, None]) * binsize
+    assert_allclose(binned, func(yb, xb), atol=1e-4)
+    assert fourier_bin(binned, 1) is binned
     with pytest.raises(ValueError):
-        fourier_bin(image, 0)
+        fourier_bin(binned, 0)
 
 
 def test_filters_are_multiplied():

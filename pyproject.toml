@@ -37,9 +37,6 @@ include = [
 ]
 
 [project.optional-dependencies]
-torch = [
-    "torch-tilt-series>=0.6.0",
-]
 testing = [
     "pytest",
     "pytest-cov",

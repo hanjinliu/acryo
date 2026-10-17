@@ -13,7 +13,6 @@ from numpy.typing import ArrayLike, NDArray
 from acryo._types import nm
 from acryo.projection._local_shifts import (
     AffineShifts2D,
-    FunctionShifts,
     LocalAlignment,
     LocalShiftFunction,
     LocalShiftModel,
@@ -23,7 +22,6 @@ from acryo.projection._local_shifts import (
 
 if TYPE_CHECKING:
     from typing_extensions import Self
-    from torch_tilt_series import TiltSeries as TorchTiltSeries
 
 _ANGSTROM_PER_NM = 10.0
 
@@ -32,9 +30,12 @@ _ANGSTROM_PER_NM = 10.0
 class TiltSeries:
     """Alignment geometry of a tilt series, and the projection of 3D points.
 
-    This is a numpy port of ``torch_tilt_series.TiltSeries``, but all the lengths
-    are in nm instead of Å. Coordinates are in (z, y, x) order. Points in the
-    tomogram space are projected to the detector by
+    The geometry and the reconstruction from tilt series in :mod:`acryo.projection` are
+    ported from `torch-reconstruct-tomogram
+    <https://github.com/teamtomo/torch-reconstruct-tomogram>`_ and its tilt series
+    model, `torch-tilt-series <https://github.com/teamtomo/torch-tilt-series>`_, in
+    numpy and scipy. All the lengths are in nm instead of Å. Coordinates are in
+    (z, y, x) order. Points in the tomogram space are projected to the detector by
 
     1. ``tomo2sample`` (tomogram space -> sample space),
     2. ``local_shifts`` (deformation of the sample, optional),
@@ -226,58 +227,6 @@ class TiltSeries:
         if self.local_shifts_2d is not None:
             projected = projected + self.local_shifts_2d.shifts(self, points, projected)
         return projected.reshape(batch_shape + projected.shape[1:])
-
-    @classmethod
-    def from_torch(cls, tilt_series: TorchTiltSeries) -> TiltSeries:
-        """Convert a ``torch_tilt_series.TiltSeries`` (in Å) to a tilt series."""
-
-        def _numpy(tensor) -> NDArray[np.float64]:
-            return tensor.detach().cpu().numpy().astype(np.float64)
-
-        if (indices := tilt_series.image_indices) is not None:
-            indices = indices.cpu().numpy()
-        spacing = tilt_series._pixel_spacing
-        return cls(
-            tilt_angles=_numpy(tilt_series.tilt_angles),
-            tilt_axis_angle=_numpy(tilt_series.tilt_axis_angle),
-            sample_translations=_numpy(tilt_series.sample_translations)
-            / _ANGSTROM_PER_NM,
-            x_tilts=_numpy(tilt_series.x_tilts),
-            sample2levelled=_affine_to_nm(_numpy(tilt_series.sample2levelled)),
-            levelled2tomo=_affine_to_nm(_numpy(tilt_series.levelled2tomo)),
-            local_shifts=_shift_function_from_torch(tilt_series.local_shifts),
-            local_shifts_2d=_shift_function_from_torch(tilt_series.local_shifts_2d),
-            image_path=tilt_series.image_path,
-            image_indices=indices,
-            scale=None if spacing is None else spacing / _ANGSTROM_PER_NM,
-        )
-
-    def to_torch(self, device="cpu") -> TorchTiltSeries:
-        """Convert to a ``torch_tilt_series.TiltSeries`` (in Å).
-
-        If the tilt images are in separate files, ``image_path`` is not converted,
-        because ``torch_tilt_series.TiltSeries`` only supports a stack.
-        """
-        from torch_tilt_series import TiltSeries as TorchTiltSeries
-
-        if isinstance(self.image_path, tuple):
-            image_path, image_indices = None, None
-        else:
-            image_path, image_indices = self.image_path, self.image_indices
-        return TorchTiltSeries(
-            tilt_angles=self.tilt_angles,
-            tilt_axis_angle=self.tilt_axis_angle,
-            sample_translations=self.sample_translations * _ANGSTROM_PER_NM,
-            x_tilts=self.x_tilts,
-            sample2levelled=_affine_to_angstrom(self.sample2levelled),
-            levelled2tomo=_affine_to_angstrom(self.levelled2tomo),
-            local_shifts=_shift_function_to_torch(self.local_shifts),
-            local_shifts_2d=_shift_function_to_torch(self.local_shifts_2d),
-            image_path=image_path,
-            image_indices=image_indices,
-            pixel_spacing=None if self.scale is None else self.scale * _ANGSTROM_PER_NM,
-            device=device,
-        )
 
     @classmethod
     def from_etomo_directory(
@@ -767,81 +716,3 @@ def _translation(shifts: NDArray[np.float64]) -> NDArray[np.float64]:
     out = np.tile(np.eye(4), shifts.shape[:-1] + (1, 1))
     out[..., :3, 3] = shifts
     return out
-
-
-def _affine_to_nm(mtx: NDArray[np.float64]) -> NDArray[np.float64]:
-    mtx = mtx.copy()
-    mtx[:3, 3] /= _ANGSTROM_PER_NM
-    return mtx
-
-
-def _affine_to_angstrom(mtx: NDArray[np.float64]) -> NDArray[np.float64]:
-    mtx = mtx.copy()
-    mtx[:3, 3] *= _ANGSTROM_PER_NM
-    return mtx
-
-
-class _TorchShiftFunction:
-    """A local shift function of torch (in Å) wrapped for numpy (in nm)."""
-
-    def __init__(self, func):
-        self.torch_function = func
-
-    def __call__(self, points: NDArray[np.float64]) -> NDArray[np.float64]:
-        import torch
-
-        with torch.no_grad():
-            tensor = torch.as_tensor(points * _ANGSTROM_PER_NM, dtype=torch.float32)
-            out = self.torch_function(tensor)
-        return out.cpu().numpy().astype(np.float64) / _ANGSTROM_PER_NM
-
-
-class _NumpyShiftFunction:
-    """A local shift function or model of numpy (in nm) wrapped for torch (in Å)."""
-
-    def __init__(self, func: LocalShiftFunction | LocalShiftModel):
-        self.numpy_function = func
-
-    def __call__(self, points):
-        import torch
-        import torch.nn.functional as F
-
-        # projected points may be given in (z, y, x, w) for local_shifts_2d
-        zyxw = points.ndim == 3 and points.shape[-1] == 4
-        values = points[..., 1:3] if zyxw else points
-        array = values.detach().cpu().numpy().astype(np.float64) / _ANGSTROM_PER_NM
-        if isinstance(func := self.numpy_function, LocalShiftModel):
-            out = func.shifts(None, None, array)
-        else:
-            out = func(array)
-        out = torch.as_tensor(out * _ANGSTROM_PER_NM, device=points.device)
-        out = out.to(points.dtype)
-        return F.pad(out, (1, 1)) if zyxw else out
-
-
-def _shift_function_from_torch(func):
-    """Convert a local shift function of torch to a function or model of numpy."""
-    if func is None:
-        return None
-    if isinstance(func, _NumpyShiftFunction):
-        return func.numpy_function
-    return _TorchShiftFunction(func)
-
-
-def _shift_function_to_torch(func: LocalShiftFunction | LocalShiftModel | None):
-    """Convert a local shift function or model of numpy to a function of torch."""
-    if func is None:
-        return None
-    if isinstance(func, FunctionShifts):
-        return _shift_function_to_torch(func.func)
-    if isinstance(func, _TorchShiftFunction):
-        return func.torch_function
-    model = func
-    while model is not None:
-        if isinstance(model, LocalAlignment):
-            raise NotImplementedError(
-                "LocalAlignment cannot be converted to torch_tilt_series, because it "
-                "depends on the 3D positions of the points."
-            )
-        model = getattr(model, "base", None)
-    return _NumpyShiftFunction(func)

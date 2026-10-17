@@ -40,7 +40,6 @@ from acryo.tilt import TiltSeriesModel, single_axis
 
 if TYPE_CHECKING:
     from typing_extensions import Self
-    from torch_tilt_series import TiltSeries as TorchTiltSeries
 
 # Memory budget (bytes) of the tilt images being preprocessed in parallel. Each
 # thread needs about five times the size of the (padded) tilt image.
@@ -64,7 +63,7 @@ class BackProjectionLoader(LoaderBase):
     ----------
     tilt_series : acryo.projection.TiltSeries
         Tilt series with the alignment parameters. ``image_path`` and ``scale`` must
-        be set. ``torch_tilt_series.TiltSeries`` is also accepted and converted. The
+        be set. The
         tilt images are read from the file tilt by tilt, preprocessed at the original
         pixel size and binned by the largest integer factor whose pixel size does not
         exceed ``scale``, so the raw tilt series is never in memory all at once. A few
@@ -122,7 +121,7 @@ class BackProjectionLoader(LoaderBase):
 
     def __init__(
         self,
-        tilt_series: TiltSeries | TorchTiltSeries,
+        tilt_series: TiltSeries,
         molecules: Molecules | None = None,
         order: int = 3,
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
@@ -317,7 +316,7 @@ class BackProjectionLoader(LoaderBase):
         out._images = self._images  # share the loaded tilt images
         return out
 
-    def with_tilt_series(self, tilt_series: TiltSeries | TorchTiltSeries) -> Self:
+    def with_tilt_series(self, tilt_series: TiltSeries) -> Self:
         """Return a new instance with another tilt series, such as a refined one.
 
         If the tilt series has the same tilt images (``image_path``,
@@ -828,11 +827,9 @@ def _num_load_workers(
     return max(min(by_memory, os.cpu_count() or 1), 1)
 
 
-def _as_tilt_series(tilt_series: TiltSeries | TorchTiltSeries) -> TiltSeries:
+def _as_tilt_series(tilt_series: TiltSeries) -> TiltSeries:
     if isinstance(tilt_series, TiltSeries):
         return tilt_series
-    if type(tilt_series).__module__.startswith("torch_tilt_series"):
-        return TiltSeries.from_torch(tilt_series)  # type: ignore
     raise TypeError(f"Expected a TiltSeries, got {type(tilt_series)}.")
 
 

@@ -104,8 +104,8 @@ def _center_of_mass(img: np.ndarray) -> np.ndarray:
     return (inds * weight.ravel()).sum(axis=1) / weight.sum()
 
 
-# NOTE: scales are chosen so that the crop sizes of the tilt images in
-# torch-reconstruct-tomogram are both even and odd.
+# NOTE: scales are chosen so that the pixel sizes are both even and odd multiples of
+# the tilt images.
 @pytest.mark.parametrize("scale", [0.5, 0.64, 0.8, 1.0])
 @pytest.mark.parametrize("order", [0, 1, 3])
 def test_subtomograms_are_centered(blob_tilt_series, scale, order):
@@ -690,15 +690,6 @@ def test_filters_are_applied_to_the_right_tilts(blob_tilt_series):
     out = _loader(blob_tilt_series, mole, preprocess=scaled)._images.get(2)[1]
     factors = np.arange(1, TILT_ANGLES.size + 1)[:, np.newaxis, np.newaxis]
     assert_allclose(out, ref * factors, rtol=1e-4, atol=1e-4)
-
-
-def test_torch_tilt_series_is_converted(blob_tilt_series):
-    pytest.importorskip("torch_tilt_series")
-    mole = Molecules(BLOBS + CENTER, Rotation.random(len(BLOBS), random_state=11))
-    ref = _loader(blob_tilt_series, mole).asnumpy()
-    loader = _loader(blob_tilt_series.to_torch(), mole)
-    assert isinstance(loader.tilt_series, TiltSeries)
-    assert_allclose(loader.asnumpy(), ref, atol=1e-4)
 
 
 def test_reconstruct_tomogram_with_filters(blob_tilt_series):
