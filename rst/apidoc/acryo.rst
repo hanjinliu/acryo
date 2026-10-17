@@ -14,6 +14,7 @@ Subpackages
    acryo.molecules
    acryo.pick
    acryo.pipe
+   acryo.projection
    acryo.testing
    acryo.tilt
 

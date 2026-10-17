@@ -63,6 +63,22 @@ def test_chunked_image_gives_same_subtomograms(chunks, order, corner_safe):
     assert_allclose(loader.load(2), ref[2], rtol=1e-6, atol=1e-6)
 
 
+@pytest.mark.parametrize("order", [0, 1, 3])
+def test_float16_image(order):
+    # float16 is not supported by scipy.ndimage, so the regions are converted
+    img, mole = _random_image_and_molecules()
+    img16 = img.astype(np.float16)
+    kwargs = dict(order=order, output_shape=OUTPUT_SHAPE)
+    ref = SubtomogramLoader(img16.astype(np.float32), mole, **kwargs).asnumpy()
+    out = SubtomogramLoader(img16, mole, **kwargs).asnumpy()
+    assert out.dtype == np.float32
+    assert_allclose(out, ref, rtol=1e-6, atol=1e-6)
+    chunked = SubtomogramLoader(
+        da.from_array(img16, chunks=(13, 17, 19)), mole, **kwargs
+    )
+    assert_allclose(chunked.asnumpy(), ref, rtol=1e-6, atol=1e-6)
+
+
 def test_tomogram_chunks_are_loaded_once():
     img, mole = _random_image_and_molecules(n=60)
     reader = ChunkReader(img, chunks=(13, 17, 19))

@@ -1,0 +1,424 @@
+import dataclasses
+import json
+from pathlib import Path
+
+import numpy as np
+from numpy.testing import assert_allclose
+import pytest
+
+from acryo.projection import (
+    AffineShifts2D,
+    FunctionShifts,
+    LocalAlignment,
+    LocalShiftModel,
+    LocalShifts2D,
+    TiltSeries,
+)
+
+NTILTS = 9
+
+
+def _tilt_series(**kwargs) -> TiltSeries:
+    rng = np.random.default_rng(0)
+    params = dict(
+        tilt_angles=np.linspace(-60, 60, NTILTS),
+        tilt_axis_angle=rng.normal(85, 1, NTILTS),
+        sample_translations=rng.normal(scale=3.0, size=(NTILTS, 2)),
+        x_tilts=rng.normal(size=NTILTS),
+    )
+    params.update(kwargs)
+    return TiltSeries(**params)
+
+
+def _uniform_alignment(grid_shape=(3, 4), **kwargs) -> LocalAlignment:
+    """Local alignment of the same parameters in all the local areas."""
+    shape = tuple(grid_shape) + (NTILTS,)
+    params = {"tilt_angles": np.zeros(NTILTS)}
+    params.update(kwargs)
+    tail = {
+        "tilt_angles": (),
+        "x_tilts": (),
+        "z_factors": (2,),
+        "matrices": (2, 2),
+        "translations": (2,),
+    }
+    arrays = {
+        k: np.broadcast_to(np.asarray(v, dtype=np.float64), shape + tail[k])
+        for k, v in params.items()
+    }
+    return LocalAlignment(origin=[-100.0, -150.0], spacing=[100.0, 100.0], **arrays)
+
+
+def _rotate(ts: TiltSeries, yx: np.ndarray) -> np.ndarray:
+    """Rotate (N, T, 2) vectors by the tilt axis angles, as scope2detector."""
+    rad = np.deg2rad(ts.tilt_axis_angle)
+    c, s = np.cos(rad), np.sin(rad)
+    return np.stack(
+        [c * yx[..., 0] + s * yx[..., 1], -s * yx[..., 0] + c * yx[..., 1]], axis=-1
+    )
+
+
+def _points(seed=1, n=20) -> np.ndarray:
+    return np.random.default_rng(seed).uniform(-300, 300, size=(n, 3)) * [0.2, 1, 1]
+
+
+def test_local_alignment_identity():
+    ts = _tilt_series()
+    points = _points()
+    shifted = ts.replace(local_shifts_2d=_uniform_alignment())
+    assert_allclose(shifted.project_points(points), ts.project_points(points))
+
+
+def test_local_alignment_angles():
+    ts = _tilt_series()
+    points = _points()
+    rng = np.random.default_rng(2)
+    d_tilt, d_xtilt = rng.normal(size=(2, NTILTS))
+    local = _uniform_alignment(tilt_angles=d_tilt, x_tilts=d_xtilt)
+    expected = ts.replace(
+        tilt_angles=ts.tilt_angles + d_tilt, x_tilts=ts.x_tilts + d_xtilt
+    ).project_points(points)
+    out = ts.replace(local_shifts_2d=local).project_points(points)
+    assert_allclose(out, expected, atol=1e-10)
+
+
+def test_local_alignment_refinement():
+    ts = _tilt_series()
+    points = _points()
+    rng = np.random.default_rng(3)
+    matrices = np.eye(2) + rng.normal(scale=0.01, size=(NTILTS, 2, 2))
+    translations = rng.normal(size=(NTILTS, 2))
+    z_factors = rng.normal(scale=0.01, size=(NTILTS, 2))
+    local = _uniform_alignment(
+        matrices=matrices, translations=translations, z_factors=z_factors
+    )
+    out = ts.replace(local_shifts_2d=local).project_points(points)
+    # projection before the rotation by the tilt axis angle
+    scope = np.einsum("tij,nj->nti", ts.sample2scope[:, 1:3, :3], points)
+    refined = np.einsum("tij,ntj->nti", matrices, scope) + translations
+    refined += z_factors * points[:, 0, None, None]
+    expected = ts.project_points(points) + _rotate(ts, refined - scope)
+    assert_allclose(out, expected, atol=1e-10)
+
+
+def test_local_alignment_interpolation():
+    ts = _tilt_series()
+    rng = np.random.default_rng(4)
+    gy, gx = 3, 4
+    translations = rng.normal(size=(gy, gx, NTILTS, 2))
+    local = LocalAlignment(
+        origin=[-100.0, -150.0],
+        spacing=[100.0, 100.0],
+        tilt_angles=np.zeros((gy, gx, NTILTS)),
+        translations=translations,
+    )
+    shifted = ts.replace(local_shifts_2d=local)
+    yy, xx = np.meshgrid(
+        -100.0 + 100 * np.arange(gy), -150.0 + 100 * np.arange(gx), indexing="ij"
+    )
+    centers = np.stack([yy, xx], axis=-1)  # (gy, gx, 2)
+    z = rng.uniform(-30, 30, size=(gy, gx, 1))
+    points = np.concatenate([z, centers], axis=-1).reshape(-1, 3)
+    out = shifted.project_points(points) - ts.project_points(points)
+    assert_allclose(out, _rotate(ts, translations.reshape(-1, NTILTS, 2)), atol=1e-10)
+    # bilinear between the local areas, and clamped outside
+    point = np.array([[0.0, -50.0, -125.0], [0.0, 500.0, -500.0]])
+    out = shifted.project_points(point) - ts.project_points(point)
+    expected = [
+        np.tensordot([0.75, 0.25], translations[0:2, 0:2].mean(axis=0), axes=1),
+        translations[-1, 0],
+    ]
+    assert_allclose(out, _rotate(ts, np.stack(expected)), atol=1e-10)
+
+
+def test_affine_shifts():
+    ts = _tilt_series()
+    points = _points()
+    rng = np.random.default_rng(5)
+    matrices = np.eye(2) + rng.normal(scale=0.01, size=(NTILTS, 2, 2))
+    translations = rng.normal(size=(NTILTS, 2))
+    affine = AffineShifts2D(matrices, translations)
+    projected = ts.project_points(points)
+    out = ts.replace(local_shifts_2d=affine).project_points(points)
+    expected = np.einsum("tij,ntj->nti", matrices, projected) + translations
+    assert_allclose(out, expected, atol=1e-10)
+
+
+def test_base_and_select_tilts():
+    ts = _tilt_series()
+    points = _points()
+    rng = np.random.default_rng(6)
+    affine = AffineShifts2D(
+        np.eye(2) + rng.normal(scale=0.01, size=(NTILTS, 2, 2)),
+        rng.normal(size=(NTILTS, 2)),
+    )
+    local = _uniform_alignment(tilt_angles=rng.normal(size=NTILTS), grid_shape=(2, 2))
+    chained = LocalShifts2D(
+        rng.normal(size=(NTILTS, 2, 2, 3)),
+        [300.0, 300.0],
+        base=dataclasses.replace(local, base=affine),
+    )
+    full = ts.replace(local_shifts_2d=chained).project_points(points)
+    # the base is applied first
+    expected = ts.project_points(points)
+    for model in [
+        affine,
+        local,
+        LocalShifts2D(chained.control_points, chained.half_extent),
+    ]:
+        expected = expected + model.shifts(ts, points, expected)
+    assert_allclose(full, expected, atol=1e-10)
+
+    idx = [0, 3, 4, 8]
+    sub = ts.replace(
+        tilt_angles=ts.tilt_angles[idx],
+        tilt_axis_angle=ts.tilt_axis_angle[idx],
+        sample_translations=ts.sample_translations[idx],
+        x_tilts=ts.x_tilts[idx],
+        local_shifts_2d=chained.select_tilts(idx),
+    )
+    assert_allclose(sub.project_points(points), full[:, idx], atol=1e-10)
+
+
+def test_serialization():
+    ts = _tilt_series()
+    points = _points()
+    rng = np.random.default_rng(7)
+    local = LocalAlignment(
+        origin=[-100.0, -150.0],
+        spacing=[100.0, 120.0],
+        tilt_angles=rng.normal(size=(2, 3, NTILTS)),
+        x_tilts=rng.normal(size=(2, 3, NTILTS)),
+        z_factors=rng.normal(scale=0.01, size=(2, 3, NTILTS, 2)),
+        matrices=np.eye(2) + rng.normal(scale=0.01, size=(2, 3, NTILTS, 2, 2)),
+        translations=rng.normal(size=(2, 3, NTILTS, 2)),
+        base=AffineShifts2D(np.eye(2) + rng.normal(scale=0.01, size=(NTILTS, 2, 2))),
+    )
+    model = LocalShifts2D(rng.normal(size=(NTILTS, 2, 2, 2)), [200, 300], base=local)
+    ts = ts.replace(local_shifts_2d=model)
+    data = json.loads(json.dumps(model.to_dict()))
+    assert isinstance(LocalShiftModel.from_dict(data).base, LocalAlignment)
+    out = TiltSeries.from_json(ts.dump_json())
+    assert isinstance(out.local_shifts_2d, LocalShifts2D)
+    assert_allclose(out.project_points(points), ts.project_points(points))
+    # default parameters are omitted
+    plain = _uniform_alignment().to_dict()
+    assert set(plain) == {"type", "origin", "spacing", "tilt_angles", "base"}
+    with pytest.raises(ValueError):
+        LocalShiftModel.from_dict({"type": "Unknown"})
+
+
+def test_functions_are_not_serializable():
+    ts = _tilt_series(local_shifts_2d=lambda p: np.zeros_like(p))
+    assert isinstance(ts.local_shifts_2d, FunctionShifts)
+    with pytest.raises(TypeError):
+        ts.dump_json()
+    with pytest.raises(TypeError):
+        _tilt_series(local_shifts=lambda p: np.zeros_like(p)).dump_json()
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"tilt_angles": np.zeros((2, NTILTS))},
+        {"x_tilts": np.zeros((2, 3, NTILTS))},
+        {"matrices": np.zeros((2, 2, NTILTS, 2))},
+        {"spacing": [0.0, 1.0]},
+        {"origin": [0.0]},
+    ],
+)
+def test_invalid_local_alignment(kwargs):
+    params = dict(
+        origin=[0.0, 0.0], spacing=[1.0, 1.0], tilt_angles=np.zeros((2, 2, NTILTS))
+    )
+    params.update(kwargs)
+    with pytest.raises(ValueError):
+        LocalAlignment(**params)
+
+
+def test_local_alignment_needs_points():
+    local = _uniform_alignment()
+    with pytest.raises(ValueError):
+        LocalShifts2D(np.zeros((NTILTS, 2, 1, 1)), [1.0, 1.0], base=local)(
+            np.zeros((3, NTILTS, 2))
+        )
+    ts = TiltSeries(
+        tilt_angles=np.zeros(NTILTS + 1), tilt_axis_angle=0.0, local_shifts_2d=local
+    )
+    with pytest.raises(ValueError):
+        ts.project_points(np.zeros(3))
+
+
+# --- IMOD ---------------------------------------------------------------------------
+
+
+def _write_imod_local(path: Path, params: dict, pixel_angstrom: float):
+    """Write a local alignment file of IMOD with X tilts and Z factors."""
+    ny, nx, ntilts = params["dtilt"].shape
+    x0, y0, dx, dy = params["grid"]
+    lines = [f"{nx} {ny} {x0} {y0} {dx} {dy} 1 {pixel_angstrom} 1"]
+    for iy in range(ny):
+        for ix in range(nx):
+            lines.append(" ".join(f"{v:.12g}" for v in params["dtilt"][iy, ix]))
+            lines.append(" ".join(f"{v:.12g}" for v in params["dxtilt"][iy, ix]))
+            lines.append(" ".join(f"{v:.12g}" for v in params["zf"][iy, ix].ravel()))
+            for v in range(ntilts):
+                lines.append(" ".join(f"{a:.12g}" for a in params["xf"][iy, ix, v]))
+    path.write_text("\n".join(lines) + "\n")
+
+
+def _imod_projection(points, df, xaxistilt, local, scale, shape, z_factors):
+    """Projection by the IMOD model in pixels of (x, y), written independently."""
+    ny_img, nx_img = shape
+    out = np.empty((len(points), len(df), 2))
+    for n, (z, y, x) in enumerate(np.asarray(points) / scale):
+        big_x, big_y = x + nx_img / 2, y + ny_img / 2  # specimen coordinates
+        weights = []
+        if local is not None:
+            x0, y0, dx, dy = local["grid"]
+            gy, gx = local["dtilt"].shape[:2]
+            fx = np.clip((big_x - x0) / dx, 0, gx - 1)
+            fy = np.clip((big_y - y0) / dy, 0, gy - 1)
+            ix0, iy0 = min(int(fx), gx - 2), min(int(fy), gy - 2)
+            tx, ty = fx - ix0, fy - iy0
+            weights = [
+                ((iy0, ix0), (1 - tx) * (1 - ty)),
+                ((iy0, ix0 + 1), tx * (1 - ty)),
+                ((iy0 + 1, ix0), (1 - tx) * ty),
+                ((iy0 + 1, ix0 + 1), tx * ty),
+            ]
+        for t, (_, row) in enumerate(df.iterrows()):
+            v = row["idx_tilt"]
+            areas = weights or [(None, 1.0)]
+            aligned = np.zeros(2)
+            for area, w in areas:
+                tilt, xtilt = row["tlt"], -xaxistilt + row["xtilt"]
+                a, d, zf = np.eye(2), np.zeros(2), np.zeros(2)
+                if area is not None:
+                    tilt += local["dtilt"][area][v]
+                    xtilt += local["dxtilt"][area][v]
+                    xf = local["xf"][area][v]
+                    a, d = xf[:4].reshape(2, 2), xf[4:]
+                    if z_factors:
+                        zf = local["zf"][area][v]
+                al, th = np.deg2rad(xtilt), np.deg2rad(tilt)
+                y1 = np.cos(al) * y - np.sin(al) * z
+                z1 = np.sin(al) * y + np.cos(al) * z
+                p = np.array([np.cos(th) * x + np.sin(th) * z1, y1])
+                aligned += w * (a @ p + d + zf * z)
+            m = np.array(
+                [[row["xf_a11"], row["xf_a12"]], [row["xf_a21"], row["xf_a22"]]]
+            )
+            shift = np.array([row["xf_dx"], row["xf_dy"]])
+            out[n, t] = np.linalg.solve(m, aligned - shift)
+    return out[..., ::-1] * scale  # (y, x) in nm
+
+
+def _etomo_dataframe(rng, n=7, magnification=True):
+    pd = pytest.importorskip("pandas")
+    angles = np.radians(rng.normal(-177, 1, n))
+    mag = rng.uniform(0.99, 1.01, n) if magnification else np.ones(n)
+    stretch = rng.normal(scale=0.003, size=n) if magnification else np.zeros(n)
+    excluded = np.zeros(n, dtype=bool)
+    excluded[2] = True
+    return pd.DataFrame(
+        {
+            "image_path": [f"TS_01.st[{i}]" for i in range(n)],
+            "idx_tilt": np.arange(n),
+            "tilt_axis_angle": [177.0] * n,  # nominal value in .edf
+            "rawtlt": np.linspace(-45, 45, n),
+            "tlt": np.linspace(-45, 45, n) + 0.3,
+            "xtilt": rng.normal(size=n),
+            "xaxistilt": [1.5] * n,
+            "xf_a11": mag * np.cos(angles) + stretch,
+            "xf_a12": -mag * np.sin(angles),
+            "xf_a21": mag * np.sin(angles),
+            "xf_a22": mag * np.cos(angles),
+            "xf_dx": rng.normal(scale=5, size=n),
+            "xf_dy": rng.normal(scale=5, size=n),
+            "excluded": excluded,
+        }
+    )
+
+
+@pytest.mark.parametrize("magnification", [True, False])
+def test_from_etomo_directory_global(tmp_path, monkeypatch, magnification):
+    etomofiles = pytest.importorskip("etomofiles")
+    df = _etomo_dataframe(np.random.default_rng(9), magnification=magnification)
+    monkeypatch.setattr(etomofiles, "read", lambda path: df.copy())
+    scale = 0.2
+    ts = TiltSeries.from_etomo_directory(tmp_path, scale=scale)
+    kept = df.loc[~df["excluded"]]
+    assert ts.ntilts == 6
+    assert_allclose(ts.image_indices, [0, 1, 3, 4, 5, 6])
+    points = _points(10)
+    expected = _imod_projection(points, kept, 1.5, None, scale, (100, 100), False)
+    assert_allclose(ts.project_points(points), expected, atol=1e-8)
+    if magnification:
+        assert isinstance(ts.local_shifts_2d, AffineShifts2D)
+    else:
+        assert ts.local_shifts_2d is None
+        angles = np.degrees(np.arctan2(kept["xf_a21"], kept["xf_a11"]))
+        assert_allclose(np.cos(np.radians(ts.tilt_axis_angle + angles)), 1.0)
+
+
+def test_from_etomo_directory_local(tmp_path, monkeypatch):
+    etomofiles = pytest.importorskip("etomofiles")
+    rng = np.random.default_rng(11)
+    df = _etomo_dataframe(rng)
+    monkeypatch.setattr(etomofiles, "read", lambda path: df.copy())
+    scale, shape = 0.25, (1200, 1000)  # (NY, NX) of the images
+    gy, gx, n = 3, 4, len(df)
+    xf = np.zeros((gy, gx, n, 6))
+    xf[..., :4] = np.eye(2).ravel() + rng.normal(scale=0.005, size=(gy, gx, n, 4))
+    xf[..., 4:] = rng.normal(scale=2, size=(gy, gx, n, 2))
+    local = {
+        "grid": (150.0, 200.0, 250.0, 300.0),  # X_start, Y_start, dX, dY in pixels
+        "dtilt": rng.normal(scale=0.5, size=(gy, gx, n)),
+        "dxtilt": rng.normal(scale=0.5, size=(gy, gx, n)),
+        "zf": rng.normal(scale=0.01, size=(gy, gx, n, 2)),
+        "xf": xf,
+    }
+    _write_imod_local(tmp_path / "TS_01local.xf", local, scale * 10)
+    tilt_com = ["# comment", "$tilt -StandardInput", "LOCALFILE TS_01local.xf"]
+    tilt_com.append(f"FULLIMAGE {shape[1]} {shape[0]}")
+    (tmp_path / "tilt.com").write_text("\n".join(tilt_com) + "\n")
+
+    kept = df.loc[~df["excluded"]]
+    points = np.concatenate(
+        [
+            rng.uniform(-30, 30, (40, 1)),
+            rng.uniform(-0.6, 0.6, (40, 2)) * np.array(shape) * scale,
+        ],
+        axis=1,
+    )
+    without = TiltSeries.from_etomo_directory(tmp_path, scale=scale)
+    ts = TiltSeries.from_etomo_directory(tmp_path, scale=scale, local_alignment=True)
+    assert isinstance(ts.local_shifts_2d, AffineShifts2D)
+    assert isinstance(ts.local_shifts_2d.base, LocalAlignment)
+    expected = _imod_projection(points, kept, 1.5, local, scale, shape, False)
+    assert_allclose(ts.project_points(points), expected, atol=1e-6)
+    assert (
+        np.abs(ts.project_points(points) - without.project_points(points)).max() > 0.5
+    )
+
+    # the file can be given, and the Z factors are used with ZFACTORFILE
+    (tmp_path / "tilt.com").write_text(
+        "\n".join(tilt_com[:2] + tilt_com[3:] + ["ZFACTORFILE TS_01.zfac"]) + "\n"
+    )
+    with pytest.warns(UserWarning, match="ZFACTORFILE"):
+        ts = TiltSeries.from_etomo_directory(
+            tmp_path, scale=scale, local_alignment="TS_01local.xf"
+        )
+    expected = _imod_projection(points, kept, 1.5, local, scale, shape, True)
+    assert_allclose(ts.project_points(points), expected, atol=1e-6)
+    out = TiltSeries.from_json(ts.dump_json())
+    assert_allclose(out.project_points(points), ts.project_points(points))
+
+
+def test_from_etomo_directory_no_local_file(tmp_path, monkeypatch):
+    etomofiles = pytest.importorskip("etomofiles")
+    df = _etomo_dataframe(np.random.default_rng(12))
+    monkeypatch.setattr(etomofiles, "read", lambda path: df.copy())
+    with pytest.raises(ValueError, match="local alignment"):
+        TiltSeries.from_etomo_directory(tmp_path, scale=0.2, local_alignment=True)

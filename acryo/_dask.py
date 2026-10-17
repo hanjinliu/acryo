@@ -278,7 +278,8 @@ class _SubvolumeCropper:
 
     def __call__(self, blocks: list[Any], region: SubvolumeRegion):
         xp = self.backend
-        subimg = _assemble_region(blocks, region, xp)
+        # float16 is not supported in interpolation
+        subimg = _assemble_region(blocks, region, xp, upcast_float16=True)
         out = xp.rotated_crop(
             subimg,
             region.matrix,
@@ -303,8 +304,17 @@ class _RegionCropper:
         return _assemble_region(blocks, region, self.backend)[np.newaxis]
 
 
-def _assemble_region(blocks: list[Any], region: SubvolumeRegion, xp: Backend):
-    """Assemble the region from the image blocks and pad it if needed."""
+def _assemble_region(
+    blocks: list[Any],
+    region: SubvolumeRegion,
+    xp: Backend,
+    upcast_float16: bool = False,
+):
+    """Assemble the region from the image blocks and pad it if needed.
+
+    If ``upcast_float16`` is true, float16 regions are converted to float32 before
+    padding.
+    """
     # only the small pieces of the blocks are copied
     pieces = [block[src] for block, src in zip(blocks, region.src)]
     for axis in reversed(range(len(region.grid))):
@@ -314,6 +324,8 @@ def _assemble_region(blocks: list[Any], region: SubvolumeRegion, xp: Backend):
                 for k in range(0, len(pieces), n)
             ]
     subimg = xp.asarray(pieces[0])
+    if upcast_float16 and subimg.dtype == np.float16:
+        subimg = subimg.astype(np.float32)
     if region.pads is not None:
         subimg = xp.pad(subimg, region.pads, mode="mean")
     return subimg
