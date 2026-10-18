@@ -63,3 +63,7 @@ def test_binning():
         MockLoader(template[:7], mole).binning(2)
     with pytest.raises(ValueError):
         loader.binning(1.5)
+    with pytest.raises(ValueError):
+        loader.binning(0)
+    assert loader.binning(1).scale == loader.scale
+    assert loader.replace(scale=2.0).scale == 2.0

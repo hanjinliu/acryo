@@ -9,6 +9,7 @@ import pytest
 from scipy import ndimage as ndi
 from scipy.spatial.transform import Rotation
 import polars as pl
+from dask import array as da
 
 
 def test_replace():
@@ -52,6 +53,32 @@ def test_add_tomograms():
     loader = loader.copy()
     loader.add_loader(sub)
     loader.add_loader(loader.copy())
+
+
+def test_edge_cases():
+    rng = np.random.default_rng(0)
+    img = da.from_array(rng.normal(size=(10, 10, 10)).astype(np.float32), chunks=5)
+    batch = BatchLoader()
+    assert list(batch.loaders) == []
+    batch.add_tomogram(img, Molecules.empty(), image_id=1)
+    assert batch.count() == 0
+    # the generated image ID does not conflict
+    batch.add_tomogram(img, Molecules(np.full((2, 3), 5.0)))
+    assert list(batch.images) == [1, 2]
+    with pytest.raises(KeyError):
+        batch.loaders[1]  # no molecules
+    # sources without molecules are also binned
+    template = rng.normal(size=(4, 4, 4)).astype(np.float32)
+    batch.add_loader(MockLoader(template, Molecules.empty()), image_id=3)
+    binned = batch.binning(2, compute=True)
+    assert all(isinstance(img, np.ndarray) for img in binned.images.values())
+    assert binned.images[2].shape == (5, 5, 5)
+    assert binned._sources[3].output_shape == (2, 2, 2)
+    assert binned.binning(1).scale == binned.scale == 2.0
+    # the accessor does not keep the loader alive
+    accessor = BatchLoader().loaders
+    with pytest.raises(RuntimeError):
+        len(accessor)
 
 
 def test_get_loader():
@@ -227,6 +254,7 @@ def test_interleaved_molecules():
     assert shuffled.features["image-id"].to_list() == image_ids
 
     ref = batch.asnumpy()[order]
+    assert len(batch.construct_loading_tasks()) == len(order)
     assert_allclose(shuffled.asnumpy(), ref, atol=1e-6)
     each = np.stack([task.compute() for task in shuffled.construct_loading_tasks()])
     assert_allclose(each, ref, atol=1e-6)
