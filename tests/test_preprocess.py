@@ -206,6 +206,35 @@ def test_ctf_correction_per_tilt():
         correction(freq, 0.0, 3)
 
 
+def test_select_tilts():
+    defocus = [-1.0, -2.0, -3.0, -4.0]
+    calls: list[int] = []
+
+    def _filter(freq_y, freq_x, index):
+        calls.append(index)
+        return 1.0
+
+    preprocessor = (
+        TiltImagePreprocessor(low=0.01)
+        .with_ctf(CTF, defocus=defocus)
+        .with_ctf(CTF)
+        .with_filters(_filter)
+    )
+    selected = preprocessor.select_tilts([3, 1])
+    assert selected.low == 0.01
+    per_tilt, single, generic = selected.filters
+    # the CTF models of the selected tilts
+    assert [m.defocus for m in per_tilt.models] == [-4.0, -2.0]
+    assert single is preprocessor.filters[1]
+    # other filters are called with the indices before the selection
+    generic(0.0, 0.0, 0)
+    generic(0.0, 0.0, 1)
+    generic.select_tilts([1])(0.0, 0.0, 0)
+    assert calls == [3, 1, 1]
+    image = _image((32, 40))
+    assert_allclose(selected(image, index=0), preprocessor(image, index=3))
+
+
 def test_ctf_correction_invalid_input():
     with pytest.raises(ValueError):
         CTFCorrection(())

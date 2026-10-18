@@ -176,12 +176,10 @@ class BackProjectionLoader(LoaderBase):
             raise ValueError(f"'padding' must be >= 1, got {padding!r}.")
         if binsize <= 0:
             raise ValueError(f"'binsize' must be positive, got {binsize!r}.")
+        # the default tilt model is created again if the tilts are excluded
+        self._default_tilt_model = tilt_model is None
         if tilt_model is None:
-            # mirroring along the z axis inverts the tilt angles
-            angles = tilt_series.tilt_angles * tomo_hand
-            tilt_model = single_axis(
-                (float(angles.min()), float(angles.max())), axis="y"
-            )
+            tilt_model = _default_tilt_model(tilt_series, tomo_hand)
         self._images = _TiltSeriesImages(tilt_series, preprocessor)
         self._molecules = molecules
         self._corner_safe = corner_safe
@@ -264,8 +262,9 @@ class BackProjectionLoader(LoaderBase):
         preprocessed tilt images (of each binning factor) and the reconstructors are
         cached, and reused by this loader and the loaders created from it, such as the
         results of :meth:`replace`, :meth:`binning`, :meth:`align`,
-        :meth:`with_tilt_series` and :meth:`refine_tilt_series`. The cache is released when the outermost context
-        exits. Lazy arrays created in the context can still be computed after that.
+        :meth:`with_tilt_series`, :meth:`refine_tilt_series` and
+        :meth:`exclude_tilts`. The cache is released when the outermost context exits.
+        Lazy arrays created in the context can still be computed after that.
 
         Examples
         --------
@@ -322,6 +321,7 @@ class BackProjectionLoader(LoaderBase):
             binsize=binsize,
         )
         out._images = self._images  # share the loaded tilt images
+        out._default_tilt_model = self._default_tilt_model
         return out
 
     def with_tilt_series(self, tilt_series: TiltSeries) -> Self:
@@ -337,6 +337,48 @@ class BackProjectionLoader(LoaderBase):
             out._images = self._images.with_tilt_series(tilt_series)
         else:
             out._images = _TiltSeriesImages(tilt_series, self.preprocessor)
+        return out
+
+    def exclude_tilts(self, indices: SupportsIndex | Iterable[SupportsIndex]) -> Self:
+        """Return a new instance without the given tilts.
+
+        Subtomograms are reconstructed from the rest of the tilt images, and the images
+        of the excluded tilts are not read. The tilt series and the preprocessor are
+        converted by their ``select_tilts`` methods, so the filters of each tilt, such
+        as the CTF correction, are kept. If ``tilt_model`` was not given, it is created
+        again from the remaining tilt angles. The cache of the tilt images (see
+        :meth:`cache_tilt_images`) is shared with this loader.
+
+        Parameters
+        ----------
+        indices : int or sequence of int
+            Indices of the tilts to exclude in the tilt series of this loader (such as
+            ``tilt_series.tilt_angles[i]``). They are not the indices of the images in
+            the file, which differ if the tilt series is read with excluded views
+            (such as by :meth:`TiltSeries.from_etomo_directory`).
+
+        Examples
+        --------
+        >>> loader.exclude_tilts([0, 1])  # exclude the first two tilts
+        >>> angles = loader.tilt_series.tilt_angles
+        >>> loader.exclude_tilts(np.flatnonzero(np.abs(angles) > 50))
+        """
+        ntilts = self.tilt_series.ntilts
+        excluded = np.atleast_1d(np.asarray(indices))
+        if excluded.size == 0:
+            return self.replace()
+        if excluded.ndim != 1 or not np.issubdtype(excluded.dtype, np.integer):
+            raise TypeError(
+                f"'indices' must be int or a sequence of int, got {indices!r}."
+            )
+        excluded = np.arange(ntilts)[excluded]  # IndexError if out of range
+        keep = np.setdiff1d(np.arange(ntilts), excluded)
+        if keep.size == 0:
+            raise ValueError("Cannot exclude all the tilts.")
+        out = self.replace()
+        out._images = self._images.select_tilts(keep)
+        if self._default_tilt_model:
+            out._tilt_model = _default_tilt_model(out.tilt_series, self.tomo_hand)
         return out
 
     def binning(self, binsize: float = 2, *, compute: bool = True) -> Self:
@@ -686,7 +728,8 @@ class _ImageCache:
     def __init__(self):
         self.lock = threading.RLock()
         self._depth = 0
-        self.images: dict[int, NDArray[np.float32]] = {}
+        # (binsize, selection of the tilts) -> images
+        self.images: dict[tuple[int, bytes | None], NDArray[np.float32]] = {}
         self.reconstructors: dict[tuple[Any, ...], DirectFourierReconstructor] = {}
 
     @property
@@ -726,10 +769,18 @@ class _TiltSeriesImages:
         tilt_series: TiltSeries,
         preprocessor: TiltImagePreprocessor | None,
         cache: _ImageCache | None = None,
+        selection: NDArray[np.intp] | None = None,
     ):
         self.tilt_series = tilt_series
         self.preprocessor = preprocessor
         self.cache = cache if cache is not None else _ImageCache()
+        # Indices of the tilts in the images that created the cache, if some tilts are
+        # excluded. The images are cropped from the cached images of all the tilts.
+        self.selection = selection
+
+    def _cache_key(self, binsize: int) -> tuple[int, bytes | None]:
+        sel = self.selection
+        return binsize, None if sel is None else sel.tobytes()
 
     @property
     def scale(self) -> nm:
@@ -759,11 +810,17 @@ class _TiltSeriesImages:
         """
         cache = self.cache
         with cache.lock:
-            images = cache.images.get(binsize)
+            key = self._cache_key(binsize)
+            images = cache.images.get(key)
+            if images is None and self.selection is not None:
+                all_images = cache.images.get((binsize, None))
+                if all_images is not None:
+                    images = all_images[self.selection]
+                    images.setflags(write=False)
             if images is None:
                 images = self._load(binsize)
                 if cache.enabled:
-                    cache.images[binsize] = images
+                    cache.images[key] = images
         return self.binned_tilt_series(binsize), images
 
     def reconstructor(
@@ -772,7 +829,7 @@ class _TiltSeriesImages:
         """Get the reconstructor of cubes from the tilt images binned by binsize."""
         rotations = self.tilt_series.detector2tomo
         key = (
-            binsize,
+            self._cache_key(binsize),
             round(output_scale, 8),
             sidelength,
             padding,
@@ -797,7 +854,22 @@ class _TiltSeriesImages:
 
     def with_tilt_series(self, tilt_series: TiltSeries) -> _TiltSeriesImages:
         """Return a new instance of another geometry for the same tilt images."""
-        return _TiltSeriesImages(tilt_series, self.preprocessor, cache=self.cache)
+        return _TiltSeriesImages(
+            tilt_series, self.preprocessor, cache=self.cache, selection=self.selection
+        )
+
+    def select_tilts(self, indices: NDArray[np.intp]) -> _TiltSeriesImages:
+        """Return a new instance of the selected tilts, which shares the cache."""
+        preprocessor = self.preprocessor
+        if preprocessor is not None:
+            preprocessor = preprocessor.select_tilts(indices)
+        selection = indices if self.selection is None else self.selection[indices]
+        return _TiltSeriesImages(
+            self.tilt_series.select_tilts(indices),
+            preprocessor,
+            cache=self.cache,
+            selection=selection,
+        )
 
     def _load(self, binsize: int) -> NDArray[np.float32]:
         tilt_series = self.tilt_series
@@ -856,6 +928,13 @@ def _as_tilt_series(tilt_series: TiltSeries) -> TiltSeries:
     if isinstance(tilt_series, TiltSeries):
         return tilt_series
     raise TypeError(f"Expected a TiltSeries, got {type(tilt_series)}.")
+
+
+def _default_tilt_model(tilt_series: TiltSeries, tomo_hand: int) -> TiltSeriesModel:
+    """Single-axis tilt model around the y axis from the tilt angles."""
+    # mirroring along the z axis inverts the tilt angles
+    angles = tilt_series.tilt_angles * tomo_hand
+    return single_axis((float(angles.min()), float(angles.max())), axis="y")
 
 
 def _same_tilt_images(ts0: TiltSeries, ts1: TiltSeries) -> bool:

@@ -1,11 +1,12 @@
 import dataclasses
 import json
+from pathlib import Path
 
 import numpy as np
 from numpy.testing import assert_allclose
 import pytest
 
-from acryo.projection import LocalShifts2D, TiltSeries
+from acryo.projection import AffineShifts2D, LocalShifts2D, TiltSeries
 
 NTILTS = 21
 
@@ -148,6 +149,53 @@ def test_json_without_geometry():
     out = TiltSeries.from_json(json.dumps(data))
     assert_allclose(out.x_tilts, [0.0, 0.0, 0.0])
     assert_allclose(out.sample2tomo, np.eye(4))
+
+
+def test_select_tilts():
+    ts = _random_tilt_series()
+    rng = np.random.default_rng(3)
+    affine = AffineShifts2D(
+        np.eye(2) + rng.normal(scale=0.01, size=(NTILTS, 2, 2)),
+        rng.normal(size=(NTILTS, 2)),
+        base=ts.local_shifts_2d,
+    )
+    ts = ts.replace(local_shifts_2d=affine)
+    indices = [3, 0, 7, -1]
+    out = ts.select_tilts(indices)
+    assert out.ntilts == 4
+    for name in ["tilt_angles", "tilt_axis_angle", "sample_translations", "x_tilts"]:
+        assert_allclose(getattr(out, name), getattr(ts, name)[indices], err_msg=name)
+    assert_allclose(out.image_indices, ts.image_indices[indices])
+    assert out.image_path == ts.image_path and out.scale == ts.scale
+    # the selected tilts are projected in the same way
+    points = rng.normal(scale=50.0, size=(10, 3))
+    assert_allclose(
+        out.project_points(points), ts.project_points(points)[:, indices], atol=1e-10
+    )
+
+
+def test_select_tilts_of_images():
+    # all the images in the stack are the tilts
+    ts = _random_tilt_series(image_indices=None)
+    assert_allclose(ts.select_tilts([1, 4]).image_indices, [1, 4])
+    # no image
+    assert ts.replace(image_path=None).select_tilts([1, 4]).image_indices is None
+    # separate image files
+    paths = [f"tilt_{i}.mrc" for i in range(NTILTS)]
+    out = ts.replace(image_path=paths).select_tilts([2, 0])
+    assert out.image_path == (Path("tilt_2.mrc"), Path("tilt_0.mrc"))
+    assert out.image_indices is None
+
+
+@pytest.mark.parametrize("indices", [[], [[0, 1]], [0.0, 1.0]])
+def test_select_tilts_invalid_input(indices):
+    with pytest.raises(ValueError):
+        _random_tilt_series().select_tilts(indices)
+
+
+def test_select_tilts_out_of_range():
+    with pytest.raises(IndexError):
+        _random_tilt_series().select_tilts([0, NTILTS])
 
 
 def test_broadcast_and_defaults():

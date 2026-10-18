@@ -162,6 +162,48 @@ class TiltSeries:
         """Return a new tilt series with the given attributes replaced."""
         return dataclasses.replace(self, **kwargs)
 
+    def select_tilts(self, indices: ArrayLike) -> Self:
+        """Return the tilt series of the selected tilts.
+
+        The alignment, ``local_shifts_2d``, ``image_path`` and ``image_indices`` of the
+        selected tilts are kept, so the selected tilts are projected and read from the
+        same images as before.
+
+        Parameters
+        ----------
+        indices : sequence of int
+            Indices of the tilts to keep (such as ``tilt_angles[i]``), in the order of
+            the new tilt series. They are not the indices of the images in the file.
+        """
+        idx = np.asarray(indices)
+        if idx.ndim != 1 or idx.size == 0 or not np.issubdtype(idx.dtype, np.integer):
+            raise ValueError(
+                f"'indices' must be a non-empty sequence of int, got {indices!r}."
+            )
+        idx = np.arange(self.ntilts)[idx]  # IndexError if out of range
+        image_path = self.image_path
+        image_indices = self.image_indices
+        if image_indices is not None:
+            image_indices = image_indices[idx]
+        elif isinstance(image_path, Path):
+            # all the images in the stack are the tilts
+            image_indices = idx
+        if isinstance(image_path, tuple):
+            image_path = tuple(image_path[i] for i in idx)
+        return self.replace(
+            tilt_angles=self.tilt_angles[idx],
+            tilt_axis_angle=self.tilt_axis_angle[idx],
+            sample_translations=self.sample_translations[idx],
+            x_tilts=self.x_tilts[idx],
+            local_shifts_2d=(
+                self.local_shifts_2d.select_tilts(idx)
+                if self.local_shifts_2d is not None
+                else None
+            ),
+            image_path=image_path,
+            image_indices=image_indices,
+        )
+
     @property
     def sample2tomo(self) -> NDArray[np.float64]:
         """(4, 4) affine matrix from the sample space to the tomogram space."""

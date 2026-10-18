@@ -12,7 +12,7 @@ from acryo.projection import (
     TiltImagePreprocessor,
     TiltSeries,
 )
-from acryo.tilt import SingleAxis
+from acryo.tilt import SingleAxis, single_axis
 
 mrcfile = pytest.importorskip("mrcfile")
 
@@ -818,7 +818,7 @@ def test_cache_is_shared_and_nested(blob_tilt_series, monkeypatch):
         with derived.cache_tilt_images():
             ref = derived.asnumpy()
         # the cache is kept until the outermost context exits
-        assert set(loader._images.cache.images) == {1}
+        assert set(loader._images.cache.images) == {(1, None)}
         loader.asnumpy()
         # created in the context, computed after the context
         stack = derived.construct_dask()
@@ -848,6 +848,126 @@ def test_image_indices(tmp_path, blob_tilt_series):
     mole = Molecules(BLOBS + CENTER, Rotation.random(len(BLOBS), random_state=9))
     ref = _loader(blob_tilt_series, mole).asnumpy()
     assert_allclose(_loader(ts, mole).asnumpy(), ref, atol=1e-5)
+
+
+EXCLUDED = [0, 5, TILT_ANGLES.size - 1]
+KEPT = np.setdiff1d(np.arange(TILT_ANGLES.size), EXCLUDED)
+
+
+@pytest.mark.parametrize("tomo_hand", [1, -1])
+def test_exclude_tilts(tmp_path, blob_tilt_series, tomo_hand):
+    # the tilt series of the kept tilts, made from scratch
+    raw = mrcfile.read(blob_tilt_series.image_path)
+    path = tmp_path / "kept.mrc"
+    with mrcfile.new(path) as mrc:
+        mrc.set_data(raw[KEPT])
+    ts = blob_tilt_series
+    ref_ts = TiltSeries(
+        tilt_angles=ts.tilt_angles[KEPT],
+        tilt_axis_angle=ts.tilt_axis_angle[KEPT],
+        sample_translations=ts.sample_translations[KEPT],
+        scale=IMAGE_SCALE,
+        image_path=path,
+    )
+    rot = Rotation.random(len(BLOBS), random_state=13)
+    blobs = BLOBS if tomo_hand == 1 else _mirror_z(BLOBS)
+    mole = Molecules(blobs + CENTER, rot)
+    loader = _loader(ts, mole, tomo_hand=tomo_hand)
+    out = loader.exclude_tilts(EXCLUDED)
+    assert isinstance(out, BackProjectionLoader)
+    assert out.tilt_series.ntilts == KEPT.size
+    assert_allclose(out.tilt_series.image_indices, KEPT)
+    assert out.molecules is loader.molecules
+    assert out.tomo_hand == tomo_hand
+    assert loader.tilt_series is ts  # not modified
+    ref = _loader(ref_ts, mole, tomo_hand=tomo_hand)
+    assert_allclose(out.asnumpy(), ref.asnumpy(), atol=1e-5)
+    # the default tilt model is created from the remaining tilt angles
+    assert out.tilt_model.tilt_range == ref.tilt_model.tilt_range
+    assert out.tilt_model.tilt_range != loader.tilt_model.tilt_range
+    derived = loader.replace(output_shape=(9, 9, 9)).exclude_tilts(EXCLUDED)
+    assert derived.tilt_model.tilt_range == ref.tilt_model.tilt_range
+    # the indices are of the tilt series of the loader
+    twice = loader.exclude_tilts(0).exclude_tilts([4, -1])
+    assert_allclose(twice.tilt_series.image_indices, KEPT)
+    assert_allclose(twice.asnumpy(), out.asnumpy(), atol=1e-6)
+
+
+def test_exclude_tilts_keeps_given_tilt_model(blob_tilt_series):
+    tilt_model = single_axis((-60.0, 60.0), axis="y")
+    loader = _loader(blob_tilt_series, Molecules(BLOBS + CENTER), tilt_model=tilt_model)
+    assert loader.exclude_tilts(EXCLUDED).tilt_model is tilt_model
+    assert loader.replace().exclude_tilts(EXCLUDED).tilt_model is tilt_model
+
+
+def test_exclude_tilts_with_filters(blob_tilt_series):
+    plain = TiltImagePreprocessor(normalize=False)
+    scaled = plain.with_filters(lambda fy, fx, index: float(index + 1))
+    mole = Molecules(BLOBS + CENTER)
+    ref = _loader(blob_tilt_series, mole, preprocess=plain)._images.get(2)[1]
+    loader = _loader(blob_tilt_series, mole, preprocess=scaled).exclude_tilts(EXCLUDED)
+    # the filters are applied to the same tilts as before
+    factors = (KEPT + 1)[:, np.newaxis, np.newaxis]
+    assert_allclose(loader._images.get(2)[1], ref[KEPT] * factors, rtol=1e-4, atol=1e-4)
+    # the preprocessor is consistent with the tilt series
+    same = _loader(loader.tilt_series, mole, preprocess=loader.preprocessor)
+    assert_allclose(same._images.get(2)[1], loader._images.get(2)[1])
+
+
+def test_exclude_tilts_cache(blob_tilt_series, monkeypatch):
+    from acryo.loader._back_projection import _TiltSeriesImages
+    from acryo.projection._io import MrcImageStack
+
+    loaded: list[tuple[int, int]] = []
+    read: list[int] = []
+    _load = _TiltSeriesImages._load
+    _iter_images = MrcImageStack.iter_images
+
+    def _recorded_load(self, binsize):
+        loaded.append((self.tilt_series.ntilts, binsize))
+        return _load(self, binsize)
+
+    def _recorded_iter_images(self, indices):
+        indices = list(indices)
+        read.extend(indices)
+        return _iter_images(self, indices)
+
+    monkeypatch.setattr(_TiltSeriesImages, "_load", _recorded_load)
+    monkeypatch.setattr(MrcImageStack, "iter_images", _recorded_iter_images)
+    mole = Molecules(BLOBS + CENTER, Rotation.random(len(BLOBS), random_state=14))
+    loader = _loader(blob_tilt_series, mole)
+    ntilts = TILT_ANGLES.size
+    with loader.cache_tilt_images():
+        images = loader._images.get(1)[1]
+        out = loader.exclude_tilts(EXCLUDED)
+        # cropped from the cached images of all the tilts
+        assert_allclose(out._images.get(1)[1], images[KEPT])
+        out.average()
+        out.exclude_tilts([0]).average()
+        assert loaded == [(ntilts, 1)]
+        # only the images of the kept tilts are loaded and cached
+        read.clear()
+        out.binning(2).average()
+        out.binning(2).average()
+        assert loaded == [(ntilts, 1), (KEPT.size, 2)]
+        assert read == KEPT.tolist()
+    assert loader._images.cache.images == {}
+    # the images of the excluded tilts are not read
+    read.clear()
+    loader.exclude_tilts(EXCLUDED).average()
+    assert read == KEPT.tolist()
+
+
+def test_exclude_tilts_invalid_input(blob_tilt_series):
+    loader = _loader(blob_tilt_series, Molecules(BLOBS + CENTER))
+    assert loader.exclude_tilts(3).tilt_series.ntilts == TILT_ANGLES.size - 1
+    assert loader.exclude_tilts([]).tilt_series is loader.tilt_series
+    with pytest.raises(ValueError):
+        loader.exclude_tilts(np.arange(TILT_ANGLES.size))
+    with pytest.raises(IndexError):
+        loader.exclude_tilts([TILT_ANGLES.size])
+    with pytest.raises(TypeError):
+        loader.exclude_tilts([0.5])
 
 
 @pytest.mark.parametrize("scale", [1.0, 1.5])  # binsize 2 and 3
