@@ -337,6 +337,71 @@ def test_extracted_subvolumes_resampled_at_molecules(tmp_path):
     assert_allclose(sub.asnumpy()[sl], ref[[3, 0, 2]][sl], atol=1e-4)
 
 
+def _blob_image_and_molecules(sigma: float = 1.5, seed: int = 4):
+    """Gaussian blobs at the molecules of random sub-pixel positions."""
+    rng = np.random.default_rng(seed)
+    corners = np.array([[13, 13, 13], [13, 27, 27], [27, 13, 27], [27, 27, 13]])
+    pos = corners + rng.uniform(-0.5, 0.5, size=corners.shape)
+    zz, yy, xx = np.indices((40, 40, 40), dtype=np.float32)
+    img = np.zeros((40, 40, 40), dtype=np.float32)
+    for z, y, x in pos:
+        img += np.exp(-((zz - z) ** 2 + (yy - y) ** 2 + (xx - x) ** 2) / 2 / sigma**2)
+    return img, Molecules(pos, Rotation.random(len(pos), random_state=seed))
+
+
+def _center_of_mass(img: np.ndarray) -> np.ndarray:
+    weight = np.clip(img.astype(np.float64), 0, None) ** 4
+    inds = np.indices(img.shape).reshape(3, -1)
+    return (inds * weight.ravel()).sum(axis=1) / weight.sum()
+
+
+@pytest.mark.parametrize("shape", [(10, 10, 10), (11, 10, 9)])
+@pytest.mark.parametrize("pre_transform", [False, True])
+@pytest.mark.parametrize("order, apply_prefilter", [(1, False), (3, True)])
+def test_extracted_subvolumes_binning(
+    tmp_path, shape, pre_transform, order, apply_prefilter
+):
+    from acryo._utils import bin_image
+
+    img, mole = _blob_image_and_molecules()
+    loader = SubtomogramLoader(img, mole, order=order, output_shape=shape)
+    extracted = loader.extract_subtomograms(
+        tmp_path / "ext", pre_transform=pre_transform, apply_prefilter=apply_prefilter
+    )
+    binned = extracted.binning(2, compute=False)
+    binned_shape = tuple(s // 2 for s in shape)
+    assert binned.output_shape == binned_shape
+    assert binned.scale == 2.0
+    if not pre_transform and shape == (10, 10, 10):
+        ref = np.stack([bin_image(sub, 2) for sub in extracted.asnumpy()])
+        assert_allclose(binned.asnumpy(), ref, rtol=1e-5, atol=1e-5)
+    assert_allclose(binned.binning(1).asnumpy(), binned.asnumpy())
+    assert_allclose(extracted.binning(2).asnumpy(), binned.asnumpy())
+
+    # consistent with the binned tomogram
+    loader_binned = loader.binning(2).replace(output_shape=binned_shape)
+    assert_allclose(binned.molecules.pos, loader_binned.molecules.pos)
+    center = (np.array(binned_shape) - 1) / 2
+    for sub, ref in zip(binned.asnumpy(), loader_binned.asnumpy()):
+        assert_allclose(_center_of_mass(sub), center, atol=0.15)
+        # NOTE: subvolumes not divisible by 2 are interpolated again
+        assert np.corrcoef(sub.ravel(), ref.ravel())[0, 1] > 0.9
+    # subvolumes are resampled at the molecules in the binned pixel size
+    moved = binned.replace(molecules=binned.molecules.translate_internal([2, 0, 0]))
+    for sub in moved.asnumpy():
+        assert_allclose(_center_of_mass(sub), center - [1, 0, 0], atol=0.15)
+
+
+def test_extracted_subvolumes_binning_invalid(tmp_path):
+    img, mole = _blob_image_and_molecules()
+    loader = SubtomogramLoader(img, mole, order=1, output_shape=(4, 4, 4))
+    extracted = loader.extract_subtomograms(tmp_path / "ext")
+    with pytest.raises(ValueError):
+        extracted.binning(1.5)
+    with pytest.raises(ValueError):
+        extracted.binning(5)
+
+
 def test_order_optimize():
     img, mole = _random_image_and_molecules(n=40)
     # more than 10 chunks along each axis, so that the chunk labels are not sorted

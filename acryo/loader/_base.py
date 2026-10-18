@@ -148,6 +148,18 @@ class LoaderBase(ABC):
     ) -> Self:
         """Return a new loader with updated attributes."""
 
+    @abstractmethod
+    def binning(self, binsize: int = 2, *, compute: bool = True) -> Self:
+        """Return a new loader of ``binsize`` times larger pixel size.
+
+        Parameters
+        ----------
+        binsize : int, default is 2
+            Bin size.
+        compute : bool, default is True
+            If true, the binned images are computed immediately if possible.
+        """
+
     def copy(self) -> Self:
         """Return a copy of the loader."""
         return self.replace()

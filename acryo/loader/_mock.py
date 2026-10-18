@@ -155,8 +155,41 @@ class MockLoader(LoaderBase):
             molecules=molecules,
             noise=self._noise,
             degrees=self._degrees,
+            central_axis=tuple(self._central_axis),
             order=order,
             scale=scale,
+        )
+
+    def binning(self, binsize: int = 2, *, compute: bool = True) -> Self:
+        """Return a new instance with binned template.
+
+        An array template is binned, and an ``ImageProvider`` template is provided at
+        the binned scale. The molecules are not translated, as they are relative to
+        the true center. ``compute`` has no effect.
+        """
+        if binsize <= 0:
+            raise ValueError(f"'binsize' must be positive, got {binsize!r}.")
+        if binsize == 1:
+            return self.copy()
+        template = self._template
+        if not isinstance(template, ImageProvider):
+            if int(binsize) != binsize:
+                raise ValueError(f"'binsize' must be an integer, got {binsize!r}.")
+            # the center of the template is kept only if the shape is divisible
+            if any(s % binsize for s in template.shape):
+                raise ValueError(
+                    f"Shape of the template {template.shape} is not divisible by "
+                    f"{binsize}."
+                )
+            template = _utils.bin_image(template, int(binsize))
+        return self.__class__(
+            template,
+            molecules=self.molecules,
+            noise=self._noise,
+            degrees=self._degrees,
+            central_axis=tuple(self._central_axis),
+            order=self.order,
+            scale=self.scale * binsize,
         )
 
 

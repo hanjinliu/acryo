@@ -215,6 +215,63 @@ class ExtractedSubvolumeLoader(LoaderBase):
             extracted_molecules=self._extracted_molecules,
         )
 
+    def binning(self, binsize: int = 2, *, compute: bool = True) -> Self:
+        """Return a new instance with binned subvolumes.
+
+        The stored subvolumes are binned, so the output shape is also divided by
+        ``binsize``, keeping the region around the molecules. As in
+        `SubtomogramLoader.binning`, the molecules are translated to the coordinates
+        of the binned tomogram. The binned subvolumes are not prefiltered.
+
+        Parameters
+        ----------
+        binsize : int, default is 2
+            Bin size.
+        compute : bool, default is True
+            If true, the binned subvolumes are computed immediately to a numpy array.
+        """
+        if binsize < 1 or int(binsize) != binsize:
+            raise ValueError(f"'binsize' must be a positive integer, got {binsize!r}.")
+        binsize = int(binsize)
+        if binsize == 1:
+            return self.copy()
+        dsk = self._dask_array
+        stored_shape = dsk.shape[1:]
+        if any(s < binsize for s in stored_shape + tuple(self.output_shape)):
+            raise ValueError(
+                f"Subvolumes of shape {stored_shape} and output shape "
+                f"{self.output_shape} are too small to bin by {binsize}."
+            )
+        if self._is_array_prefiltered:
+            # interpolation at the grid points converts the coefficients to the image
+            dsk = map_subvolumes_to_array(
+                dsk,
+                _shift_subvolume,
+                stored_shape,
+                dtype=np.float32,
+                shift=np.zeros(3, dtype=np.float32),
+                order=self.order,
+                prefilter=False,
+                backend=Backend(),
+            )
+        binned = _bin_subvolumes(dsk, binsize)
+        if compute:
+            binned = da.from_array(binned.compute(), chunks=binned.chunks, name=False)
+        pre_transform = _binned_pre_transform(
+            self._pre_transform, dsk.shape[0], stored_shape, self.output_shape, binsize
+        )
+        tr = -(binsize - 1) / 2 * self.scale
+        return self.__class__(
+            binned,
+            molecules=self.molecules.translate([tr, tr, tr]),
+            order=self.order,
+            scale=self.scale * binsize,
+            tilt_model=self.tilt_model,
+            pre_transform=pre_transform,
+            output_shape=tuple(s // binsize for s in self.output_shape),
+            extracted_molecules=self._extracted_molecules.translate([tr, tr, tr]),
+        )
+
     def _default_align_kwargs(self):
         return {"tilt": self.tilt_model}
 
@@ -265,6 +322,59 @@ class ExtractedSubvolumeLoader(LoaderBase):
         ref_rot = ref.rotator[rows]
         dpos = self.molecules.pos.astype(np.float64) - ref.pos[rows]
         return ref_rot.apply(dpos, inverse=True), ref_rot.inv() * self.molecules.rotator
+
+
+def _bin_subvolumes(dsk: da.Array, binsize: int) -> da.Array:
+    """Bin each subvolume of the stack, in the same way as `_utils.bin_image`."""
+    dsk = dsk.rechunk({1: -1, 2: -1, 3: -1})
+    shape = tuple(s // binsize for s in dsk.shape[1:])
+    return dsk.map_blocks(
+        _bin_block,
+        binsize,
+        chunks=(dsk.chunks[0],) + tuple((s,) for s in shape),
+        meta=np.empty((0, 0, 0, 0), dtype=np.float32),
+    )
+
+
+def _bin_block(block: NDArray[np.float32], binsize: int) -> NDArray[np.float32]:
+    nz, ny, nx = (s // binsize for s in block.shape[1:])
+    cropped = block[:, : nz * binsize, : ny * binsize, : nx * binsize]
+    return cropped.reshape(-1, nz, binsize, ny, binsize, nx, binsize).sum(
+        axis=(2, 4, 6), dtype=np.float32
+    )
+
+
+def _binned_pre_transform(
+    pre_transform: NDArray[np.float32] | None,
+    num: int,
+    stored_shape: tuple[int, ...],
+    output_shape: tuple[int, ...],
+    binsize: int,
+) -> NDArray[np.float32] | None:
+    """Pre-transform of the binned subvolumes, which keeps the center of the output.
+
+    Binning crops the trailing pixels, so the pixel ``i`` of the binned subvolumes is
+    at ``binsize * i + (binsize - 1) / 2`` of the stored ones. The binned output is
+    aligned to the center of the original output. None is returned if the binned
+    subvolumes are the binned outputs as they are.
+    """
+    out = np.asarray(output_shape, dtype=np.float64)
+    binned_out = np.asarray(output_shape) // binsize
+    # binned output -> original output
+    to_output = np.eye(4)
+    to_output[:3, :3] *= binsize
+    to_output[:3, 3] = (out - 1) / 2 - binsize * (binned_out - 1) / 2
+    # original stored -> binned stored
+    from_stored = np.eye(4)
+    from_stored[:3, :3] /= binsize
+    from_stored[:3, 3] = -(binsize - 1) / 2 / binsize
+    if pre_transform is None:
+        if tuple(stored_shape) == tuple(output_shape) and all(
+            s % binsize == 0 for s in stored_shape
+        ):
+            return None
+        pre_transform = np.broadcast_to(np.eye(4), (num, 4, 4))
+    return np.matmul(from_stored @ pre_transform, to_output).astype(np.float32)
 
 
 def _transform_subvolume(

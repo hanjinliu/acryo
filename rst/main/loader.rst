@@ -280,6 +280,20 @@ shares the same interface with :class:`SubtomogramLoader`. It is constructed usi
     out = collection.align(template, max_shifts=(5, 5, 5))
     group = collection.groupby("cluster_id")
 
+Other loaders, such as :class:`BackProjectionLoader`, can also be added. Subtomograms
+are loaded by each loader with the molecules, interpolation order and scale of the
+:class:`BatchLoader`. For :class:`BackProjectionLoader`, the scale is converted to the
+binning factor of the tilt series.
+
+.. code-block:: python
+
+    from acryo import BackProjectionLoader
+
+    collection = BatchLoader(scale=0.68)
+    collection.add_loader(imread("path/to/image-0.mrc", molecules_0))
+    collection.add_loader(BackProjectionLoader(tilt_series_1, molecules_1))
+    sub = collection.loaders[1]  # binsize is 0.68 / tilt_series_1.scale
+
 Mock Loader for Testing
 =======================
 

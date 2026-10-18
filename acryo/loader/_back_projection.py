@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import contextmanager
+import functools
 import math
 import os
 from pathlib import Path
@@ -10,6 +11,7 @@ import threading
 from typing import (
     TYPE_CHECKING,
     Any,
+    Callable,
     Iterable,
     Iterator,
     Generator,
@@ -44,6 +46,9 @@ if TYPE_CHECKING:
 # Memory budget (bytes) of the tilt images being preprocessed in parallel. Each
 # thread needs about five times the size of the (padded) tilt image.
 _LOAD_MEMORY_BUDGET = 2e9
+# Only one tilt series is preprocessed at a time, so that the memory budget is kept
+# when many tilt series are loaded in parallel dask tasks.
+_LOAD_LOCK = threading.Lock()
 
 
 class BackProjectionLoader(LoaderBase):
@@ -68,8 +73,11 @@ class BackProjectionLoader(LoaderBase):
         pixel size and binned by the largest integer factor whose pixel size does not
         exceed ``scale``, so the raw tilt series is never in memory all at once. A few
         tilt images are preprocessed in parallel, as many as fit in about 2 GB of
-        memory. The preprocessed images are released after each computation. Use
-        :meth:`cache_tilt_images` to reuse them in repeated computations.
+        memory, and only one tilt series is preprocessed at a time. The tilt images
+        are loaded in the computation of the dask array of :meth:`construct_dask`, and
+        released after that, so the tilt series of many loaders (such as in a
+        ``BatchLoader``) are not all in memory at once. Use :meth:`cache_tilt_images`
+        to reuse them in repeated computations.
     molecules : Molecules
         Molecules object that represents positions and orientations of
         subtomograms.
@@ -351,14 +359,16 @@ class BackProjectionLoader(LoaderBase):
         """Construct a list of subtomogram lazy loader.
 
         Note that subtomograms are reconstructed in batches, so computing each
-        subtomogram separately is inefficient.
+        subtomogram separately is inefficient. Unlike :meth:`construct_dask`, the tilt
+        images are loaded here, so that they are not loaded again for each subtomogram.
 
         Returns
         -------
         DaskArrayList
             Each dask array returns a subtomogram on computation.
         """
-        return DaskArrayList(list(self.construct_dask(output_shape, backend)))
+        stack = self._construct_dask(output_shape, backend, lazy=False)
+        return DaskArrayList(list(stack))
 
     def construct_dask(
         self,
@@ -368,17 +378,32 @@ class BackProjectionLoader(LoaderBase):
         """Construct a dask array of subtomograms.
 
         Each dask task reconstructs ``batch_size`` subtomograms, so the subtomograms
-        are never in memory all at once.
+        are never in memory all at once. The tilt images are loaded by the first task
+        in the computation, and released after all the tasks, unless they are cached
+        by :meth:`cache_tilt_images`. Note that each computation of the whole array
+        loads the tilt images again.
 
         Returns
         -------
         da.Array
             An 4-D array which ``arr[i]`` corresponds to the ``i``-th subtomogram.
         """
+        return self._construct_dask(output_shape, backend, lazy=True)
+
+    def _construct_dask(
+        self,
+        output_shape: pixel | tuple[pixel, ...] | None,
+        backend: Backend | None,
+        lazy: bool,
+    ) -> da.Array:
         output_shape = self._get_output_shape(output_shape)
         if self.molecules.count() == 0:
             return da.zeros((0,) + tuple(output_shape), dtype=np.float32)
-        return self._plan_reconstruction(output_shape).to_dask(backend or Backend())
+        # The cached tilt images are captured by the dask array, so that it can be
+        # computed after the cache is released.
+        lazy = lazy and not self._images.cache.enabled
+        plan = self._plan_reconstruction(output_shape)
+        return plan.to_dask(backend or Backend(), lazy=lazy)
 
     def load_iter(
         self, output_shape: _ShapeType = None
@@ -395,7 +420,8 @@ class BackProjectionLoader(LoaderBase):
         3D array
             Subtomogram
         """
-        stack = self.construct_dask(output_shape=output_shape)
+        # the tilt images are loaded once for all the steps
+        stack = self._construct_dask(output_shape, None, lazy=False)
         step = max(self.batch_size or 1, 64)
         for start in range(0, stack.shape[0], step):
             yield from stack[start : start + step].compute()
@@ -435,19 +461,18 @@ class BackProjectionLoader(LoaderBase):
     def _plan_reconstruction(
         self, output_shape: tuple[pixel, pixel, pixel]
     ) -> _ReconstructionPlan:
-        """Plan the reconstruction of the subtomograms. The tilt images are loaded."""
+        """Plan the reconstruction without loading the tilt images."""
         binsize = self._images.binsize_for(self.binsize)
         sidelength = _cube_sidelength(output_shape, self.order, self.corner_safe)
-        reconstructor = self._images.reconstructor(
-            binsize, self.scale, sidelength, self.padding
+        get_reconstructor = functools.partial(
+            self._images.reconstructor, binsize, self.scale, sidelength, self.padding
         )
         tilt_series = self._images.binned_tilt_series(binsize)
         pos, rotations = self._to_tilt_series_frame(self.molecules)
         # the projection of the molecules, including the local shifts
         projected = tilt_series.project_points(pos - self.tomogram_center)
-        # (nm from the detector center) -> (pixels of the tilt images)
-        image_center = np.array(reconstructor.images.shape[1:]) // 2
-        positions = projected / tilt_series.scale + image_center
+        # (nm from the detector center) -> (pixels from the center of the tilt images)
+        offsets = projected / tilt_series.scale
         # The molecules are at the center of the cubes (sidelength // 2). Crop the
         # rotated subtomograms from the cubes, similar to `SubtomogramLoader`.
         nmole = rotations.shape[0]
@@ -459,8 +484,8 @@ class BackProjectionLoader(LoaderBase):
         translation_1[:3, 3] = -(np.array(output_shape) / 2 - 0.5)
         matrices = translation_0 @ rot_mat @ translation_1
         return _ReconstructionPlan(
-            reconstructor,
-            positions,
+            get_reconstructor,
+            offsets,
             matrices.astype(np.float32),
             output_shape,
             self.order,
@@ -803,7 +828,7 @@ class _TiltSeriesImages:
         # The tilt images are read one by one, and processed in parallel. The number
         # of the images being processed is limited to save memory.
         num_workers = _num_load_workers(source.image_shape, self.preprocessor)
-        with ThreadPoolExecutor(num_workers) as executor:
+        with _LOAD_LOCK, ThreadPoolExecutor(num_workers) as executor:
             pending: set[Future] = set()
             for t, image in enumerate(source.iter_images()):
                 if len(pending) >= num_workers:
@@ -859,39 +884,90 @@ class _ReconstructionPlan:
 
     def __init__(
         self,
-        reconstructor: DirectFourierReconstructor,
-        positions: NDArray[np.float64],
+        get_reconstructor: Callable[[], DirectFourierReconstructor],
+        offsets: NDArray[np.float64],
         matrices: NDArray[np.float32],
         output_shape: tuple[int, int, int],
         order: int,
         batch_size: int,
     ):
-        self.reconstructor = reconstructor
-        self.positions = positions  # (N, T, 2) positions on the tilt images
+        self.get_reconstructor = get_reconstructor  # loads the tilt images
+        self.offsets = offsets  # (N, T, 2) positions from the center of the images
         self.matrices = matrices  # (N, 4, 4) from the subtomograms to the cubes
         self.output_shape = tuple(output_shape)
         self.order = order
         self.batch_size = batch_size
 
-    def to_dask(self, backend: Backend) -> da.Array:
-        """Construct the dask array of the subtomograms."""
+    def to_dask(self, backend: Backend, lazy: bool = True) -> da.Array:
+        """Construct the dask array of the subtomograms.
+
+        If ``lazy``, the reconstructor is created in the computation and released after
+        that (see `_LazyReconstructor`). Otherwise, the reconstructor is created now
+        and shared by the tasks.
+        """
         output_shape = self.output_shape
         name = f"pseudo-subvolumes-{uuid.uuid4().hex}"
+        nmole = self.offsets.shape[0]
+        starts = range(0, nmole, self.batch_size)
+        reconstructor: DirectFourierReconstructor | _LazyReconstructor
+        if lazy:
+            reconstructor = _LazyReconstructor(self.get_reconstructor, len(starts))
+        else:
+            reconstructor = self.get_reconstructor()
         zeros = (0,) * len(output_shape)
-        task = _ReconstructionTask(
-            self.reconstructor, output_shape, self.order, backend
-        )
+        task = _ReconstructionTask(output_shape, self.order, backend)
         layer = {}
         sizes = []
-        nmole = self.positions.shape[0]
-        for ib, start in enumerate(range(0, nmole, self.batch_size)):
+        for ib, start in enumerate(starts):
             sl = slice(start, start + self.batch_size)
-            layer[(name, ib, *zeros)] = (task, self.positions[sl], self.matrices[sl])
-            sizes.append(self.positions[sl].shape[0])
+            layer[(name, ib, *zeros)] = (
+                task,
+                reconstructor,
+                ib,
+                self.offsets[sl],
+                self.matrices[sl],
+            )
+            sizes.append(self.offsets[sl].shape[0])
         graph = HighLevelGraph.from_collections(name, layer, dependencies=[])
         chunks = (tuple(sizes),) + tuple((s,) for s in output_shape)
         meta = np.empty((0,) * (len(output_shape) + 1), dtype=np.float32)
         return da.Array(graph, name, chunks, meta=meta)
+
+
+class _LazyReconstructor:
+    """The reconstructor shared by the reconstruction tasks of a dask array.
+
+    The reconstructor is created (and the tilt images are loaded) by the first task,
+    and released after all the tasks are computed, so the tilt images are in memory
+    only during the computation, and loaded again if the array is computed again. The
+    reconstruction tasks do not depend on a task that loads the tilt images, so that
+    they are scheduled by their priority: the tilt images of many loaders are loaded
+    one after another, rather than all at the beginning of the computation.
+    """
+
+    def __init__(self, factory: Callable[[], DirectFourierReconstructor], ntasks: int):
+        self._factory = factory
+        self._ntasks = ntasks
+        self._lock = threading.Lock()
+        self._reconstructor: DirectFourierReconstructor | None = None
+        self._done: set[int] = set()
+
+    def acquire(self) -> DirectFourierReconstructor:
+        """Get the reconstructor, which is created if not yet."""
+        with self._lock:
+            if self._reconstructor is None:
+                self._reconstructor = self._factory()
+            return self._reconstructor
+
+    def release(self, index: int) -> None:
+        """Mark the task of given index as done."""
+        with self._lock:
+            self._done.add(index)
+            # If only a part of the array is computed, the reconstructor is kept until
+            # the rest are computed, or the array is deleted.
+            if len(self._done) == self._ntasks:
+                self._reconstructor = None
+                self._done.clear()
 
 
 class _ReconstructionTask:
@@ -899,21 +975,38 @@ class _ReconstructionTask:
 
     def __init__(
         self,
-        reconstructor: DirectFourierReconstructor,
         output_shape: tuple[int, int, int],
         order: int,
         backend: Backend,
     ):
-        self.reconstructor = reconstructor
         self.output_shape = output_shape
         self.order = order
         self.backend = backend
 
     def __call__(
-        self, positions: NDArray[np.float64], matrices: NDArray[np.float32]
+        self,
+        reconstructor: DirectFourierReconstructor | _LazyReconstructor,
+        index: int,
+        offsets: NDArray[np.float64],
+        matrices: NDArray[np.float32],
+    ) -> NDArray[np.float32]:
+        if not isinstance(reconstructor, _LazyReconstructor):
+            return self._reconstruct(reconstructor, offsets, matrices)
+        try:
+            return self._reconstruct(reconstructor.acquire(), offsets, matrices)
+        finally:
+            reconstructor.release(index)
+
+    def _reconstruct(
+        self,
+        reconstructor: DirectFourierReconstructor,
+        offsets: NDArray[np.float64],
+        matrices: NDArray[np.float32],
     ) -> NDArray[np.float32]:
         xp = self.backend
-        cubes = self.reconstructor(positions)
+        # (pixels from the center of the tilt images) -> (pixels of the tilt images)
+        positions = offsets + np.array(reconstructor.images.shape[1:]) // 2
+        cubes = reconstructor(positions)
         # the tilt images have dark densities on a light background
         cubes *= -1
         subvolumes = [
