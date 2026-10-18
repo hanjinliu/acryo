@@ -4,7 +4,7 @@ import polars as pl
 import pytest
 from scipy.spatial.transform import Rotation
 
-from acryo import Molecules, SubtomogramLoader, BackProjectionLoader
+from acryo import Molecules, SubtomogramLoader, BackProjectionLoader, BatchLoader
 from acryo.backend import Backend
 from acryo.projection import (
     LocalAlignment,
@@ -873,3 +873,188 @@ def test_subtomograms_are_not_kept(blob_tilt_series, recorded_calls):
     assert [n for n, _ in recorded_calls] == [2]
     stack.compute()
     assert sorted(n for n, _ in recorded_calls) == [1, 2, 2, 2]
+
+
+def test_batch_loader(blob_tilt_series):
+    # tilt series loaders and a tomogram in a batch loader
+    rng = np.random.default_rng(0)
+    mole = Molecules(BLOBS + CENTER, Rotation.random(len(BLOBS), random_state=11))
+    loader0 = _loader(blob_tilt_series, mole[:3])
+    loader1 = _loader(blob_tilt_series, mole[3:], tomo_hand=-1)
+    tomo = rng.normal(size=(40, 120, 140)).astype(np.float32)
+    loader2 = SubtomogramLoader(
+        tomo, mole, scale=IMAGE_SCALE, output_shape=(13, 13, 13)
+    )
+    batch = BatchLoader.from_loaders(
+        [loader0, loader1, loader2], scale=IMAGE_SCALE, output_shape=(13, 13, 13)
+    )
+    repr(batch)
+    assert list(batch.images) == [2]
+    assert batch.tilt_models[0] is loader0.tilt_model
+    assert batch.tilt_models[1] is loader1.tilt_model
+    assert len(batch.loaders) == 3
+    subs = dict(batch.loaders.iter_loaders())
+    for i, ref in enumerate([loader0, loader1]):
+        assert isinstance(subs[i], BackProjectionLoader)
+        assert subs[i].binsize == 1.0  # exact, not through the scale
+        assert subs[i].tomo_hand == ref.tomo_hand
+    assert isinstance(subs[2], SubtomogramLoader)
+    refs = [loader0.asnumpy(), loader1.asnumpy(), loader2.asnumpy()]
+    # rotations are slightly changed when molecules are added to a batch loader
+    assert_allclose(batch.asnumpy(), np.concatenate(refs), atol=1e-4)
+    assert_allclose(
+        batch.average(), np.concatenate(refs).mean(axis=0), rtol=1e-4, atol=1e-4
+    )
+
+    # the output shape of the loader is used if not set
+    batch_unset = BatchLoader(scale=IMAGE_SCALE).add_loader(loader0)
+    assert batch_unset.loaders[0].output_shape == (13, 13, 13)
+
+    # the scale of the batch loader is converted to the binsize
+    rescaled = batch.replace(scale=1.0)
+    assert rescaled.loaders[0].binsize == pytest.approx(2.0)
+    binned = batch.binning(2)
+    assert binned.scale == pytest.approx(IMAGE_SCALE * 2)
+    subs = dict(binned.loaders.iter_loaders())
+    assert subs[0].binsize == subs[1].binsize == 2.0
+    # only the molecules in the tomogram are translated by binning
+    assert_allclose(subs[0].molecules.pos, loader0.molecules.pos, atol=1e-5)
+    assert_allclose(subs[1].molecules.pos, loader1.molecules.pos, atol=1e-5)
+    assert_allclose(
+        subs[2].molecules.pos, loader2.molecules.pos - IMAGE_SCALE / 2, atol=1e-5
+    )
+    assert subs[2].image.shape == (20, 60, 70)
+    assert binned.loaders[0].asnumpy().shape == (3, 13, 13, 13)
+
+    filtered = batch.filter(pl.col("image-id") != 0)
+    assert set(filtered.tilt_models) == {1, 2}
+    assert len(filtered.loaders) == 2
+    out = {key: sub for key, sub in batch.groupby("image-id")}
+    assert isinstance(out[0].loaders[0], BackProjectionLoader)
+
+    # molecules of the tilt series and the tomogram are interleaved
+    order = [5, 0, 3, 6, 1, 7, 2, 4, 8, 9]
+    shuffled = batch.replace(molecules=batch.molecules.subset(order))
+    assert_allclose(shuffled.asnumpy(), np.concatenate(refs)[order], atol=1e-4)
+
+    optimized = batch.order_optimize()
+    assert_allclose(optimized.order_restore().molecules.pos, batch.molecules.pos)
+
+    template = refs[0].mean(axis=0)
+    aligned = batch.align(template, max_shifts=1.0)
+    assert isinstance(aligned.loaders[1], BackProjectionLoader)
+    assert_allclose(
+        aligned.loaders[1].molecules.pos,
+        loader1.align(template, max_shifts=1.0).molecules.pos,
+        atol=1e-4,
+    )
+
+
+def test_batch_loader_image_id(blob_tilt_series):
+    mole = Molecules(BLOBS + CENTER)
+    loader0 = _loader(blob_tilt_series, mole[:3])
+    loader1 = _loader(blob_tilt_series, mole[3:])
+    # molecules of the same tilt series are added with the same image ID
+    batch = BatchLoader(scale=IMAGE_SCALE)
+    batch.add_loader(loader0, image_id="a").add_loader(loader1, image_id="a")
+    assert len(batch.loaders) == 1
+    assert batch.loaders["a"].molecules.count() == 5
+    with pytest.raises(ValueError):
+        batch.add_tomogram(np.zeros((4, 4, 4)), mole, image_id="a")
+    batch.add_tomogram(np.zeros((4, 4, 4)), mole, image_id="b")
+    with pytest.raises(ValueError):
+        batch.add_loader(loader0, image_id="b")
+    with pytest.raises(TypeError):
+        batch.add_loader(BatchLoader(), image_id="c")
+
+    # nested loaders are added one by one
+    nested = BatchLoader(scale=IMAGE_SCALE)
+    nested.add_loader(batch).add_loader(BatchLoader().add_loader(loader0))
+    assert len(nested.loaders) == 3
+    assert nested.molecules.count() == 13
+
+
+@pytest.fixture
+def live_tilt_images(monkeypatch) -> dict[str, int]:
+    """Record the number of loads and of the loaded tilt images in memory."""
+    import threading
+    import weakref
+    from acryo.loader._back_projection import _TiltSeriesImages
+
+    state = {"loads": 0, "live": 0, "peak": 0}
+    lock = threading.Lock()
+    _load = _TiltSeriesImages._load
+
+    def _release():
+        with lock:
+            state["live"] -= 1
+
+    def _recorded_load(self, binsize):
+        out = _load(self, binsize)
+        with lock:
+            state["loads"] += 1
+            state["live"] += 1
+            state["peak"] = max(state["peak"], state["live"])
+        weakref.finalize(out, _release)
+        return out
+
+    monkeypatch.setattr(_TiltSeriesImages, "_load", _recorded_load)
+    return state
+
+
+def test_tilt_images_are_loaded_in_computation(blob_tilt_series, live_tilt_images):
+    import gc
+
+    mole = Molecules(BLOBS + CENTER, Rotation.random(len(BLOBS), random_state=13))
+    loader = _loader(blob_tilt_series, mole, batch_size=2)
+    stack = loader.construct_dask()
+    assert live_tilt_images["loads"] == 0
+    ref = stack.compute()
+    # loaded once for all the tasks, and released after the computation
+    assert live_tilt_images["loads"] == 1
+    assert live_tilt_images["live"] == 0
+    # a part of the array keeps the tilt images until the rest are computed
+    assert_allclose(stack[:2].compute(), ref[:2])
+    assert live_tilt_images["live"] == 1
+    assert_allclose(stack[2:].compute(), ref[2:])
+    assert live_tilt_images["loads"] == 2
+    assert live_tilt_images["live"] == 0
+    assert_allclose(stack.compute(), ref)
+    assert live_tilt_images["loads"] == 3
+
+    # each loading task does not load the tilt images again
+    tasks = loader.construct_loading_tasks()
+    assert live_tilt_images["loads"] == 4
+    each = np.stack([task.compute() for task in tasks])
+    assert_allclose(each, ref, rtol=1e-6, atol=1e-6)
+    assert_allclose(np.stack(list(loader.load_iter())), ref, rtol=1e-6, atol=1e-6)
+    assert live_tilt_images["loads"] == 5
+    del tasks
+    gc.collect()  # the graphs of the arrays have reference cycles
+    assert live_tilt_images["live"] == 0
+
+
+def test_tilt_images_of_batch_are_loaded_one_by_one(tmp_path, live_tilt_images):
+    import dask
+
+    rot = Rotation.random(len(BLOBS) * 4, random_state=14)
+    mole = Molecules(np.tile(BLOBS, (4, 1)) + CENTER, rot)
+    loaders = [
+        _loader(_make_tilt_series(tmp_path / f"ts-{i}.mrc", BLOBS), mole, order=1)
+        for i in range(4)
+    ]
+    batch = BatchLoader.from_loaders(loaders, scale=IMAGE_SCALE, order=1)
+    template = loaders[0].average()
+    live_tilt_images.update(loads=0, peak=0)
+    with dask.config.set(scheduler="threads", num_workers=8):
+        aligned = batch.align(template, max_shifts=0.5)
+    assert live_tilt_images["loads"] == 4
+    # the tilt images of the first loader is released before those of the last one
+    # are loaded
+    assert live_tilt_images["peak"] < 4
+    assert live_tilt_images["live"] == 0
+    assert_allclose(
+        aligned.loaders[2].molecules.pos,
+        loaders[2].align(template, max_shifts=0.5).molecules.pos,
+        atol=1e-4,
+    )

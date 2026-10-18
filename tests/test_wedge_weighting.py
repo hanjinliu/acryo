@@ -7,7 +7,6 @@ from scipy.spatial.transform import Rotation
 import pytest
 
 from acryo import BatchLoader, Molecules, SubtomogramLoader, TomogramSimulator
-from acryo.loader import ConcatenatedLoader
 from acryo.loader import _misc
 from acryo.loader._group import LoaderGroup
 from acryo.tilt import single_axis, dual_axis, TiltSeriesModel
@@ -121,10 +120,6 @@ def test_batch_loader_uses_each_tilt_model():
     _assert_close_to_reference(out, _reference(loaders, 0.1))
     halves = batch.average_split(wedge_weighting=True)
     assert halves.shape == (2, *shape)
-
-    concat = ConcatenatedLoader(loaders)
-    out = concat.average(wedge_weighting=True)
-    _assert_close_to_reference(out, _reference(loaders, 0.1))
 
 
 def test_loader_group():

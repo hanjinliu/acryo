@@ -3,12 +3,14 @@
 from __future__ import annotations
 from types import MappingProxyType
 
+import math
 import weakref
-from typing import Hashable, Iterable, Iterator, TYPE_CHECKING, Sequence
+from typing import Hashable, Iterable, Iterator, Mapping, TYPE_CHECKING
 import numpy as np
 import polars as pl
 
 from dask import array as da
+from scipy.spatial.transform import Rotation
 
 from acryo import _utils
 from acryo.alignment._base import TomographyInput
@@ -32,58 +34,6 @@ if TYPE_CHECKING:
 IMAGE_ID_LABEL = "image-id"
 
 
-class ConcatenatedLoader(LoaderBase):
-    """A simple loader that concatenates the subtomograms of multiple loaders."""
-
-    def __init__(self, loaders: Sequence[LoaderBase]):
-        if len(loaders) == 0:
-            raise ValueError("At least one loader is required.")
-        first = loaders[0]
-        super().__init__(
-            order=first.order, scale=first.scale, output_shape=first.output_shape
-        )
-        self._loaders = list(loaders)
-
-    @property
-    def molecules(self) -> Molecules:
-        return Molecules.concat([loader.molecules for loader in self._loaders])
-
-    def construct_loading_tasks(self, output_shape=None, backend=None) -> DaskArrayList:
-        return DaskArrayList.concat(
-            loader.construct_loading_tasks(output_shape=output_shape, backend=backend)
-            for loader in self._loaders
-        )
-
-    def construct_dask(self, output_shape=None, backend=None) -> da.Array:
-        return da.concatenate(
-            [
-                loader.construct_dask(output_shape=output_shape, backend=backend)
-                for loader in self._loaders
-            ],
-            axis=0,
-        )
-
-    def construct_wedge_weighted_ft(self, output_shape, backend) -> da.Array:
-        # each loader has its own tilt series model
-        return da.concatenate(
-            [
-                loader.construct_wedge_weighted_ft(output_shape, backend)
-                for loader in self._loaders
-            ],
-            axis=0,
-        )
-
-    def replace(self, molecules=None, output_shape=None, order=None, scale=None):
-        if molecules is not None:
-            raise ValueError(f"Cannot replace molecules of {type(self).__name__}.")
-        return self.__class__(
-            [
-                loader.replace(output_shape=output_shape, order=order, scale=scale)
-                for loader in self._loaders
-            ]
-        )
-
-
 class BatchLoader(LoaderBase):
     """Collection of tomograms and their molecules.
 
@@ -91,6 +41,11 @@ class BatchLoader(LoaderBase):
     better consistency in loader parameters and more convenient access to the molecules.
     This class is useful for processing many tomograms at once, especially when you want
     to get the average of all the molecules available.
+
+    Tomograms are stored as images, and loaded by `SubtomogramLoader`. Other loaders,
+    such as `BackProjectionLoader`, can also be added by `add_loader`. They are stored
+    as is, and the subtomograms are loaded by them with the molecules, order, scale and
+    output shape of the batch loader.
     """
 
     def __init__(
@@ -103,16 +58,23 @@ class BatchLoader(LoaderBase):
         self._images: dict[Hashable, NDArray[np.float32] | da.Array] = {}
         self._molecules: Molecules = Molecules.empty([IMAGE_ID_LABEL])
         self._tilt_models: dict[Hashable, TomographyInput] = {}
+        # loaders other than `SubtomogramLoader`. Their molecules are not used.
+        self._sources: dict[Hashable, LoaderBase] = {}
 
     def __repr__(self) -> str:
         loaders_repr = []
         for loader in self.loaders:
-            shape = loader.image.shape
             mole_repr = repr(loader.molecules)
-            loaders_repr.append(
-                f"{loader.__class__.__name__}(tomogram={shape}, "
-                f"molecules={mole_repr})"
-            )
+            if isinstance(loader, SubtomogramLoader):
+                shape = loader.image.shape
+                loaders_repr.append(
+                    f"{loader.__class__.__name__}(tomogram={shape}, "
+                    f"molecules={mole_repr})"
+                )
+            else:
+                loaders_repr.append(
+                    f"{loader.__class__.__name__}(molecules={mole_repr})"
+                )
         loaders_repr = ", ".join(loaders_repr)
         return (
             f"{self.__class__.__name__}(loaders=[{loaders_repr}], "
@@ -150,13 +112,19 @@ class BatchLoader(LoaderBase):
 
     @property
     def images(self) -> MappingProxyType:
-        """All the images in the collection."""
+        """All the images in the collection.
+
+        Loaders added by `add_loader` other than `SubtomogramLoader` are not included.
+        """
         return MappingProxyType(self._images)
 
     @property
     def tilt_models(self) -> MappingProxyType[Hashable, TomographyInput]:
         """All the tilt series models in the collection."""
-        return MappingProxyType(self._tilt_models)
+        tilt_models = dict(self._tilt_models)
+        for image_id, source in self._sources.items():
+            tilt_models[image_id] = source._default_align_kwargs().get("tilt")
+        return MappingProxyType(tilt_models)
 
     def add_tomogram(
         self,
@@ -180,55 +148,175 @@ class BatchLoader(LoaderBase):
             generated. This identifier is used to tag molecules with the tomogram they
             reside in.
         """
-        if image_id is None:
-            image_id = len(self._images)
-            while image_id in self._images:
-                image_id += 1
-        molecules = molecules.copy()
-        molecules.features = molecules.features.with_columns(
-            pl.Series(IMAGE_ID_LABEL, np.full((len(molecules)), image_id))
-        )
-        _molecules_new = self._molecules.concat_with(molecules)
+        new = self._register_tomogram(image, molecules, image_id, tilt_model)
+        self._molecules = _concat_molecules([self._molecules, new])
+        return self
 
+    def add_loader(self, loader: LoaderBase, image_id: Hashable | None = None) -> Self:
+        """Add a loader to the collection.
+
+        A `SubtomogramLoader` is added as a tomogram (see `add_tomogram`), and the
+        loaders in a `BatchLoader` are added one by one. Other loaders, such as
+        `BackProjectionLoader`, are added as is. The subtomograms are loaded by the
+        loader with the molecules, order and scale of the batch loader, and with its
+        output shape if set.
+
+        Parameters
+        ----------
+        loader : LoaderBase
+            Loader to be added.
+        image_id : Hashable, optional
+            Identifier for the tomogram of the loader. If not provided, a unique
+            identifier will be generated. Not allowed for a `BatchLoader`.
+        """
+        new = self._register_loader(loader, image_id)
+        self._molecules = _concat_molecules([self._molecules, *new])
+        return self
+
+    def _register_tomogram(
+        self,
+        image: np.ndarray | da.Array,
+        molecules: Molecules,
+        image_id: Hashable | None,
+        tilt_model: TiltSeriesModel | None,
+    ) -> Molecules:
+        """Register a tomogram and return its molecules tagged with the image ID."""
+        if image_id is None:
+            image_id = self._new_image_id()
+        elif image_id in self._sources:
+            raise ValueError(f"Image ID {image_id!r} is already used by a loader.")
+        tagged = _tag_molecules(molecules, image_id)
         self._images[image_id] = image
         self._tilt_models[image_id] = tilt_model
-        self._molecules = _molecules_new
-        return self
+        return tagged
 
-    def add_loader(self, loader: SubtomogramLoader | BatchLoader) -> Self:
-        """Add a subtomogram loader or a batch loader to the collection."""
+    def _register_loader(
+        self, loader: LoaderBase, image_id: Hashable | None
+    ) -> list[Molecules]:
+        """Register a loader and return its molecules tagged with the image IDs."""
         if isinstance(loader, SubtomogramLoader):
-            image = loader.image
-            molecules = loader.molecules
-            self.add_tomogram(image, molecules, tilt_model=loader.tilt_model)
+            tagged = self._register_tomogram(
+                loader.image, loader.molecules, image_id, loader.tilt_model
+            )
+            return [tagged]
         elif isinstance(loader, BatchLoader):
-            for sub in loader.loaders:
-                self.add_loader(sub)
-        else:
+            if image_id is not None:
+                raise TypeError(
+                    f"Cannot specify 'image_id' for {type(loader).__name__}."
+                )
+            return [
+                m for sub in loader.loaders for m in self._register_loader(sub, None)
+            ]
+        elif not isinstance(loader, LoaderBase):
             raise TypeError(f"Cannot add {type(loader)}.")
-        return self
+        if image_id is None:
+            image_id = self._new_image_id()
+        elif image_id in self._images:
+            raise ValueError(f"Image ID {image_id!r} is already used by a tomogram.")
+        tagged = _tag_molecules(loader.molecules, image_id)
+        self._sources[image_id] = loader
+        return [tagged]
+
+    def _new_image_id(self) -> int:
+        image_id = len(self._images) + len(self._sources)
+        while image_id in self._images or image_id in self._sources:
+            image_id += 1
+        return image_id
+
+    def _image_rows(self) -> list[tuple[Hashable, slice | NDArray[np.intp]]]:
+        """Image IDs and the rows of their molecules, in the order of `self.loaders`.
+
+        The images are in the order of the first appearance, and the rows are given as
+        a slice if they are contiguous.
+        """
+        image_ids = self.features[IMAGE_ID_LABEL].to_numpy()
+        if image_ids.size == 0:
+            return []
+        keys, first, inverse = np.unique(
+            image_ids, return_index=True, return_inverse=True
+        )
+        group_order = np.argsort(first)
+        rank = np.empty_like(group_order)
+        rank[group_order] = np.arange(group_order.size)
+        group_of_rows = rank[inverse.ravel()]
+        rows = np.argsort(group_of_rows, kind="stable")
+        stops = np.cumsum(np.bincount(group_of_rows))
+        out: list[tuple[Hashable, slice | NDArray[np.intp]]] = []
+        start = 0
+        for igroup, stop in zip(group_order, stops):
+            sub = rows[start:stop]
+            if sub[-1] - sub[0] + 1 == sub.size:
+                spec: slice | NDArray[np.intp] = slice(int(sub[0]), int(sub[-1]) + 1)
+            else:
+                spec = sub
+            key = keys[igroup]
+            out.append((key.item() if isinstance(key, np.generic) else key, spec))
+            start = stop
+        return out
+
+    def _iter_image_molecules(
+        self,
+    ) -> Iterator[tuple[Hashable, slice | NDArray[np.intp], Molecules]]:
+        """Iterate over the image IDs, the rows and the molecules of each image.
+
+        Same as ``self.molecules.subset(rows)`` for each image, but the rotations are
+        converted only once.
+        """
+        mole = self.molecules
+        pos = mole.pos
+        quat = mole.quaternion(canonical=False)
+        features = mole.features
+        for key, rows in self._image_rows():
+            yield key, rows, Molecules(pos[rows], Rotation(quat[rows]), features[rows])
+
+    def _make_loader(self, image_id: Hashable, molecules: Molecules) -> LoaderBase:
+        """Create the loader of the given image ID with the given molecules."""
+        if image_id in self._images:
+            return SubtomogramLoader(
+                self._images[image_id],
+                molecules,
+                order=self.order,
+                scale=self.scale,
+                output_shape=self.output_shape,
+                tilt_model=self._tilt_models.get(image_id, None),
+            )
+        source = self._sources[image_id]
+        # keep the output shape of the loader if not set, as some loaders cannot change
+        # it. The scale is not replaced if not changed, because some loaders, such as
+        # `BackProjectionLoader`, convert it to other parameters.
+        return source.replace(
+            molecules=molecules,
+            output_shape=self.output_shape or None,
+            order=self.order,
+            scale=None if math.isclose(source.scale, self.scale) else self.scale,
+        )
 
     @classmethod
     def from_loaders(
         cls,
-        loaders: Iterable[SubtomogramLoader],
+        loaders: Iterable[LoaderBase] | Mapping[Hashable, LoaderBase],
         order: int = 3,
         scale: nm = 1.0,
         output_shape: pixel | tuple[pixel, pixel, pixel] | Unset = Unset(),
     ) -> Self:
         """Construct a loader from a list of loaders.
 
-        This method is not safe to use if a `BatchLoader` is split into multiple
-        `SubtomogramLoader`s and then re-constructed using this method, as the image IDs
-        may conflict.
+        If a mapping is given, its keys are used as the image IDs of the loaders (see
+        `add_loader`). Otherwise, the image IDs are generated, so the image IDs of a
+        `BatchLoader` split into multiple loaders are not kept.
         """
         self = cls(
             order=order,
             scale=scale,
             output_shape=output_shape,
         )
-        for loader in loaders:
-            self.add_loader(loader)
+        if isinstance(loaders, Mapping):
+            items = list(loaders.items())
+        else:
+            items = [(None, ldr) for ldr in loaders]
+        # the molecules are concatenated at once, which is much faster for many loaders
+        new = [mole for _id, ldr in items for mole in self._register_loader(ldr, _id)]
+        self._molecules = _concat_molecules([self._molecules, *new])
         return self
 
     @property
@@ -257,6 +345,7 @@ class BatchLoader(LoaderBase):
         )
         out._images = self._images.copy()
         out._tilt_models = self._tilt_models.copy()
+        out._sources = self._sources.copy()
         if molecules is None:
             out._molecules = self._molecules.copy()
         else:
@@ -265,6 +354,9 @@ class BatchLoader(LoaderBase):
             for k in list(out._images.keys()):
                 if k not in _id_exists:
                     out._images.pop(k)
+            for k in list(out._sources.keys()):
+                if k not in _id_exists:
+                    out._sources.pop(k)
         return out
 
     def order_optimize(self) -> Self:
@@ -281,8 +373,9 @@ class BatchLoader(LoaderBase):
         df_sorted = []
         for sl, sub in df.group_by(IMAGE_ID_LABEL):
             # sl is something like (1,)
-            img = self._images[sl[0]]
-            if isinstance(img, np.ndarray):
+            img = self._images.get(sl[0])
+            if not isinstance(img, da.Array):
+                # numpy arrays and other loaders are not chunked
                 df_sorted.append(sub)
             else:
                 zchunks, ychunks, xchunks = img.chunks
@@ -299,12 +392,31 @@ class BatchLoader(LoaderBase):
         mole = Molecules.from_dataframe(df)
         return self.replace(molecules=mole)
 
-    def binning(self, binsize: int, *, compute: bool = False) -> Self:
-        """Return a new instance with binned images."""
+    def binning(self, binsize: int = 2, *, compute: bool = False) -> Self:
+        """Return a new instance with binned images.
+
+        Loaders other than `SubtomogramLoader` are binned by their `binning` method.
+        The output shape in pixels is kept, so if the output shape of a loader is
+        binned together, such as `ExtractedSubvolumeLoader`, the output shape has to
+        be replaced by `replace(output_shape=...)`.
+        """
         if binsize == 1:
             return self.copy()
         tr = -(binsize - 1) / 2 * self.scale
-        molecules = self.molecules.translate([tr, tr, tr])
+        shifts = np.full((self.molecules.count(), 3), tr)
+        _sources: dict[Hashable, LoaderBase] = {}
+        for _id, rows, mole in self._iter_image_molecules():
+            if _id not in self._sources:
+                continue
+            # the molecules may be translated by binning, depending on the loader
+            loader = self._make_loader(_id, mole)
+            binned = loader.binning(binsize, compute=compute)
+            shifts[rows] = binned.molecules.pos - loader.molecules.pos
+            _sources[_id] = binned
+        for _id, source in self._sources.items():
+            if _id not in _sources:  # no molecules
+                _sources[_id] = source.binning(binsize, compute=compute)
+        molecules = self.molecules.translate(shifts)
         _images: dict[Hashable, NDArray[np.float32] | da.Array] = {}
         _compute_dict: dict[Hashable, da.Array] = {}
         for _id, image in self._images.items():
@@ -322,7 +434,23 @@ class BatchLoader(LoaderBase):
             scale=self.scale * binsize,
         )
         out._images = _images
+        out._sources = _sources
         return out
+
+    def _molecule_order(self) -> NDArray[np.intp] | None:
+        """Indices to sort the outputs of `self.loaders` to the order of the molecules.
+
+        The loaders are in the order of the first appearance of the image IDs, and each
+        of them has the molecules of the image in the original order. None is returned
+        if the outputs are already in the order of the molecules, that is, the
+        molecules of each image are contiguous.
+        """
+        image_rows = self._image_rows()
+        if all(isinstance(rows, slice) for _, rows in image_rows):
+            return None
+        indices = np.arange(self.molecules.count())
+        order = np.concatenate([indices[rows] for _, rows in image_rows])
+        return np.argsort(order)
 
     def construct_loading_tasks(
         self,
@@ -331,10 +459,13 @@ class BatchLoader(LoaderBase):
     ) -> DaskArrayList:
         """Construct batch loading tasks."""
         _backend = backend or Backend()
-        return DaskArrayList.concat(
+        tasks = DaskArrayList.concat(
             loader.construct_loading_tasks(output_shape=output_shape, backend=_backend)
             for loader in self.loaders
         )
+        if (indices := self._molecule_order()) is not None:
+            tasks = DaskArrayList(tasks[i] for i in indices)
+        return tasks
 
     def construct_dask(
         self,
@@ -343,13 +474,16 @@ class BatchLoader(LoaderBase):
     ) -> da.Array:
         """Construct a dask array of subtomograms of all the tomograms."""
         _backend = backend or Backend()
-        return da.concatenate(
+        out = da.concatenate(
             [
                 loader.construct_dask(output_shape=output_shape, backend=_backend)
                 for loader in self.loaders
             ],
             axis=0,
         )
+        if (indices := self._molecule_order()) is not None:
+            out = out[indices]
+        return out
 
     def construct_wedge_weighted_ft(
         self,
@@ -357,13 +491,16 @@ class BatchLoader(LoaderBase):
         backend: Backend,
     ) -> da.Array:
         # each tomogram has its own tilt series model
-        return da.concatenate(
+        out = da.concatenate(
             [
                 loader.construct_wedge_weighted_ft(output_shape, backend)
                 for loader in self.loaders
             ],
             axis=0,
         )
+        if (indices := self._molecule_order()) is not None:
+            out = out[indices]
+        return out
 
     def align(
         self,
@@ -420,6 +557,8 @@ class BatchLoader(LoaderBase):
                 tasks.extend(each._prep_align_tasks(model, max_shifts, _backend))
 
         all_results = tasks.compute()
+        if (indices := self._molecule_order()) is not None:
+            all_results = [all_results[i] for i in indices]
 
         if is_multi:
             return self._post_align_multi_templates(all_results, model.input_shape)
@@ -446,7 +585,10 @@ class BatchLoader(LoaderBase):
                 **align_kwargs,
             )
             arrays.append(arr)
-        return da.concatenate(arrays, axis=0)
+        out = da.concatenate(arrays, axis=0)
+        if (indices := self._molecule_order()) is not None:
+            out = out[indices]
+        return out
 
     def score(
         self,
@@ -466,7 +608,29 @@ class BatchLoader(LoaderBase):
                     **align_kwargs,
                 )
             )
-        return np.concatenate(scores, axis=1)
+        out = np.concatenate(scores, axis=1)
+        if (indices := self._molecule_order()) is not None:
+            out = out[:, indices]
+        return out
+
+
+def _tag_molecules(molecules: Molecules, image_id: Hashable) -> Molecules:
+    """Return a copy of the molecules tagged with the image ID."""
+    molecules = molecules.copy()
+    molecules.features = molecules.features.with_columns(
+        pl.Series(IMAGE_ID_LABEL, np.full((len(molecules)), image_id))
+    )
+    return molecules
+
+
+def _concat_molecules(molecules: list[Molecules]) -> Molecules:
+    """Concatenate the molecules, ignoring the empty ones as `Molecules.concat_with`."""
+    nonempty = [mole for mole in molecules if mole.count() > 0]
+    if len(nonempty) == 0:
+        return molecules[0]
+    elif len(nonempty) == 1:
+        return nonempty[0]
+    return Molecules.concat(nonempty)
 
 
 class LoaderAccessor:
@@ -475,46 +639,27 @@ class LoaderAccessor:
     def __init__(self, collection: BatchLoader):
         self._loader = weakref.ref(collection)
 
-    def __getitem__(self, idx: int) -> SubtomogramLoader:
+    def __getitem__(self, idx: Hashable) -> LoaderBase:
         ldr = self._get_loader()
-        mole = ldr.filter(pl.col(IMAGE_ID_LABEL) == idx).molecules
-        if mole.features.shape[0] == 0:
+        rows = dict(ldr._image_rows()).get(idx)
+        if rows is None:
             raise KeyError(idx)
-        image = ldr._images[idx]
-        loader = SubtomogramLoader(
-            image,
-            mole,
-            order=ldr.order,
-            scale=ldr.scale,
-            output_shape=ldr.output_shape,
-            tilt_model=ldr._tilt_models.get(idx, None),
-        )
-        return loader
+        return ldr._make_loader(idx, ldr.molecules.subset(rows))
 
-    def __iter__(self) -> Iterator[SubtomogramLoader]:
+    def __iter__(self) -> Iterator[LoaderBase]:
         for _, loader in self.iter_loaders():
             yield loader
 
-    def iter_loaders(self) -> Iterator[tuple[Hashable, SubtomogramLoader]]:
+    def iter_loaders(self) -> Iterator[tuple[Hashable, LoaderBase]]:
         """Iterate over all loaders with its image ID."""
         ldr = self._get_loader()
-        for key, group in ldr.molecules.group_by(IMAGE_ID_LABEL):
-            image = ldr._images[key]
-            tilt_model = ldr._tilt_models.get(key, None)
-            loader = SubtomogramLoader(
-                image,
-                group,
-                ldr.order,
-                ldr.scale,
-                ldr.output_shape,
-                tilt_model=tilt_model,
-            )
-            yield key, loader
+        for key, _, mole in ldr._iter_image_molecules():
+            yield key, ldr._make_loader(key, mole)
 
     def __len__(self) -> int:
         """Number of loaders."""
         ldr = self._get_loader()
-        return len(ldr._images)
+        return len(ldr._images) + len(ldr._sources)
 
     def _get_loader(self) -> BatchLoader:
         loader = self._loader()
