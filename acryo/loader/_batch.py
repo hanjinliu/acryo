@@ -426,7 +426,7 @@ class BatchLoader(LoaderBase):
             _images[_id] = binned_image
 
         if _compute_dict:
-            _computed = da.compute(_compute_dict)
+            (_computed,) = da.compute(_compute_dict)
             _images.update(_computed)
 
         out = self.replace(
