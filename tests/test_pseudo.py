@@ -912,6 +912,11 @@ def test_exclude_tilts_with_filters(blob_tilt_series):
     # the preprocessor is consistent with the tilt series
     same = _loader(loader.tilt_series, mole, preprocess=loader.preprocessor)
     assert_allclose(same._images.get(2)[1], loader._images.get(2)[1])
+    # without preprocessing
+    raw = mrcfile.read(blob_tilt_series.image_path)
+    loader = _loader(blob_tilt_series, mole, preprocess=False).exclude_tilts(EXCLUDED)
+    assert loader.preprocessor is None
+    assert_allclose(loader._images.get(1)[1], raw[KEPT])
 
 
 def test_exclude_tilts_cache(blob_tilt_series, monkeypatch):
