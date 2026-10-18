@@ -125,6 +125,41 @@ class CTFCorrection:
             return np.sign(ctf)
         return ctf / (ctf**2 + self.wiener_constant)
 
+    def select_tilts(self, indices: ArrayLike) -> CTFCorrection:
+        """Return the CTF correction of the selected tilts."""
+        if len(self.models) == 1:
+            return self
+        models = tuple(self.models[i] for i in np.asarray(indices, dtype=np.intp))
+        return dataclasses.replace(self, models=models)
+
+
+@dataclass(frozen=True)
+class _SelectedTiltsFilter:
+    """A filter of the selected tilts, called with the indices before the selection."""
+
+    filter: TiltImageFilter
+    indices: tuple[int, ...]
+
+    def __call__(
+        self,
+        freq_y: NDArray[np.float64],
+        freq_x: NDArray[np.float64],
+        index: int,
+    ) -> NDArray[np.floating] | float:
+        return self.filter(freq_y, freq_x, self.indices[index])
+
+    def select_tilts(self, indices: ArrayLike) -> _SelectedTiltsFilter:
+        idx = np.asarray(indices, dtype=np.intp)
+        return _SelectedTiltsFilter(self.filter, tuple(self.indices[i] for i in idx))
+
+
+def _select_filter_tilts(
+    filt: TiltImageFilter, indices: NDArray[np.intp]
+) -> TiltImageFilter:
+    if (select_tilts := getattr(filt, "select_tilts", None)) is not None:
+        return select_tilts(indices)
+    return _SelectedTiltsFilter(filt, tuple(int(i) for i in indices))
+
 
 @dataclass(frozen=True)
 class TiltImagePreprocessor:
@@ -217,6 +252,24 @@ class TiltImagePreprocessor:
                 ctf, defocus, method=method, wiener_constant=wiener_constant  # type: ignore
             )
         return self.with_filters(correction)
+
+    def select_tilts(self, indices: ArrayLike) -> Self:
+        """Return the preprocessor of the selected tilts.
+
+        The ``filters`` are converted so that each tilt of the selection is filtered
+        as before, such as by the CTF model of the tilt. A filter that has the
+        ``select_tilts`` method is converted by it, and the others are called with the
+        indices of the tilts before the selection.
+
+        Parameters
+        ----------
+        indices : sequence of int
+            Indices of the tilts to keep, as :meth:`TiltSeries.select_tilts`.
+        """
+        idx = np.asarray(indices, dtype=np.intp)
+        return self.replace(
+            filters=tuple(_select_filter_tilts(filt, idx) for filt in self.filters)
+        )
 
     def __call__(
         self,

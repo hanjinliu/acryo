@@ -425,6 +425,22 @@ of :meth:`align` or :meth:`binning`). The cache is released when the context exi
         aligned = loader.align(template, max_shifts=1.0)
         avg = aligned.average()
 
+Tilt images can be excluded from the reconstruction by
+:meth:`BackProjectionLoader.exclude_tilts`, such as those damaged by the electron dose or
+blocked by the grid bars. The indices are of the tilts in the tilt series of the loader
+(``loader.tilt_series.tilt_angles[i]``), not of the images in the file, which differ if
+some views were already excluded when the tilt series was read (such as by
+:meth:`TiltSeries.from_etomo_directory`). The filters of the preprocessor, such as the CTF
+correction, stay matched to their tilts, and the default tilt model is created again from
+the remaining tilt angles. :meth:`TiltSeries.select_tilts` returns the tilt series of the
+selected tilts.
+
+.. code-block:: python
+
+    loader = loader.exclude_tilts([0, 1])  # exclude the first two tilts
+    angles = loader.tilt_series.tilt_angles
+    loader = loader.exclude_tilts(np.flatnonzero(np.abs(angles) > 50))
+
 The 3D Fourier transform of each cube is padded by the factor ``padding`` (2 by default).
 Densities outside the padded cube, such as neighboring molecules, are partly aliased into the
 cube. If the molecules are densely packed, a larger ``padding`` (such as 3) gives subtomograms
