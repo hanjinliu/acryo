@@ -25,7 +25,7 @@ import dask
 from dask import array as da
 from dask.highlevelgraph import HighLevelGraph
 
-from acryo._types import nm, pixel
+from acryo._types import degree, nm, pixel
 from acryo._dask import DaskArrayList
 from acryo.backend import Backend
 from acryo.loader._base import LoaderBase, Unset, _ShapeType, TemplateInputType
@@ -668,6 +668,7 @@ class BackProjectionLoader(LoaderBase):
         references: Sequence[tuple[Molecules, TemplateInputType]],
         *,
         max_shift: nm = 2.0,
+        rotation: tuple[degree, degree] = (0.0, 0.0),
         grid_shape: tuple[int, int] = (1, 1),
         smoothness: float = 0.01,
         niter: int = 100,
@@ -677,8 +678,9 @@ class BackProjectionLoader(LoaderBase):
 
         Similar to Bayesian polishing, the projections of the templates placed at the
         particles are compared with the tilt images to refine the shifts of each tilt
-        image. If ``grid_shape`` is larger than ``(1, 1)``, the shifts are refined as
-        a smooth field over each tilt image (local alignment).
+        image. If ``rotation`` is given, the in-plane rotation of each tilt image is
+        also searched. If ``grid_shape`` is larger than ``(1, 1)``, the shifts are
+        refined as a smooth field over each tilt image (local alignment).
 
         Parameters
         ----------
@@ -688,6 +690,14 @@ class BackProjectionLoader(LoaderBase):
             Particles of different kinds can be given with different templates.
         max_shift : float, default is 2.0
             Maximum shift of the tilt images in nm.
+        rotation : (float, float), default is (0.0, 0.0)
+            (max, step) of the in-plane rotation of the tilt images in degrees, such
+            as ``(2.0, 0.5)``. The tilt axis angle of each tilt is searched from
+            ``-max`` to ``max`` by ``step`` around the current one, and the angle with
+            the highest correlation is chosen. The rotation is around the projection
+            of the origin of the sample, so the shifts are refined after the rotation.
+            The computation time is proportional to the number of the angles. No
+            rotation is searched if ``max`` or ``step`` is 0.
         grid_shape : (int, int), default is (1, 1)
             Number of control points of the local shifts along y and x of the tilt
             images. The control points are evenly placed from edge to edge of the
@@ -706,8 +716,9 @@ class BackProjectionLoader(LoaderBase):
         -------
         BackProjectionLoader
             A new loader with the refined tilt series. ``sample_translations`` of the
-            tilt series are updated, and the local shifts are set to
-            ``local_shifts_2d`` if ``grid_shape`` is larger than ``(1, 1)``.
+            tilt series are updated, ``tilt_axis_angle`` is updated if ``rotation`` is
+            given, and the local shifts are set to ``local_shifts_2d`` if
+            ``grid_shape`` is larger than ``(1, 1)``.
         """
         from acryo.loader._tilt_refine import ParticleSet, refine_tilt_series
 
@@ -728,6 +739,7 @@ class BackProjectionLoader(LoaderBase):
             particle_sets,
             scale=self.scale,
             max_shift=max_shift,
+            rotation=rotation,
             grid_shape=grid_shape,
             smoothness=smoothness,
             niter=niter,
@@ -735,6 +747,7 @@ class BackProjectionLoader(LoaderBase):
         )
         # the geometry is in nm, so it does not depend on the binning of the images
         tilt_series = self.tilt_series.replace(
+            tilt_axis_angle=refined.tilt_axis_angle,
             sample_translations=refined.sample_translations,
             local_shifts_2d=refined.local_shifts_2d,
         )

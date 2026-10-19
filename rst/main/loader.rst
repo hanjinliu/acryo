@@ -572,6 +572,19 @@ contrast as the subtomograms (such as the averages of this loader).
         max_shift=2.0,  # nm
     )
 
+The in-plane rotation of each tilt image (``tilt_axis_angle``) can also be refined by
+``rotation=(max, step)`` in degrees. The tilt axis angle of each tilt is searched from
+``-max`` to ``max`` by ``step`` around the current one, and the shifts are refined at the
+angle with the highest correlation. The computation time is proportional to the number of
+the angles.
+
+.. code-block:: python
+
+    refined = loader.refine_tilt_series(
+        [(ribosomes, ribosome_template)],
+        rotation=(2.0, 0.5),  # search -2.0, -1.5, ..., 2.0 degrees
+    )
+
 By default, a uniform shift is refined for each tilt image (``sample_translations``). If
 ``grid_shape`` is larger than ``(1, 1)``, the shifts are refined as a smooth field over each
 tilt image, interpolated from a grid of control points (``local_shifts_2d``). The control
