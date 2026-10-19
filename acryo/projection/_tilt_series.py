@@ -256,6 +256,28 @@ class TiltSeries:
         linear = self.projection_matrices[:, :3, :3] @ self.tomo2sample[:3, :3]
         return np.linalg.pinv(linear)
 
+    @property
+    def local_detector2tomo(self) -> NDArray[np.float64]:
+        """(T, 3, 3) linear maps from the detector (z, y, x) to the tomogram space.
+
+        Same as :attr:`detector2tomo`, but the linear part of ``local_shifts_2d``
+        (:meth:`LocalShiftModel.linear_part`, such as the change of magnification of
+        :class:`AffineShifts2D`) is also inverted, so that the (y, x) offsets from the
+        projection of a point on each tilt image are mapped to the offsets from the
+        point in the tomogram space. The patches of the tilt images around the
+        projected points are reconstructed by these maps. The position-dependent
+        shifts are not included.
+        """
+        rotations = self.detector2tomo
+        if self.local_shifts_2d is None:
+            return rotations
+        if (linear := self.local_shifts_2d.linear_part()) is None:
+            return rotations
+        inverse = np.zeros((self.ntilts, 3, 3))
+        inverse[:, 0, 0] = 1.0
+        inverse[:, 1:, 1:] = np.linalg.inv(linear)
+        return rotations @ inverse
+
     def project_points(self, points: ArrayLike) -> NDArray[np.float64]:
         """Project points in the tomogram space to the detector.
 
@@ -776,7 +798,7 @@ def _read_imod_local_alignment(
         names = tilt_com.get("LOCALFILE") or _read_imod_com(path / "align.com").get(
             "OUTPUTLOCALFILE"
         )
-        if names and Path(names[0]).exists():
+        if names:
             file = Path(names[0])
         else:
             return None
@@ -784,6 +806,8 @@ def _read_imod_local_alignment(
         file = Path(local_alignment)
     if not file.is_absolute():
         file = path / file
+    if not Path(file).exists():
+        return None
     if fullimage := tilt_com.get("FULLIMAGE"):
         image_shape = (int(fullimage[1]), int(fullimage[0]))
     else:

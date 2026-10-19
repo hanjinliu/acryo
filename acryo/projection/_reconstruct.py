@@ -6,7 +6,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy import fft as sfft
 
-from acryo.projection._insertion import CentralSliceInsertion
+from acryo.projection._insertion import CentralSliceInsertion, slice_stretch
 from acryo.projection._patch import centered_patches_rfft
 
 
@@ -25,7 +25,8 @@ class DirectFourierReconstructor:
         only the patches are read.
     rotations : (T, 3, 3) array
         Matrices that map the (z, y, x) coordinates on each tilt image (z = 0) to
-        the (z, y, x) coordinates of the cube.
+        the (z, y, x) coordinates of the cube. The image plane may also be scaled,
+        such as :attr:`TiltSeries.local_detector2tomo` of magnified tilt images.
     input_spacing : float
         Pixel spacing of the tilt images.
     output_spacing : float
@@ -60,8 +61,12 @@ class DirectFourierReconstructor:
         self.sidelength = sidelength
         padded = sfft.next_fast_len(math.ceil(padding * sidelength), real=True)
         ratio = output_spacing / input_spacing
-        # the patches cover the padded cube
-        self.patch_size = math.ceil(padded * ratio)
+        # The patches cover the padded cube. If the images are magnified, the size is
+        # scaled by the mean magnification, so that the period of the patches is
+        # close to that of the padded cube for all the images, which is more accurate
+        # than covering the cube in all the images.
+        stretch = float(np.exp(np.log(slice_stretch(rotations)).mean()))
+        self.patch_size = math.ceil(padded * ratio * stretch)
         self.insertion = CentralSliceInsertion(
             rotations, self.patch_size, padded, scale=ratio
         )

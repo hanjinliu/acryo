@@ -181,6 +181,48 @@ def test_base_and_select_tilts():
     assert_allclose(sub.project_points(points), full[:, idx], atol=1e-10)
 
 
+def test_linear_part():
+    rng = np.random.default_rng(10)
+    m_outer, m_inner = np.eye(2) + rng.normal(scale=0.03, size=(2, NTILTS, 2, 2))
+    inner = AffineShifts2D(m_inner, rng.normal(size=(NTILTS, 2)))
+    outer = AffineShifts2D(m_outer, rng.normal(size=(NTILTS, 2)), base=inner)
+    expected = m_outer @ m_inner
+    assert_allclose(outer.linear_part(), expected)
+    assert_allclose(outer.select_tilts([0, 2]).linear_part(), expected[[0, 2]])
+    # the position-dependent models keep the linear part of the base
+    smooth = LocalShifts2D(rng.normal(size=(NTILTS, 2, 2, 3)), [300.0, 300.0])
+    assert smooth.linear_part() is None
+    assert_allclose(dataclasses.replace(smooth, base=outer).linear_part(), expected)
+    local = _uniform_alignment(tilt_angles=rng.normal(size=NTILTS), grid_shape=(2, 2))
+    assert local.linear_part() is None
+    assert_allclose(dataclasses.replace(local, base=inner).linear_part(), m_inner)
+    assert FunctionShifts(lambda p: np.zeros_like(p)).linear_part() is None
+
+
+def test_local_detector2tomo():
+    ts = _tilt_series()
+    assert_allclose(ts.local_detector2tomo, ts.detector2tomo)
+    smooth = LocalShifts2D(np.ones((NTILTS, 2, 2, 3)), [300.0, 300.0])
+    assert_allclose(
+        ts.replace(local_shifts_2d=smooth).local_detector2tomo, ts.detector2tomo
+    )
+    rng = np.random.default_rng(11)
+    m_outer, m_inner = np.eye(2) + rng.normal(scale=0.03, size=(2, NTILTS, 2, 2))
+    affine = AffineShifts2D(
+        m_outer,
+        rng.normal(size=(NTILTS, 2)),
+        base=AffineShifts2D(m_inner, rng.normal(size=(NTILTS, 2))),
+    )
+    ts = ts.replace(local_shifts_2d=affine)
+    # the offsets from a point are mapped to the offsets from its projection
+    point = _points(n=1)[0]
+    offsets = rng.normal(scale=20.0, size=(5, 3))
+    projected = ts.project_points(point + offsets) - ts.project_points(point)
+    inverse = np.linalg.inv(ts.local_detector2tomo)
+    expected = np.einsum("tij,nj->nti", inverse, offsets)[..., 1:]
+    assert_allclose(projected, expected, atol=1e-8)
+
+
 def test_serialization():
     ts = _tilt_series()
     points = _points()

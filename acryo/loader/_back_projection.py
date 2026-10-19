@@ -603,7 +603,9 @@ class BackProjectionLoader(LoaderBase):
         Parameters
         ----------
         shape : int or tuple of int
-            Shape of the tomogram in pixel.
+            Shape of the tomogram in pixel. A negative ``ny`` or ``nx`` is the size of
+            the tilt images along the axis. If the tilt axis angle is close to ±90°,
+            the height and width of the tilt images are swapped.
         patch_size : int, default is 64
             Distance between the centers of the reconstructed patches in pixel.
         blend_margin : int, optional
@@ -638,10 +640,15 @@ class BackProjectionLoader(LoaderBase):
         nz, ny, nx = shape
         if nz < 0:
             raise ValueError(f"'nz' must be non-negative, got {nz}.")
+        image_h, image_w = images.shape[1:]
+        if abs((90 - np.mean(tilt_series.tilt_axis_angle)) % 180 - 90) > 45:
+            # The tilt axis (y axis of the tomogram) is close to the x axis of the
+            # images, so the y and x axes of the tomogram are swapped in the images.
+            image_h, image_w = image_w, image_h
         if ny < 0:
-            ny = images.shape[1]
+            ny = image_h
         if nx < 0:
-            nx = images.shape[2]
+            nx = image_w
         return reconstruct_tomogram(
             tilt_series,
             images,
@@ -863,7 +870,7 @@ class _TiltSeriesImages:
         self, binsize: int, output_scale: nm, sidelength: int, padding: float
     ) -> DirectFourierReconstructor:
         """Get the reconstructor of cubes from the tilt images binned by binsize."""
-        rotations = self.tilt_series.detector2tomo
+        rotations = self.tilt_series.local_detector2tomo
         key = (
             self._cache_key(binsize),
             round(output_scale, 8),

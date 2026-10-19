@@ -106,7 +106,7 @@ def reconstruct_tomogram(
     half = length // 2
     reconstructor = DirectFourierReconstructor(
         images,
-        tilt_series.detector2tomo,
+        tilt_series.local_detector2tomo,
         input_spacing=tilt_series.scale,
         output_spacing=scale,
         sidelength=length,
