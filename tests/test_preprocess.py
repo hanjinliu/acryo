@@ -10,7 +10,7 @@ from acryo.projection import TiltImagePreprocessor, fourier_bin
 from acryo.projection._preprocess import (
     _axis_layout,
     _bandpass,
-    _fft_size,
+    _is_5_smooth,
     _reflect_indices,
     _reflect_runs,
     _subtract_plane,
@@ -40,6 +40,14 @@ def _taper(size: int, pad: int) -> np.ndarray:
     return np.cos(np.pi / 2 * np.minimum(dist / max(pad, 1), 1.0))
 
 
+def _even_fft_size(size: int) -> int:
+    """The smallest even size >= size that is 2 * (5-smooth number)."""
+    m = -(-size // 2)
+    while not _is_5_smooth(m):
+        m += 1
+    return 2 * m
+
+
 def _reference_preprocess(image: np.ndarray, pre: TiltImagePreprocessor) -> np.ndarray:
     """Preprocessing of the whole image written step by step in numpy (float64)."""
     image = image.astype(np.float64)
@@ -53,7 +61,7 @@ def _reference_preprocess(image: np.ndarray, pre: TiltImagePreprocessor) -> np.n
     padded = np.pad(image, ((pad_y, pad_y), (pad_x, pad_x)), mode="reflect")
     padded *= np.outer(_taper(h, pad_y), _taper(w, pad_x))
     # zero-padded to the size for FFT
-    shape = tuple(_fft_size(size, 2) for size in padded.shape)
+    shape = tuple(_even_fft_size(size) for size in padded.shape)
     band = _bandpass(shape, pre.low, pre.high, pre.falloff).copy()
     if pre.low <= 0:
         band[0, 0] = 1.0  # the mean is subtracted later
@@ -469,3 +477,102 @@ def test_invalid_preprocessor():
     with pytest.raises(ValueError):
         TiltImagePreprocessor()(_image((10, 10)), binsize=6)  # too small to bin
     assert TiltImagePreprocessor(patch_grid=2).patch_grid == (2, 2)
+
+
+def test_real_space_binsize():
+    from acryo.projection._preprocess import _real_space_binsize
+
+    k3 = (4092, 5760)  # gcd is 12
+    assert [_real_space_binsize(k3, b, 4) for b in (2, 3, 4, 6, 7, 8)] == [
+        1,
+        1,
+        4,
+        6,
+        6,
+        6,
+    ]
+    assert _real_space_binsize((4096, 4096), 8, 4) == 8
+    assert _real_space_binsize(k3, 8, None) == 1
+    assert _real_space_binsize((277, 373), 8, 4) == 1  # no common factor
+    with pytest.raises(ValueError):
+        TiltImagePreprocessor(real_space_binning=1)
+
+
+def test_bin_real_space():
+    from acryo.projection._preprocess import _bin_real_space
+
+    image = _image((24, 36))
+    expected = image.reshape(4, 6, 6, 6).mean(axis=(1, 3))
+    assert_allclose(_bin_real_space(image, 6), expected, rtol=1e-5)
+
+
+@pytest.mark.parametrize("size", [276, 372, 4092])
+@pytest.mark.parametrize("binsize, prebin", [(4, 4), (5, 4), (7, 6), (8, 6), (9, 6)])
+@pytest.mark.parametrize("npatches", [1, 3])
+def test_axis_layout_real_space_binning(size, binsize, prebin, npatches):
+    from fractions import Fraction
+
+    layout = _axis_layout(size, binsize, npatches, 64, 128, prebin=prebin)
+    cropped = size - size % (2 * binsize)
+    assert layout.size_out == cropped // binsize
+    step = Fraction(binsize, prebin)
+    # the FFT of the size p * m is cropped to the even size q * m
+    assert layout.fft_size * step.denominator == layout.crop_size * step.numerator
+    assert layout.crop_size % 2 == 0
+    total = np.zeros(layout.size_out)
+    for patch in layout.patches:
+        assert patch.length <= layout.fft_size
+        assert 0 <= patch.shift < 1
+        nout = patch.out_stop - patch.out_start
+        assert patch.offset * 2 + nout <= layout.crop_size
+        # the samples of the binned patch are at the output pixels
+        for k in [0, nout - 1]:
+            j = patch.out_start + k
+            sample = patch.start + patch.shift + float((patch.offset + k) * step)
+            original = size // 2 + (j - layout.size_out // 2) * binsize
+            assert sample * prebin + (prebin - 1) / 2 == pytest.approx(original)
+        assert patch.taper.shape == (patch.length,)
+        assert np.all(
+            patch.taper[patch.margins[0] : patch.length - patch.margins[1]] == 1
+        )
+        total[patch.out_start : patch.out_stop] += patch.weight
+    assert_allclose(total, 1.0, rtol=1e-6)
+
+
+def _blob(shape, shift, sigma) -> np.ndarray:
+    pos = np.array(shape) // 2 + shift
+    yy, xx = np.indices(shape, dtype=np.float32)
+    out = np.exp(-((yy - pos[0]) ** 2 + (xx - pos[1]) ** 2) / (2 * sigma**2))
+    return out.astype(np.float32)
+
+
+@pytest.mark.parametrize("shape", [(276, 372), (240, 336)])
+@pytest.mark.parametrize("binsize", [4, 5, 7, 8, 9])
+@pytest.mark.parametrize("patch_grid", [(1, 1), (3, 3)])
+def test_real_space_binning_keeps_center(shape, binsize, patch_grid):
+    shift = np.array([13.0, -21.4])
+    image = _blob(shape, shift, 10.0)
+    preprocessor = TiltImagePreprocessor(
+        high=1.0, subtract_background=False, normalize=False, patch_grid=patch_grid
+    )
+    out = preprocessor(image, binsize=binsize)
+    fourier = preprocessor.replace(real_space_binning=None)(image, binsize=binsize)
+    assert out.shape == fourier.shape
+    weight = np.clip(out - out.min(), 0, None) ** 2
+    com = (np.indices(out.shape) * weight).sum(axis=(1, 2)) / weight.sum()
+    assert_allclose(com, np.array(out.shape) // 2 + shift / binsize, atol=0.02)
+    # only slightly different from the binning in Fourier space
+    assert np.abs(out - fourier).max() < 0.05 * np.abs(fourier).max()
+
+
+@pytest.mark.parametrize("binsize", [4, 8])
+def test_real_space_binning_low_frequency(binsize):
+    # band-limited well below the Nyquist frequency of the binned image, where the
+    # real space binning does not attenuate or alias much
+    rng = np.random.default_rng(3)
+    image = ndi.gaussian_filter(rng.normal(size=(264, 360)), 1.5 * binsize)
+    image = image.astype(np.float32)
+    preprocessor = TiltImagePreprocessor()
+    out = preprocessor(image, binsize=binsize)
+    fourier = preprocessor.replace(real_space_binning=None)(image, binsize=binsize)
+    assert np.corrcoef(out.ravel(), fourier.ravel())[0, 1] > 0.995

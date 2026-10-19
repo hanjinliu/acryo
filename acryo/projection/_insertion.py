@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-import threading
-from typing import Any, Sequence
+from typing import Sequence
 
 import numpy as np
 from numpy.typing import NDArray
 from scipy import fft as sfft
 from scipy import sparse
-
-from acryo.backend import Backend
-from acryo.backend._gpu import backend_of
 
 
 class CentralSliceInsertion:
@@ -23,8 +19,7 @@ class CentralSliceInsertion:
 
     The images are regarded as the projections of the volume along the z axis of
     each slice, that is, the sum over the voxels. Images of a smaller pixel size
-    (``scale > 1``) are normalized by the pixel area. The slices can be numpy or cupy
-    arrays, and the volume is computed on the same device.
+    (``scale > 1``) are normalized by the pixel area.
 
     Parameters
     ----------
@@ -110,55 +105,12 @@ class CentralSliceInsertion:
         self._normalizer = np.zeros(weights.shape, dtype=np.float32)
         # normalize by the pixel area of the images
         self._normalizer[valid] = 1 / weights[valid] / scale**2
-        self._device_lock = threading.Lock()
-        self._device_operators: tuple[Any, Any, Any, Any] | None = None
 
     @property
     def nbytes(self) -> int:
-        """Approximate memory usage in bytes (on the host)."""
+        """Approximate memory usage in bytes."""
         mats = [self._direct, self._conjugate]
         return sum(a.data.nbytes + a.indices.nbytes + a.indptr.nbytes for a in mats)
-
-    @property
-    def nkeep(self) -> int:
-        """Number of the frequencies of each slice that are inserted."""
-        return self._keep.size
-
-    def to_device(self, backend: Backend) -> None:
-        """Copy the operators to the device of the backend beforehand."""
-        self._operators(backend)
-
-    def _operators(self, backend: Backend) -> tuple[Any, Any, Any, Any]:
-        """The sparse matrices, the normalizer and the kept indices on the device."""
-        if not backend.is_gpu:
-            return self._direct, self._conjugate, self._normalizer, self._keep
-        with self._device_lock:
-            if self._device_operators is None:
-                from cupyx.scipy import sparse as csparse
-
-                xp = backend.xp
-                self._device_operators = (
-                    csparse.csr_matrix(self._direct),
-                    csparse.csr_matrix(self._conjugate),
-                    xp.asarray(self._normalizer),
-                    xp.asarray(self._keep),
-                )
-                # the operators are shared by the streams of the threads
-                xp.cuda.get_current_stream().synchronize()
-            return self._device_operators
-
-    def _device_nbytes(self, nbatch: int, output_shape: int | Sequence[int]) -> int:
-        """Approximate peak device memory to reconstruct ``nbatch`` volumes."""
-        ny, nx = self.slice_shape
-        dft_size = int(np.prod(self._dft_shape))
-        out_size = int(np.prod(_normalize_shape(output_shape, 3)))
-        per_volume = (
-            self.nslices * (4 * ny * nx + 16 * ny * (nx // 2 + 1))  # rfft and plan
-            + 24 * self.nslices * self.nkeep  # inserted values and their conjugates
-            + 32 * dft_size  # 3D DFT, the products and the inverse transforms
-            + 4 * out_size
-        )
-        return nbatch * per_volume
 
     def insert(self, slices: NDArray[np.complexfloating]) -> NDArray[np.complex64]:
         """Insert the slices and return the 3D DFT normalized by the weights.
@@ -171,12 +123,10 @@ class CentralSliceInsertion:
 
         Returns
         -------
-        (..., Z, Y, X // 2 + 1) complex64 array
-            The rfft of the volumes (not fftshifted), on the same device as
-            ``slices``.
+        (..., Z, Y, X // 2 + 1) complex array
+            The rfft of the volumes (not fftshifted).
         """
-        backend = backend_of(slices)
-        slices = backend.asarray(slices)
+        slices = np.asarray(slices)
         expected = (self.nslices, self.slice_shape[0], self.slice_shape[1] // 2 + 1)
         if slices.shape[-3:] != expected:
             raise ValueError(
@@ -184,15 +134,14 @@ class CentralSliceInsertion:
                 f"{expected[2]}), got {slices.shape}."
             )
         batch_shape = slices.shape[:-3]
-        direct, conjugate, normalizer, keep = self._operators(backend)
         values = slices.reshape(-1, self.nslices, expected[1] * expected[2])
         # (T * nkeep, batch) matrix of the values to be inserted
-        values = values[:, :, keep].reshape(values.shape[0], -1).T
+        values = values[:, :, self._keep].reshape(values.shape[0], -1).T
         values = values.astype(np.complex64, copy=False)
-        dft = direct @ values
-        dft += conjugate @ values.conj()
-        dft *= normalizer[:, np.newaxis]
-        return backend.xp.moveaxis(dft, -1, 0).reshape(batch_shape + self._dft_shape)
+        dft = self._direct @ values
+        dft += self._conjugate @ values.conj()
+        dft *= self._normalizer[:, np.newaxis]
+        return np.moveaxis(dft, -1, 0).reshape(batch_shape + self._dft_shape)
 
     def reconstruct(
         self,
@@ -214,27 +163,24 @@ class CentralSliceInsertion:
         Returns
         -------
         (..., *output_shape) float32 array
-            The reconstructed volumes, corrected for the trilinear interpolation, on
-            the same device as ``slices``.
+            The reconstructed volumes, corrected for the trilinear interpolation.
         """
         vshape = self.volume_shape
         if output_shape is None:
             output_shape = vshape
         output_shape = _normalize_shape(output_shape, 3)
-        backend = backend_of(slices)
-        xp, fft = backend.xp, backend.fft
         # indices of the output, whose origin is moved to the center
         indices = [
-            xp.asarray((np.arange(size) - size // 2) % length)
+            (np.arange(size) - size // 2) % length
             for size, length in zip(output_shape, vshape)
         ]
         # The inverse transform is computed axis by axis, and each axis is cropped
         # right after the transform, so the later transforms are smaller.
-        volume = fft.ifft(self.insert(slices), axis=-3, overwrite_x=True)
-        volume = fft.ifft(volume[..., indices[0], :, :], axis=-2, overwrite_x=True)
-        volume = fft.irfft(volume[..., indices[1], :], n=vshape[2], overwrite_x=True)
+        volume = sfft.ifft(self.insert(slices), axis=-3, overwrite_x=True)
+        volume = sfft.ifft(volume[..., indices[0], :, :], axis=-2, overwrite_x=True)
+        volume = sfft.irfft(volume[..., indices[1], :], n=vshape[2], overwrite_x=True)
         volume = volume[..., indices[2]].astype(np.float32, copy=False)
-        volume /= xp.asarray(_gridding_correction(vshape, output_shape))
+        volume /= _gridding_correction(vshape, output_shape)
         return volume
 
 

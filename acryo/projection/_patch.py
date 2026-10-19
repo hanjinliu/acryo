@@ -7,8 +7,6 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy import fft as sfft
 
-from acryo.backend import NUMPY_BACKEND, AnyArray, Backend
-
 
 def read_patch(
     image: NDArray[np.float32],
@@ -42,8 +40,7 @@ def centered_patches_rfft(
     images: NDArray[np.float32],
     positions: NDArray[np.floating],
     shape: int | Sequence[int],
-    backend: Backend | None = None,
-) -> AnyArray[np.complex64]:
+) -> NDArray[np.complex64]:
     """The rfft of the patches of images, whose origins are at the given positions.
 
     A patch around each position is read, and shifted with subpixel precision in
@@ -60,16 +57,12 @@ def centered_patches_rfft(
         multiple sets of positions, such as different particles.
     shape : int or (int, int)
         Shape of the patches.
-    backend : Backend, optional
-        Backend of the Fourier transform. The patches are read on the host, and
-        transformed on the device of the backend. Default is numpy.
 
     Returns
     -------
-    (..., T, ny, nx // 2 + 1) complex64 array
-        The rfft of the patches, on the device of the backend.
+    (..., T, ny, nx // 2 + 1) complex array
+        The rfft of the patches.
     """
-    backend = backend or NUMPY_BACKEND
     ny, nx = (shape, shape) if isinstance(shape, int) else tuple(shape)
     positions = np.asarray(positions, dtype=np.float64)
     if positions.shape[-2:] != (len(images), 2):
@@ -87,11 +80,10 @@ def centered_patches_rfft(
             patches[i, t] = read_patch(image, (iy - ny // 2, ix - nx // 2), (ny, nx))
             # position of the point in the patch
             shifts[i, t] = ny // 2 + y - iy, nx // 2 + x - ix
-    xp = backend.xp
-    ft = backend.fft.rfft2(xp.asarray(patches), axes=(-2, -1), overwrite_x=True)
+    ft = sfft.rfft2(patches, axes=(-2, -1), overwrite_x=True)  # complex64
     # shift the point to the origin, along y and then along x
     ramp_y = np.exp(2j * np.pi * shifts[..., 0:1] * sfft.fftfreq(ny))
     ramp_x = np.exp(2j * np.pi * shifts[..., 1:2] * sfft.rfftfreq(nx))
-    ft *= xp.asarray(ramp_y.astype(np.complex64))[..., :, np.newaxis]
-    ft *= xp.asarray(ramp_x.astype(np.complex64))[..., np.newaxis, :]
+    ft *= ramp_y.astype(np.complex64)[..., :, np.newaxis]
+    ft *= ramp_x.astype(np.complex64)[..., np.newaxis, :]
     return ft.reshape(batch_shape + ft.shape[-3:])

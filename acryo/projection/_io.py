@@ -33,19 +33,29 @@ class MrcImageStack:
 
     def iter_images(self, indices: Iterable[int]) -> Iterator[NDArray[np.float32]]:
         """Iterate over the images of given indices as float32 arrays."""
-        nimages, ny, nx = self.shape
         with open(self.path, "rb") as f:
             for index in indices:
-                if not -nimages <= index < nimages:
-                    raise IndexError(
-                        f"Index {index} is out of range of {nimages} images in "
-                        f"{self.path}."
-                    )
-                f.seek(self.offset + (index % nimages) * ny * nx * self.dtype.itemsize)
-                image = np.fromfile(f, dtype=self.dtype, count=ny * nx)
-                if image.size != ny * nx:
-                    raise ValueError(f"The data block of {self.path} is truncated.")
-                yield image.reshape(ny, nx).astype(np.float32, copy=False)
+                yield self._read(f, index)
+
+    def read_image(self, index: int) -> NDArray[np.float32]:
+        """Read the image of the index as a float32 array.
+
+        The file is opened for each call, so images can be read in parallel threads.
+        """
+        with open(self.path, "rb") as f:
+            return self._read(f, index)
+
+    def _read(self, f, index: int) -> NDArray[np.float32]:
+        nimages, ny, nx = self.shape
+        if not -nimages <= index < nimages:
+            raise IndexError(
+                f"Index {index} is out of range of {nimages} images in {self.path}."
+            )
+        f.seek(self.offset + (index % nimages) * ny * nx * self.dtype.itemsize)
+        image = np.fromfile(f, dtype=self.dtype, count=ny * nx)
+        if image.size != ny * nx:
+            raise ValueError(f"The data block of {self.path} is truncated.")
+        return image.reshape(ny, nx).astype(np.float32, copy=False)
 
     def memmap(self) -> np.memmap:
         """Read-only memory map of the whole data block."""
@@ -102,6 +112,20 @@ class TiltImageSource:
     def image_shape(self) -> tuple[int, int]:
         """(H, W) shape of the tilt images."""
         return self._stacks[0].shape[1:]  # type: ignore
+
+    @property
+    def shape(self) -> tuple[int, int, int]:
+        """(T, H, W) shape of the tilt series."""
+        return (len(self._indices),) + self.image_shape
+
+    def __len__(self) -> int:
+        return len(self._indices)
+
+    def __getitem__(self, t: int) -> NDArray[np.float32]:
+        """Read the ``t``-th tilt image (thread-safe)."""
+        if len(self._stacks) == 1:
+            return self._stacks[0].read_image(self._indices[t])
+        return self._stacks[t].read_image(self._indices[t])
 
     @property
     def voxel_size(self) -> float:

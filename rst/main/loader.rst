@@ -445,7 +445,13 @@ tilt image.
 
 The tilt images are read from the file tilt by tilt, preprocessed, and binned by the largest
 integer factor whose pixel size does not exceed ``scale``, so the raw tilt series is never in
-memory all at once. Subtomograms are reconstructed lazily and in parallel by :mod:`dask`. A
+memory all at once. Each tilt image is read and preprocessed in a task of a dask graph, and
+the tasks run in parallel threads. For binning by 4 or more (``real_space_binning`` of the
+preprocessor), the tilt images are first binned in real space by the largest integer that
+does not exceed the binning factor and divides the image size, and the rest of the binning
+(which may be fractional) and the preprocessing are done in Fourier space. The resolution
+near the Nyquist frequency of the binned images is slightly attenuated, but the
+preprocessing is several times faster. Subtomograms are reconstructed lazily and in parallel by :mod:`dask`. A
 cube aligned to the tomogram axes is reconstructed around each molecule, and the subtomogram
 is cropped from the cube with the rotation of the molecule, in the same way as
 :class:`SubtomogramLoader` (interpolation order ``order``, and larger cubes if
@@ -514,21 +520,6 @@ tomograms (subvolumes are converted to float32).
 
 The same reconstruction is available for any tilt images and tilt series as
 :func:`acryo.projection.reconstruct_tomogram`.
-
-The preprocessing of the tilt images and the reconstruction of the tomogram run on GPU with
-the cupy backend. The tilt images are read on the host, and the results are returned to the
-host. The threads run on their own CUDA streams, and each task (a tilt image or a patch of
-the tomogram) reserves its estimated GPU memory before running, within 70% of the free GPU
-memory, so the parallel threads do not run out of the GPU memory. A task that still runs out
-of memory is retried alone after the cached memory is released. The subtomograms of
-:class:`BackProjectionLoader` are still reconstructed on the host.
-
-.. code-block:: python
-
-    from acryo.backend import using_backend
-
-    with using_backend("cupy"):
-        tomogram = loader.reconstruct_tomogram((D, H, W))
 
 Local Shifts of the Tilt Images
 -------------------------------

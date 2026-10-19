@@ -98,21 +98,6 @@ class Backend:
     def name(self) -> str:
         return self._xp_.__name__
 
-    @property
-    def xp(self) -> Any:
-        """The array module (numpy or cupy)."""
-        return self._xp_
-
-    @property
-    def fft(self) -> Any:
-        """The FFT module (scipy.fft or cupyx.scipy.fft)."""
-        return self._fft_
-
-    @property
-    def is_gpu(self) -> bool:
-        """Whether the arrays are on GPU."""
-        return self._xp_ is not np
-
     def __hash__(self) -> int:
         """Hash using the backend module."""
         return hash(self._xp_)

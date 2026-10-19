@@ -111,8 +111,6 @@ def test_single_precision():
     assert insertion.reconstruct(slices, 12).dtype == np.float32
     assert reconstructor(positions).dtype == np.float32
     assert _gridding_correction((24, 24, 24), (12, 12, 12)).dtype == np.float32
-    # the device memory is estimated for each batch
-    assert insertion._device_nbytes(2, 12) == 2 * insertion._device_nbytes(1, 12)
 
 
 def test_insertion_non_cubic():

@@ -957,19 +957,18 @@ def test_exclude_tilts_cache(blob_tilt_series, monkeypatch):
     loaded: list[tuple[int, int]] = []
     read: list[int] = []
     _load = _TiltSeriesImages._load
-    _iter_images = MrcImageStack.iter_images
+    _read_image = MrcImageStack.read_image
 
     def _recorded_load(self, binsize):
         loaded.append((self.tilt_series.ntilts, binsize))
         return _load(self, binsize)
 
-    def _recorded_iter_images(self, indices):
-        indices = list(indices)
-        read.extend(indices)
-        return _iter_images(self, indices)
+    def _recorded_read_image(self, index):
+        read.append(index)
+        return _read_image(self, index)
 
     monkeypatch.setattr(_TiltSeriesImages, "_load", _recorded_load)
-    monkeypatch.setattr(MrcImageStack, "iter_images", _recorded_iter_images)
+    monkeypatch.setattr(MrcImageStack, "read_image", _recorded_read_image)
     mole = Molecules(BLOBS + CENTER, Rotation.random(len(BLOBS), random_state=14))
     loader = _loader(blob_tilt_series, mole)
     ntilts = TILT_ANGLES.size
@@ -986,12 +985,13 @@ def test_exclude_tilts_cache(blob_tilt_series, monkeypatch):
         out.binning(2).average()
         out.binning(2).average()
         assert loaded == [(ntilts, 1), (KEPT.size, 2)]
-        assert read == KEPT.tolist()
+        # read in parallel
+        assert sorted(read) == KEPT.tolist()
     assert loader._images.cache.images == {}
     # the images of the excluded tilts are not read
     read.clear()
     loader.exclude_tilts(EXCLUDED).average()
-    assert read == KEPT.tolist()
+    assert sorted(read) == KEPT.tolist()
 
 
 def test_exclude_tilts_invalid_input(blob_tilt_series):

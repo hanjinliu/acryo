@@ -1,7 +1,6 @@
 # pyright: reportPrivateImportUsage=false
 from __future__ import annotations
 
-from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 import functools
 import math
@@ -22,12 +21,13 @@ import uuid
 
 import numpy as np
 from numpy.typing import DTypeLike, NDArray
+import dask
 from dask import array as da
 from dask.highlevelgraph import HighLevelGraph
 
 from acryo._types import nm, pixel
 from acryo._dask import DaskArrayList
-from acryo.backend import NUMPY_BACKEND, Backend
+from acryo.backend import Backend
 from acryo.loader._base import LoaderBase, Unset, _ShapeType, TemplateInputType
 from acryo.molecules import Molecules
 from acryo.ctf import CTFCorrection, PatchCTFCorrection
@@ -69,14 +69,16 @@ class BackProjectionLoader(LoaderBase):
     ----------
     tilt_series : acryo.projection.TiltSeries
         Tilt series with the alignment parameters. ``image_path`` and ``scale`` must
-        be set. The
-        tilt images are read from the file tilt by tilt, preprocessed at the original
-        pixel size and binned by the largest integer factor whose pixel size does not
-        exceed ``scale``, so the raw tilt series is never in memory all at once. A few
-        tilt images are preprocessed in parallel, as many as fit in about 2 GB of
-        memory, and only one tilt series is preprocessed at a time. The tilt images
-        are loaded in the computation of the dask array of :meth:`construct_dask`, and
-        released after that, so the tilt series of many loaders (such as in a
+        be set. The tilt images are read from the file tilt by tilt, preprocessed and
+        binned by the largest integer factor whose pixel size does not exceed
+        ``scale``, so the raw tilt series is never in memory all at once. For binning
+        by 4 or more, the images are binned partly in real space before preprocessing
+        (see ``TiltImagePreprocessor``). Each tilt image is read and preprocessed in a
+        task of a dask graph, and the tasks run in parallel threads, as many as fit in
+        about 2 GB of memory. Only one tilt series is preprocessed at a time. The tilt
+        images are loaded in the computation of the dask array of
+        :meth:`construct_dask`, and released after that, so the tilt series of many
+        loaders (such as in a
         ``BatchLoader``) are not all in memory at once. Use :meth:`cache_tilt_images`
         to reuse them in repeated computations.
     molecules : Molecules
@@ -570,7 +572,6 @@ class BackProjectionLoader(LoaderBase):
         overwrite: bool = False,
         num_workers: int | None = None,
         dtype: DTypeLike = np.float16,
-        backend: Backend | None = None,
     ) -> NDArray[np.floating]:
         """Reconstruct the tomogram from the tilt series.
 
@@ -606,10 +607,6 @@ class BackProjectionLoader(LoaderBase):
         dtype : float16 or float32, default is float16
             Data type of the tomogram. If ``save_path`` is given, the MRC file is of
             mode 12 (float16) or mode 2 (float32).
-        backend : Backend, optional
-            Backend of the reconstruction. Default is the current backend, which is
-            also used to preprocess the tilt images (see
-            :class:`acryo.projection.TiltImagePreprocessor`).
 
         Returns
         -------
@@ -643,7 +640,6 @@ class BackProjectionLoader(LoaderBase):
             overwrite=overwrite,
             num_workers=num_workers,
             dtype=dtype,
-            backend=backend,
         )
 
     def refine_tilt_series(
@@ -771,9 +767,9 @@ class _ImageCache:
 class _TiltSeriesImages:
     """Tilt series and its preprocessed images.
 
-    The images are read from the file tilt by tilt, preprocessed at the original pixel
-    size and binned by an integer factor. They are cached only while the cache is
-    enabled.
+    The images are read from the file, and preprocessed and binned by an integer factor
+    in the tasks of a dask graph (one for each tilt image). They are cached only while
+    the cache is enabled.
     """
 
     def __init__(
@@ -873,8 +869,6 @@ class _TiltSeriesImages:
                 output_spacing=output_scale,
                 sidelength=sidelength,
                 padding=padding,
-                # the subtomograms are reconstructed on the host
-                backend=NUMPY_BACKEND,
             )
             if cache.enabled:
                 cache.add_reconstructor(key, out)
@@ -905,37 +899,25 @@ class _TiltSeriesImages:
         source = TiltImageSource(
             tilt_series.image_path, tilt_series.image_indices, tilt_series.ntilts
         )
-        ntilts = tilt_series.ntilts
-        out: NDArray[np.float32] | None = None
         preprocessor = self.effective_preprocessor()
 
-        def _process(t: int, image: NDArray[np.float32]):
-            if preprocessor is not None:
-                image = preprocessor(image, index=t, scale=self.scale, binsize=binsize)
-            else:
-                image = fourier_bin(image, binsize)
-            return t, image
+        def _process(t: int, image: NDArray[np.float32]) -> NDArray[np.float32]:
+            if preprocessor is None:
+                return fourier_bin(image, binsize)
+            return preprocessor(image, index=t, scale=self.scale, binsize=binsize)
 
-        def _store(futures: Iterable[Future]):
-            nonlocal out
-            for future in futures:
-                t, image = future.result()
-                if out is None:
-                    out = np.empty((ntilts,) + image.shape, dtype=np.float32)
-                out[t] = image
-
-        # The tilt images are read one by one, and processed in parallel. The number
-        # of the images being processed is limited to save memory.
+        # Each tilt image is read and preprocessed in the tasks of a dask graph, which
+        # run in parallel threads. The number of the threads is limited to save memory.
+        tasks = [
+            dask.delayed(_process, pure=False)(
+                t, dask.delayed(source.__getitem__, pure=False)(t)
+            )
+            for t in range(len(source))
+        ]
         num_workers = _num_load_workers(source.image_shape, preprocessor)
-        with _LOAD_LOCK, ThreadPoolExecutor(num_workers) as executor:
-            pending: set[Future] = set()
-            for t, image in enumerate(source.iter_images()):
-                if len(pending) >= num_workers:
-                    done, pending = wait(pending, return_when=FIRST_COMPLETED)
-                    _store(done)
-                pending.add(executor.submit(_process, t, image))
-            _store(pending)
-        assert out is not None
+        with _LOAD_LOCK:
+            images = dask.compute(*tasks, scheduler="threads", num_workers=num_workers)
+        out = np.stack(images, axis=0)
         # the images may be cached and shared by the loaders
         out.setflags(write=False)
         return out
@@ -945,7 +927,7 @@ def _num_load_workers(
     image_shape: tuple[int, int], preprocessor: TiltImagePreprocessor | None
 ) -> int:
     """Number of threads to preprocess tilt images within the memory budget."""
-    # each thread has a tilt image and the workspace to preprocess it
+    # each thread has a tilt image, and the workspace to filter a patch of it
     image_bytes = image_shape[0] * image_shape[1] * 4
     if preprocessor is None:
         thread_bytes = 5 * image_bytes  # the image and its Fourier binning

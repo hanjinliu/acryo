@@ -11,14 +11,9 @@ import numpy as np
 from numpy.typing import DTypeLike, NDArray
 
 from acryo._types import nm
-from acryo.backend import Backend
 from acryo.projection._io import VolumeWriter
 from acryo.projection._reconstruct import DirectFourierReconstructor
 from acryo.projection._tilt_series import TiltSeries
-
-# Default number of threads with GPU. GPU kernels are mostly serialized, and a few
-# threads are enough to overlap reading the patches, transfers and accumulation.
-_GPU_WORKERS = 4
 
 
 def reconstruct_tomogram(
@@ -34,7 +29,6 @@ def reconstruct_tomogram(
     overwrite: bool = False,
     num_workers: int | None = None,
     dtype: DTypeLike = np.float16,
-    backend: Backend | None = None,
 ) -> NDArray[np.floating]:
     """Reconstruct a tomogram from tilt images by direct Fourier inversion.
 
@@ -72,20 +66,13 @@ def reconstruct_tomogram(
         Whether to overwrite the existing file at ``save_path``.
     num_workers : int, optional
         Number of threads to reconstruct the patches. Default is the number of the
-        CPUs (at most 4 with GPU). Each thread needs memory for the 3D DFT of a
-        padded patch (about ``8 * (padding * (patch_size + 2 * blend_margin)) ** 3 /
-        2`` bytes), so a smaller value uses less memory.
+        CPUs. Each thread needs memory for the 3D DFT of a padded patch (about
+        ``8 * (padding * (patch_size + 2 * blend_margin)) ** 3 / 2`` bytes), so a
+        smaller value uses less memory.
     dtype : float16 or float32, default is float16
         Data type of the tomogram. float16 is half the size of float32. If
         ``save_path`` is given, the MRC file is of mode 12 (float16) or mode 2
         (float32). The patches are always reconstructed in float32.
-    backend : Backend, optional
-        Backend of the reconstruction of the patches. Default is the current
-        backend. With cupy, the patches of the tilt images are read on the host,
-        reconstructed on the GPU and accumulated on the host. The threads run on
-        their own CUDA streams, and each patch reserves its memory in the budget of
-        the GPU memory before running, so the threads do not run out of the GPU
-        memory (see :func:`acryo.backend._gpu.run_on_device`).
 
     Returns
     -------
@@ -104,11 +91,8 @@ def reconstruct_tomogram(
         )
     if patch_size <= 0:
         raise ValueError(f"'patch_size' must be positive, got {patch_size}.")
-    backend = backend or Backend()
     if num_workers is None:
         num_workers = os.cpu_count() or 1
-        if backend.is_gpu:
-            num_workers = min(num_workers, _GPU_WORKERS)
     if num_workers <= 0:
         raise ValueError(f"'num_workers' must be positive, got {num_workers}.")
     if blend_margin is None:
@@ -127,7 +111,6 @@ def reconstruct_tomogram(
         output_spacing=scale,
         sidelength=length,
         padding=padding,
-        backend=backend,
     )
     window = _cosine_taper(patch_size, blend_margin)
     window_3d = (
