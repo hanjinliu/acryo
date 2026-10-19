@@ -1,5 +1,6 @@
 import dataclasses
 import json
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -347,7 +348,7 @@ def test_from_etomo_directory_global(tmp_path, monkeypatch, magnification):
     df = _etomo_dataframe(np.random.default_rng(9), magnification=magnification)
     monkeypatch.setattr(etomofiles, "read", lambda path: df.copy())
     scale = 0.2
-    ts = TiltSeries.from_etomo_directory(tmp_path, scale=scale)
+    ts = TiltSeries.from_etomo_directory(tmp_path, scale=scale, ctf=False)
     kept = df.loc[~df["excluded"]]
     assert ts.ntilts == 6
     assert_allclose(ts.image_indices, [0, 1, 3, 4, 5, 6])
@@ -392,8 +393,10 @@ def test_from_etomo_directory_local(tmp_path, monkeypatch):
         ],
         axis=1,
     )
-    without = TiltSeries.from_etomo_directory(tmp_path, scale=scale)
-    ts = TiltSeries.from_etomo_directory(tmp_path, scale=scale, local_alignment=True)
+    without = TiltSeries.from_etomo_directory(tmp_path, scale=scale, ctf=False)
+    ts = TiltSeries.from_etomo_directory(
+        tmp_path, scale=scale, local_alignment=True, ctf=False
+    )
     assert isinstance(ts.local_shifts_2d, AffineShifts2D)
     assert isinstance(ts.local_shifts_2d.base, LocalAlignment)
     expected = _imod_projection(points, kept, 1.5, local, scale, shape, False)
@@ -408,7 +411,7 @@ def test_from_etomo_directory_local(tmp_path, monkeypatch):
     )
     with pytest.warns(UserWarning, match="ZFACTORFILE"):
         ts = TiltSeries.from_etomo_directory(
-            tmp_path, scale=scale, local_alignment="TS_01local.xf"
+            tmp_path, scale=scale, local_alignment="TS_01local.xf", ctf=False
         )
     expected = _imod_projection(points, kept, 1.5, local, scale, shape, True)
     assert_allclose(ts.project_points(points), expected, atol=1e-6)
@@ -421,4 +424,88 @@ def test_from_etomo_directory_no_local_file(tmp_path, monkeypatch):
     df = _etomo_dataframe(np.random.default_rng(12))
     monkeypatch.setattr(etomofiles, "read", lambda path: df.copy())
     with pytest.raises(ValueError, match="local alignment"):
-        TiltSeries.from_etomo_directory(tmp_path, scale=0.2, local_alignment=True)
+        TiltSeries.from_etomo_directory(
+            tmp_path, scale=0.2, local_alignment=True, ctf=False
+        )
+
+
+def _write_ctf_files(path: Path, nviews: int, invert: str | None = None):
+    """Write the defocus file (version 3 with astigmatism) and ctfcorrection.com."""
+    lines = ["1 0 0. 0. 0 3"]
+    for v in range(1, nviews + 1):
+        lines.append(f"{v} {v} 0. 0. {3000 + 100 * v} {2900 + 100 * v} {5 * v}")
+    (path / "TS_01_ctf.defocus").write_text("\n".join(lines) + "\n")
+    com = [
+        "$ctfphaseflip -StandardInput",
+        "InputStack TS_01.ali",
+        "DefocusFile TS_01_ctf.defocus",
+        "Voltage 300",
+        "SphericalAberration 2.7",
+        "AmplitudeContrast 0.07",
+    ]
+    if invert is not None:
+        com.append(f"InvertTiltAngles {invert}".strip())
+    (path / "ctfcorrection.com").write_text("\n".join(com) + "\n")
+
+
+@pytest.mark.parametrize(
+    "invert, inverted", [(None, False), ("", True), ("1", True), ("0", False)]
+)
+def test_from_etomo_directory_ctf(tmp_path, monkeypatch, invert, inverted):
+    etomofiles = pytest.importorskip("etomofiles")
+    df = _etomo_dataframe(np.random.default_rng(9))
+    monkeypatch.setattr(etomofiles, "read", lambda path: df.copy())
+    _write_ctf_files(tmp_path, len(df), invert)
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        ts = TiltSeries.from_etomo_directory(tmp_path, scale=0.2)
+    # the handedness is not read, but warned
+    assert any("InvertTiltAngles" in str(w.message) for w in record) == inverted
+    views = np.array([1, 2, 4, 5, 6, 7])  # the third view is excluded
+    # nm (underfocus positive) to μm (underfocus negative)
+    assert_allclose(ts.ctf.defocus_u, -(3000 + 100 * views) / 1000)
+    assert_allclose(ts.ctf.defocus_v, -(2900 + 100 * views) / 1000)
+    # angles of the raw stack (ctfplotter is not run on the aligned stack)
+    assert_allclose(ts.ctf.astigmatism_angle, 5 * views)
+    assert ts.ctf.voltage == 300
+    assert ts.ctf.spherical_aberration == 2.7
+    assert ts.ctf.amplitude_contrast == 0.07
+    assert TiltSeries.from_etomo_directory(tmp_path, scale=0.2, ctf=False).ctf is None
+
+
+def test_from_etomo_directory_ctf_of_aligned_stack(tmp_path, monkeypatch):
+    etomofiles = pytest.importorskip("etomofiles")
+    df = _etomo_dataframe(np.random.default_rng(9))
+    monkeypatch.setattr(etomofiles, "read", lambda path: df.copy())
+    _write_ctf_files(tmp_path, len(df))
+    # the parameters of ctfplotter are used if not in ctfcorrection.com
+    (tmp_path / "ctfcorrection.com").unlink()
+    com = ["InputStack TS_01.ali", "Voltage 200", "SphericalAberration 2.7"]
+    com.append("AmplitudeContrast 0.1")
+    (tmp_path / "ctfplotter.com").write_text("\n".join(com) + "\n")
+    # the defocus file of the dataset name is used by default
+    (tmp_path / "TS_01_ctf.defocus").rename(tmp_path / "TS_01.defocus")
+    ts = TiltSeries.from_etomo_directory(tmp_path, scale=0.2)
+    views = np.array([1, 2, 4, 5, 6, 7])
+    assert ts.ctf.voltage == 200
+    # rotated to the angles of the raw stack
+    assert_allclose(ts.ctf.astigmatism_angle, 5 * views + ts.tilt_axis_angle)
+
+
+def test_from_etomo_directory_ctf_not_found(tmp_path, monkeypatch):
+    etomofiles = pytest.importorskip("etomofiles")
+    df = _etomo_dataframe(np.random.default_rng(9))
+    monkeypatch.setattr(etomofiles, "read", lambda path: df.copy())
+    with pytest.warns(UserWarning, match="Defocus file"):
+        ts = TiltSeries.from_etomo_directory(tmp_path, scale=0.2)
+    assert ts.ctf is None
+    with pytest.raises(FileNotFoundError):
+        TiltSeries.from_etomo_directory(tmp_path, scale=0.2, ctf="TS_01.defocus")
+    # the defocus file without the microscope parameters
+    _write_ctf_files(tmp_path, len(df))
+    (tmp_path / "ctfcorrection.com").write_text("DefocusFile TS_01_ctf.defocus\n")
+    with pytest.warns(UserWarning, match="VOLTAGE"):
+        ts = TiltSeries.from_etomo_directory(tmp_path, scale=0.2)
+    assert ts.ctf is None
+    with pytest.raises(ValueError, match="VOLTAGE"):
+        TiltSeries.from_etomo_directory(tmp_path, scale=0.2, ctf="TS_01_ctf.defocus")

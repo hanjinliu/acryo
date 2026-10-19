@@ -51,9 +51,14 @@ class CentralSliceInsertion:
         self.slice_shape = ny, nx = _normalize_shape(slice_shape, 2)
         self.volume_shape = vshape = _normalize_shape(volume_shape, 3)
         self.nslices = rotations.shape[0]
-        qy, qx = np.meshgrid(sfft.fftfreq(ny), sfft.rfftfreq(nx), indexing="ij")
+        qy, qx = np.meshgrid(
+            sfft.fftfreq(ny).astype(np.float32),
+            sfft.rfftfreq(nx).astype(np.float32),
+            indexing="ij",
+        )
         # (z, y, x) frequencies of the slices in cycles per pixel of the volume
-        freqs = np.stack([np.zeros_like(qy), qy, qx], axis=-1).reshape(-1, 3) * scale
+        freqs = np.stack([np.zeros_like(qy), qy, qx], axis=-1).reshape(-1, 3)
+        freqs *= np.float32(scale)
         # Only up to the Nyquist frequency of the volume. Half of the frequencies of
         # x = 0 are redundant because of the Friedel symmetry.
         keep = (np.linalg.norm(freqs, axis=-1) <= 0.5) & ~(
@@ -66,12 +71,12 @@ class CentralSliceInsertion:
         self._dft_shape = dft_shape = vshape[:2] + (vshape[2] // 2 + 1,)
         direct: list[tuple[NDArray, NDArray, NDArray]] = []
         conjugate: list[tuple[NDArray, NDArray, NDArray]] = []
-        for t, rotation in enumerate(rotations):
+        for t, rotation in enumerate(rotations.astype(np.float32)):
             coords = freqs @ rotation.T
             # the rfft only has x >= 0, where the conjugate values are inserted
             is_conj = coords[:, 2] < 0
             coords[is_conj] *= -1
-            index = coords * np.array(vshape)
+            index = coords * np.array(vshape, dtype=np.float32)
             base = np.floor(index).astype(np.int64)
             frac = index - base
             columns = t * nkeep + np.arange(nkeep)
@@ -157,7 +162,7 @@ class CentralSliceInsertion:
 
         Returns
         -------
-        (..., *output_shape) array
+        (..., *output_shape) float32 array
             The reconstructed volumes, corrected for the trilinear interpolation.
         """
         vshape = self.volume_shape
@@ -174,9 +179,9 @@ class CentralSliceInsertion:
         volume = sfft.ifft(self.insert(slices), axis=-3, overwrite_x=True)
         volume = sfft.ifft(volume[..., indices[0], :, :], axis=-2, overwrite_x=True)
         volume = sfft.irfft(volume[..., indices[1], :], n=vshape[2], overwrite_x=True)
-        volume = volume[..., indices[2]]
-        correction = _gridding_correction(vshape, output_shape)
-        return (volume / correction).astype(np.float32)
+        volume = volume[..., indices[2]].astype(np.float32, copy=False)
+        volume /= _gridding_correction(vshape, output_shape)
+        return volume
 
 
 def _normalize_shape(shape: int | Sequence[int], ndim: int) -> tuple[int, ...]:
@@ -195,12 +200,12 @@ def _to_csr(entries, shape) -> sparse.csr_matrix:
 
 def _gridding_correction(
     volume_shape: tuple[int, ...], output_shape: tuple[int, ...]
-) -> NDArray[np.float64]:
+) -> NDArray[np.float32]:
     """Correction of the trilinear interpolation in Fourier space (separable sinc^2)."""
-    correction = np.ones(output_shape, dtype=np.float64)
+    correction = np.ones(output_shape, dtype=np.float32)
     for axis, (length, size) in enumerate(zip(volume_shape, output_shape)):
         sinc2 = np.sinc((np.arange(size) - size // 2) / length) ** 2
         shape = [1] * len(output_shape)
         shape[axis] = size
-        correction = correction * sinc2.reshape(shape)
+        correction *= sinc2.astype(np.float32).reshape(shape)
     return correction

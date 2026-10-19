@@ -80,9 +80,10 @@ def centered_patches_rfft(
             patches[i, t] = read_patch(image, (iy - ny // 2, ix - nx // 2), (ny, nx))
             # position of the point in the patch
             shifts[i, t] = ny // 2 + y - iy, nx // 2 + x - ix
-    ft = sfft.rfft2(patches, axes=(-2, -1))
-    # shift the point to the origin
+    ft = sfft.rfft2(patches, axes=(-2, -1), overwrite_x=True)  # complex64
+    # shift the point to the origin, along y and then along x
     ramp_y = np.exp(2j * np.pi * shifts[..., 0:1] * sfft.fftfreq(ny))
     ramp_x = np.exp(2j * np.pi * shifts[..., 1:2] * sfft.rfftfreq(nx))
-    ft *= ramp_y[..., :, np.newaxis] * ramp_x[..., np.newaxis, :]
-    return ft.astype(np.complex64).reshape(batch_shape + ft.shape[-3:])
+    ft *= ramp_y.astype(np.complex64)[..., :, np.newaxis]
+    ft *= ramp_x.astype(np.complex64)[..., np.newaxis, :]
+    return ft.reshape(batch_shape + ft.shape[-3:])

@@ -5,6 +5,7 @@ from numpy.testing import assert_allclose
 import pytest
 
 from acryo import BackProjectionLoader, Molecules
+from acryo.ctf import PatchCTFCorrection
 from acryo.projection import TiltSeries
 
 pytest.importorskip("starfile_rs")
@@ -78,6 +79,8 @@ def _make_project(
     aligned: bool = True,
     tomo_names=("TS_01",),
     seed: int = 0,
+    ctf: bool = True,
+    hand: int = -1,
 ) -> tuple[dict, list[np.ndarray]]:
     """Make a RELION project with motion-corrected tilt images and STAR files."""
     rng = np.random.default_rng(seed)
@@ -105,6 +108,9 @@ def _make_project(
             columns["rlnTomoZRot"] = alignment["zrot"].tolist()
             columns["rlnTomoXShiftAngst"] = alignment["shifts_angst"][:, 0].tolist()
             columns["rlnTomoYShiftAngst"] = alignment["shifts_angst"][:, 1].tolist()
+        if ctf:
+            for key, values in _defocus().items():
+                columns[key] = values.tolist()
         _write_star(
             root / "AlignTiltSeries/job005/tilt_series" / f"{name}.star",
             {name: columns},
@@ -119,11 +125,24 @@ def _make_project(
                     for name in tomo_names
                 ],
                 "rlnVoltage": [300.0] * len(tomo_names),
+                "rlnSphericalAberration": [2.7] * len(tomo_names),
+                "rlnAmplitudeContrast": [0.1] * len(tomo_names),
+                "rlnTomoHand": [hand] * len(tomo_names),
                 "rlnTomoTiltSeriesPixelSize": [PIXEL_SIZE] * len(tomo_names),
             }
         },
     )
     return alignment, images
+
+
+def _defocus() -> dict[str, np.ndarray]:
+    """CTF parameters of the tilts (in Å and degrees, underfocus positive)."""
+    defocus_u = 30000.0 + 500 * np.arange(NTILTS)
+    return {
+        "rlnDefocusU": defocus_u,
+        "rlnDefocusV": defocus_u - 300,
+        "rlnDefocusAngle": 10.0 * np.arange(NTILTS),
+    }
 
 
 @pytest.mark.parametrize("image_shape", [(40, 50), (41, 53)])
@@ -177,14 +196,19 @@ def test_single_tilt_series_star(tmp_path):
     ref = TiltSeries.from_relion_tilt_series_star(
         tmp_path / "AlignTiltSeries/job005/tilt_series.star"
     )
-    # the pixel size is read from the header of the tilt image
-    ts = TiltSeries.from_relion_tilt_series_star(path)
+    # the pixel size is read from the header of the tilt image, and the CTF
+    # parameters are not read without the global data block
+    with pytest.warns(UserWarning, match="global data block"):
+        ts = TiltSeries.from_relion_tilt_series_star(path)
+    assert ts.ctf is None
     assert ts.scale == pytest.approx(PIXEL_SIZE / 10)
     assert ts.image_path == ref.image_path
     assert_allclose(
         ts.project_points(np.zeros((1, 3))), ref.project_points(np.zeros((1, 3)))
     )
-    ts = TiltSeries.from_relion_tilt_series_star(path, scale=0.5, project_dir=tmp_path)
+    ts = TiltSeries.from_relion_tilt_series_star(
+        path, scale=0.5, project_dir=tmp_path, ctf=False
+    )
     assert ts.scale == 0.5
 
 
@@ -195,9 +219,9 @@ def test_project_dir_not_found(tmp_path):
     moved.parent.mkdir()
     moved.write_text(star.read_text())
     with pytest.raises(ValueError, match="project_dir"):
-        TiltSeries.from_relion_tilt_series_star(moved)
+        TiltSeries.from_relion_tilt_series_star(moved, ctf=False)
     ts = TiltSeries.from_relion_tilt_series_star(
-        moved, project_dir=tmp_path / "project"
+        moved, project_dir=tmp_path / "project", ctf=False
     )
     assert all(p.exists() for p in ts.image_path)
 
@@ -246,6 +270,46 @@ def test_json_roundtrip(tmp_path):
     assert out.image_path == ts.image_path
     assert_allclose(out.sample_translations, ts.sample_translations)
     assert_allclose(out.x_tilts, ts.x_tilts)
+    assert_allclose(out.ctf.defocus_u, ts.ctf.defocus_u)
+
+
+def test_ctf(tmp_path):
+    _make_project(tmp_path)
+    path = tmp_path / "AlignTiltSeries/job005/tilt_series.star"
+    ts = TiltSeries.from_relion_tilt_series_star(path)
+    defocus = _defocus()
+    # Å (underfocus positive) to μm (underfocus negative)
+    assert_allclose(ts.ctf.defocus_u, -defocus["rlnDefocusU"] / 1e4)
+    assert_allclose(ts.ctf.defocus_v, -defocus["rlnDefocusV"] / 1e4)
+    assert_allclose(ts.ctf.astigmatism_angle, defocus["rlnDefocusAngle"])
+    assert ts.ctf.voltage == 300.0
+    assert ts.ctf.spherical_aberration == 2.7
+    assert ts.ctf.amplitude_contrast == 0.1
+    assert TiltSeries.from_relion_tilt_series_star(path, ctf=False).ctf is None
+    # the CTF is corrected by default
+    loader = BackProjectionLoader(ts, Molecules.empty())
+    (correction,) = loader.preprocessor.filters
+    assert isinstance(correction, PatchCTFCorrection)
+    assert correction.hand == -1
+
+
+def test_ctf_inverted_hand(tmp_path):
+    _make_project(tmp_path, hand=1)
+    path = tmp_path / "AlignTiltSeries/job005/tilt_series.star"
+    # the handedness is not read, but warned
+    with pytest.warns(UserWarning, match="rlnTomoHand"):
+        ts = TiltSeries.from_relion_tilt_series_star(path)
+    assert ts.ctf is not None
+
+
+def test_ctf_not_estimated(tmp_path):
+    _make_project(tmp_path, ctf=False)
+    path = tmp_path / "AlignTiltSeries/job005/tilt_series.star"
+    with pytest.warns(UserWarning, match="rlnDefocusU"):
+        ts = TiltSeries.from_relion_tilt_series_star(path)
+    assert ts.ctf is None
+    loader = BackProjectionLoader(ts, Molecules.empty())
+    assert loader.preprocessor.filters == ()
 
 
 def test_image_path_length():

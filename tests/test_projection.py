@@ -98,6 +98,21 @@ def test_reconstruct_batch():
     assert_allclose(nested[0], cubes, rtol=1e-5, atol=1e-5)
 
 
+def test_single_precision():
+    from acryo.projection._insertion import _gridding_correction
+
+    images = _gaussian_tilt_images(np.zeros(3), 2.0, 1.0)
+    reconstructor = DirectFourierReconstructor(images, ROTATIONS, 1.0, 1.0, 12)
+    positions = _projected_positions(np.zeros(3))
+    slices = centered_patches_rfft(images, positions, reconstructor.patch_size)
+    assert slices.dtype == np.complex64
+    insertion = reconstructor.insertion
+    assert insertion.insert(slices).dtype == np.complex64
+    assert insertion.reconstruct(slices, 12).dtype == np.float32
+    assert reconstructor(positions).dtype == np.float32
+    assert _gridding_correction((24, 24, 24), (12, 12, 12)).dtype == np.float32
+
+
 def test_insertion_non_cubic():
     sigma = 2.5
     center = np.array([1.2, 0.3, -2.1])

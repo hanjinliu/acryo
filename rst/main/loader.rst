@@ -381,10 +381,47 @@ can be used with ``tomogram_center=(0, 0, 0)``.
     )
 
 The tilt images are preprocessed by :class:`acryo.projection.TiltImagePreprocessor`
-(background subtraction, bandpass filtering and normalization of each tilt image). Its
-parameters can be changed by giving a preprocessor to ``preprocess``. Additional Fourier
-filters can be applied to each tilt image. For example, the CTF can be corrected by phase
-flipping or Wiener filtering with the :class:`acryo.ctf.CTFModel` of each tilt.
+(background subtraction, bandpass filtering and normalization of each tilt image). Each
+tilt image is split into overlapping patches (3 x 3 by default, ``patch_grid``), which are
+filtered separately with a margin of ``padding`` pixels and blended in the overlapping
+regions (``overlap`` pixels). If the tilt images are binned, the Fourier transform of each
+patch is cropped before the inverse transform, so the binned images are computed directly.
+The parameters can be changed by giving a preprocessor to ``preprocess``.
+
+The CTF of the tilt images is corrected by phase flipping if the tilt series has the CTF
+parameters (``tilt_series.ctf``, a :class:`acryo.ctf.TiltSeriesCTF`). They are read by
+default by :meth:`TiltSeries.from_etomo_directory` (the defocus file of ctfplotter and the
+parameters in ctfcorrection.com or ctfplotter.com) and
+:meth:`TiltSeries.from_relion_tilt_series_star` (``rlnDefocusU``, ``rlnDefocusV``,
+``rlnDefocusAngle`` and the optics in the global data block). Each patch is phase-flipped
+with the defocus at its center, which is corrected for the depth of the specimen in the
+tilted image by :class:`acryo.ctf.PatchCTFCorrection` (see
+:meth:`TiltSeries.ctf_correction`). Give ``ctf=False`` to the ``from_*`` methods to read
+the tilt series without the CTF parameters.
+
+.. code-block:: python
+
+    tilt_series = TiltSeries.from_etomo_directory("path/to/etomo", scale=0.217)
+    tilt_series.ctf  # TiltSeriesCTF of each tilt, or None if not found
+    loader = BackProjectionLoader(tilt_series, molecules)  # CTF is corrected
+
+The direction of the defocus gradient is given by ``hand`` of the CTF correction, which is
+-1 (the standard geometry, ``rlnTomoHand = -1`` of RELION or IMOD without
+``InvertTiltAngles``) by default. The handedness is not read from the files, but a warning
+is issued if they indicate the inverted one. In this case, give the CTF correction with
+``hand=1``.
+
+.. code-block:: python
+
+    from acryo.projection import TiltImagePreprocessor
+
+    preprocessor = TiltImagePreprocessor().with_filters(tilt_series.ctf_correction(hand=1))
+    loader = BackProjectionLoader(tilt_series, molecules, preprocess=preprocessor)
+
+Additional Fourier filters can be applied to each tilt image. For example, the CTF can also
+be corrected by phase flipping or Wiener filtering with the :class:`acryo.ctf.CTFModel` of
+each tilt, for the whole tilt image (a CTF correction in the preprocessor is not added
+again from the tilt series).
 
 .. code-block:: python
 
@@ -401,12 +438,20 @@ flipping or Wiener filtering with the :class:`acryo.ctf.CTFModel` of each tilt.
 
 Any function ``filter(freq_y, freq_x, index)`` that returns the values multiplied to the
 Fourier transform of the ``index``-th tilt image (spatial frequencies in 1/nm) can be added
-by :meth:`TiltImagePreprocessor.with_filters`. Note that the CTF is corrected for the whole
-tilt image, so the variation of the defocus within tilted images is not considered.
+by :meth:`TiltImagePreprocessor.with_filters`. A filter with the attribute
+``position_dependent = True`` is called for each patch with the keyword argument
+``position``, the (y, x) coordinates of the center of the patch in nm from the center of the
+tilt image.
 
 The tilt images are read from the file tilt by tilt, preprocessed, and binned by the largest
 integer factor whose pixel size does not exceed ``scale``, so the raw tilt series is never in
-memory all at once. Subtomograms are reconstructed lazily and in parallel by :mod:`dask`. A
+memory all at once. Each tilt image is read and preprocessed in a task of a dask graph, and
+the tasks run in parallel threads. For binning by 4 or more (``real_space_binning`` of the
+preprocessor), the tilt images are first binned in real space by the largest integer that
+does not exceed the binning factor and divides the image size, and the rest of the binning
+(which may be fractional) and the preprocessing are done in Fourier space. The resolution
+near the Nyquist frequency of the binned images is slightly attenuated, but the
+preprocessing is several times faster. Subtomograms are reconstructed lazily and in parallel by :mod:`dask`. A
 cube aligned to the tomogram axes is reconstructed around each molecule, and the subtomogram
 is cropped from the cube with the rotation of the molecule, in the same way as
 :class:`SubtomogramLoader` (interpolation order ``order``, and larger cubes if

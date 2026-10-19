@@ -678,8 +678,39 @@ def test_filters_receive_tilt_index_and_frequency(blob_tilt_series):
     loader.binning(2).average()
     # tilt images are preprocessed in parallel
     assert sorted(index for index, _ in calls) == list(range(TILT_ANGLES.size))
-    # frequencies in 1/nm at the original pixel size
-    assert_allclose([freq for _, freq in calls], 0.5 / IMAGE_SCALE)
+    # frequencies in 1/nm, up to the Nyquist frequency of the binned images
+    assert_allclose([freq for _, freq in calls], 0.5 / (2 * IMAGE_SCALE))
+
+
+def test_ctf_correction_of_tilt_series(blob_tilt_series):
+    from acryo.ctf import CTFModel, PatchCTFCorrection, TiltSeriesCTF
+
+    ctf = TiltSeriesCTF(defocus_u=np.linspace(-2.0, -3.0, TILT_ANGLES.size))
+    ts = blob_tilt_series.replace(ctf=ctf)
+    mole = Molecules(BLOBS + CENTER)
+    loader = _loader(ts, mole)
+    (correction,) = loader.preprocessor.filters
+    assert isinstance(correction, PatchCTFCorrection)
+    # the tilt images are preprocessed with the CTF correction
+    ref = TiltImagePreprocessor().with_filters(ts.ctf_correction())
+    raw = mrcfile.read(ts.image_path)
+    assert_allclose(
+        loader._images.get(1)[1][3],
+        ref(raw[3], index=3, scale=IMAGE_SCALE),
+        atol=1e-5,
+    )
+    assert not np.allclose(loader._images.get(1)[1][3], TiltImagePreprocessor()(raw[3]))
+    # the CTF is not corrected twice
+    custom = TiltImagePreprocessor(low=0.01).with_ctf(CTFModel.from_kv(300, 2.7))
+    assert _loader(ts, mole, preprocess=custom).preprocessor is custom
+    assert _loader(ts, mole, preprocess=False).preprocessor is None
+    # the CTF of the remaining tilts
+    excluded = loader.exclude_tilts(EXCLUDED)
+    (correction,) = excluded.preprocessor.filters
+    assert_allclose(correction.ctf.defocus_u, ctf.defocus_u[KEPT])
+    # the CTF correction is created from the new tilt series
+    other = loader.with_tilt_series(ts.replace(scale=0.6, ctf=None))
+    assert other.preprocessor.filters == ()
 
 
 def test_filters_are_applied_to_the_right_tilts(blob_tilt_series):
@@ -926,19 +957,18 @@ def test_exclude_tilts_cache(blob_tilt_series, monkeypatch):
     loaded: list[tuple[int, int]] = []
     read: list[int] = []
     _load = _TiltSeriesImages._load
-    _iter_images = MrcImageStack.iter_images
+    _read_image = MrcImageStack.read_image
 
     def _recorded_load(self, binsize):
         loaded.append((self.tilt_series.ntilts, binsize))
         return _load(self, binsize)
 
-    def _recorded_iter_images(self, indices):
-        indices = list(indices)
-        read.extend(indices)
-        return _iter_images(self, indices)
+    def _recorded_read_image(self, index):
+        read.append(index)
+        return _read_image(self, index)
 
     monkeypatch.setattr(_TiltSeriesImages, "_load", _recorded_load)
-    monkeypatch.setattr(MrcImageStack, "iter_images", _recorded_iter_images)
+    monkeypatch.setattr(MrcImageStack, "read_image", _recorded_read_image)
     mole = Molecules(BLOBS + CENTER, Rotation.random(len(BLOBS), random_state=14))
     loader = _loader(blob_tilt_series, mole)
     ntilts = TILT_ANGLES.size
@@ -955,12 +985,13 @@ def test_exclude_tilts_cache(blob_tilt_series, monkeypatch):
         out.binning(2).average()
         out.binning(2).average()
         assert loaded == [(ntilts, 1), (KEPT.size, 2)]
-        assert read == KEPT.tolist()
+        # read in parallel
+        assert sorted(read) == KEPT.tolist()
     assert loader._images.cache.images == {}
     # the images of the excluded tilts are not read
     read.clear()
     loader.exclude_tilts(EXCLUDED).average()
-    assert read == KEPT.tolist()
+    assert sorted(read) == KEPT.tolist()
 
 
 def test_exclude_tilts_invalid_input(blob_tilt_series):
