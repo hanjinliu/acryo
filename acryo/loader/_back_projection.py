@@ -14,6 +14,7 @@ from typing import (
     Iterable,
     Iterator,
     Generator,
+    Literal,
     Sequence,
     SupportsIndex,
 )
@@ -28,7 +29,13 @@ from dask.highlevelgraph import HighLevelGraph
 from acryo._types import degree, nm, pixel
 from acryo._dask import DaskArrayList
 from acryo.backend import Backend
-from acryo.loader._base import LoaderBase, Unset, _ShapeType, TemplateInputType
+from acryo.loader._base import (
+    LoaderBase,
+    MaskInputType,
+    TemplateInputType,
+    Unset,
+    _ShapeType,
+)
 from acryo.molecules import Molecules
 from acryo.ctf import CTFCorrection, PatchCTFCorrection
 from acryo.projection import (
@@ -775,6 +782,70 @@ class BackProjectionLoader(LoaderBase):
             local_shifts_2d=refined.local_shifts_2d,
         )
         return self.with_tilt_series(tilt_series)
+
+    def score_on_tilt(
+        self,
+        templates: list[TemplateInputType],
+        *,
+        mask: MaskInputType = None,
+        cutoff: float | None = None,
+        method: Literal["zncc", "ncc"] = "zncc",
+        batch_size: int = 16,
+    ) -> NDArray[np.float32]:
+        """Calculate the scores of the molecules in each tilt image.
+
+        Unlike :meth:`score`, which compares the reconstructed subtomograms with the
+        templates, the templates are projected (by extracting the central slices of
+        their Fourier transforms) to each tilt image at the positions and orientations
+        of the molecules, and compared with the patches of the tilt images at the
+        projected positions. The patches are of the size of the templates (padded to
+        cubes) at the pixel size of ``scale``, and no shift is searched.
+
+        Parameters
+        ----------
+        templates : list of 3D arrays or ImageProvider
+            Template images in the pixel size of ``scale`` and in the same contrast as
+            the subtomograms of this loader. If ImageProvider is given, the image will
+            be provided accordingly using the scale of the loader object.
+        mask : 3D array, ImageProvider or ImageConverter, optional
+            Mask image in the same shape as the templates. The mask is projected in the
+            same way as the templates, normalized to the maximum of 1, and multiplied
+            to both the projections and the patches of the tilt images.
+        cutoff : float, optional
+            Cutoff frequency of the low-pass filter applied to both the projections and
+            the patches, in the same unit as the alignment models (cycles per pixel of
+            ``scale``, 0.5 is the Nyquist frequency). No filter by default.
+        method : "zncc" or "ncc", default is "zncc"
+            Zero-mean normalized cross correlation or normalized cross correlation.
+        batch_size : int, default is 16
+            Number of molecules processed at once.
+
+        Returns
+        -------
+        np.ndarray
+            3D array of scores, where ``score[i, j, t]`` is the score of the i-th
+            template for the j-th molecule in the t-th tilt image (such as
+            ``tilt_series.tilt_angles[t]``).
+        """
+        from acryo.loader._tilt_refine import score_on_tilt
+
+        normalized = []
+        for template in templates:
+            template_, mask_ = self.normalize_input(template, mask)
+            normalized.append((template_, mask_))
+        pos, rotations = self._to_tilt_series_frame(self.molecules)
+        tilt_series, images = self._tilt_images()
+        return score_on_tilt(
+            tilt_series,
+            images,
+            pos - self.tomogram_center,
+            rotations,
+            normalized,
+            scale=self.scale,
+            cutoff=cutoff,
+            method=method,
+            batch_size=batch_size,
+        )
 
     def _default_align_kwargs(self) -> dict[str, Any]:
         """Return default keyword arguments for alignment."""

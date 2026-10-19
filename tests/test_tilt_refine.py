@@ -2,11 +2,14 @@ import numpy as np
 from numpy.testing import assert_allclose
 import pytest
 from scipy import fft as sfft
+from scipy import ndimage as ndi
 
+from acryo.backend._zncc_2d import ncc_2d, zncc_2d, zncc_landscape_2d
 from acryo.loader._tilt_refine import (
     _bicubic,
     _bilinear_nodes,
     _fourier_resize,
+    _lowpass_weight,
     _smoothness_penalty,
     _subpixel_peak,
 )
@@ -98,3 +101,54 @@ def test_subpixel_peak():
         [-((yy - dy) ** 2) - (xx - dx) ** 2 for dy, dx in [(0.3, -1.2), (-2.0, 2.4)]]
     )
     assert_allclose(_subpixel_peak(maps), [[0.3, -1.2], [-2.0, 2.4]], atol=1e-10)
+
+
+def test_ncc_2d():
+    rng = np.random.default_rng(4)
+    img0 = rng.normal(size=(3, 5, 11, 12)) + 1.0
+    img1 = 0.5 * img0 + rng.normal(scale=0.5, size=img0.shape) + 2.0
+    zncc = zncc_2d(img0, img1)
+    assert zncc.shape == (3, 5)
+    for idx in np.ndindex(3, 5):
+        expected = np.corrcoef(img0[idx].ravel(), img1[idx].ravel())[0, 1]
+        assert zncc[idx] == pytest.approx(expected)
+        expected = (img0[idx] * img1[idx]).sum() / np.sqrt(
+            (img0[idx] ** 2).sum() * (img1[idx] ** 2).sum()
+        )
+        assert ncc_2d(img0, img1)[idx] == pytest.approx(expected)
+    # invariant to the scale, and to the offset only for ZNCC
+    assert_allclose(ncc_2d(img0, 3 * img1), ncc_2d(img0, img1))
+    assert_allclose(zncc_2d(img0, 3 * img1 - 5), zncc)
+    assert_allclose(zncc_2d(img0, img0), 1.0)
+    assert_allclose(zncc_2d(img0, -img0), -1.0)
+    # zero images
+    assert_allclose(zncc_2d(img0, np.ones_like(img1)), 0.0)
+
+
+def test_zncc_landscape_2d():
+    rng = np.random.default_rng(5)
+    size, radius = 24, 4
+    img0 = ndi.gaussian_filter(rng.normal(size=(2, size, size)), (0, 1.5, 1.5)) + 1.0
+    img1 = rng.normal(size=(2, size, size))
+    ft0 = sfft.rfft2(img0)
+    ft1 = sfft.rfft2(img1)
+    maps = zncc_landscape_2d(ft0, ft1, radius)
+    assert maps.shape == (2, 2 * radius + 1, 2 * radius + 1)
+    # the center is the ZNCC of the images, and the inputs are not modified
+    assert_allclose(maps[:, radius, radius], zncc_2d(img0, img1), atol=1e-6)
+    assert_allclose(ft0, sfft.rfft2(img0))
+    # the peak is at the shift of the image
+    shifted = np.roll(img0, (2, -3), axis=(-2, -1))
+    maps = zncc_landscape_2d(sfft.rfft2(shifted), ft0, radius)
+    assert_allclose(maps[:, radius + 2, radius - 3], 1.0, atol=1e-6)
+    assert np.all(maps.reshape(2, -1).argmax(axis=1) == (radius + 2) * 9 + radius - 3)
+
+
+def test_lowpass_weight_consistent_with_backend():
+    from acryo.backend import Backend
+
+    rng = np.random.default_rng(6)
+    image = rng.normal(size=(16, 16)).astype(np.float32)
+    expected = Backend("numpy").lowpass_filter(image, cutoff=0.2)
+    filtered = sfft.irfft2(sfft.rfft2(image) * _lowpass_weight(16, 0.2), s=(16, 16))
+    assert_allclose(filtered, expected, atol=1e-5)

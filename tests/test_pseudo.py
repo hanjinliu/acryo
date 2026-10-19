@@ -6,6 +6,7 @@ from scipy.spatial.transform import Rotation
 
 from acryo import Molecules, SubtomogramLoader, BackProjectionLoader, BatchLoader
 from acryo.backend import Backend
+from acryo.pipe import soft_otsu
 from acryo.loader import ExtractedSubvolumeLoader
 from acryo.projection import (
     LocalAlignment,
@@ -697,6 +698,86 @@ def test_refined_loader(tmp_path):
         return np.corrcoef(avg.ravel(), template.ravel())[0, 1]
 
     assert _score(refined) > _score(loader) + 0.05
+
+
+def _sphere_mask(size: int) -> np.ndarray:
+    dist = np.linalg.norm(np.indices((size,) * 3) - (size - 1) / 2, axis=0)
+    return (dist < size / 2 - 1).astype(np.float32)
+
+
+@pytest.mark.parametrize("tomo_hand", [1, -1])
+@pytest.mark.parametrize("scale, size", [(0.5, 16), (0.64, 13), (1.0, 9)])
+def test_score_on_tilt_isolated(tmp_path, scale, size, tomo_hand):
+    # isolated particles match the projections of the template without preprocessing
+    centers = np.array([[1.0, -10.0, 12.0], [-2.0, 15.0, -14.0]])
+    rot = Rotation.random(2, random_state=3)
+    ts = _make_tilt_series(tmp_path / "ts.mrc", _particle_points(centers, rot))
+    if tomo_hand == 1:
+        mole = Molecules(centers + CENTER, rot)
+        template = _particle_template(scale, size)
+    else:
+        mole = Molecules(_mirror_z(centers) + CENTER, _mirror_rotation(rot))
+        template = _particle_template(scale, size, _mirror_z(PARTICLE))
+    loader = _loader(ts, mole, scale=scale, preprocess=False, tomo_hand=tomo_hand)
+    score = loader.score_on_tilt([template])
+    assert score.shape == (1, 2, ts.ntilts)
+    assert score.dtype == np.float32
+    assert score.min() > 0.97
+    assert loader.score_on_tilt([template], mask=_sphere_mask(size)).min() > 0.97
+    assert loader.score_on_tilt([template], cutoff=0.2).min() > 0.97
+    assert loader.score_on_tilt([template], method="ncc").min() > 0.85
+
+
+def test_score_on_tilt(tmp_path):
+    centers, rot = _random_particles(20, seed=6)
+    ts = _make_tilt_series(tmp_path / "ts.mrc", _particle_points(centers, rot))
+    mole = Molecules(centers + CENTER, rot)
+    template = _particle_template(0.5, 16)
+    other = _particle_template(0.5, 16, np.array([[0.0, -1.5, 1.5], [0.0, 1.5, -1.5]]))
+    loader = _loader(ts, mole)
+    score = loader.score_on_tilt([template, other])
+    assert score.shape == (2, 20, ts.ntilts)
+    assert score[0].mean() > 0.8
+    assert score[0].mean() > score[1].mean() + 0.3
+    assert_allclose(loader.score_on_tilt([template], batch_size=3)[0], score[0])
+    # templates of different shapes, compared in the patches of their own sizes
+    score_13 = loader.score_on_tilt([template, _particle_template(0.5, 13)])
+    assert_allclose(score_13[0], score[0])
+    assert score_13[1].mean() > 0.8
+    # masks
+    assert loader.score_on_tilt([template], mask=_sphere_mask(16)).mean() > 0.9
+    otsu = loader.score_on_tilt([template], mask=soft_otsu(sigma=1, radius=1))
+    assert otsu.mean() > 0.85
+
+    # only the scores of a misaligned tilt image are lowered
+    translations = ts.sample_translations.copy()
+    translations[5] += [1.5, -1.5]
+    shifted = _loader(ts.replace(sample_translations=translations), mole)
+    score_shifted = shifted.score_on_tilt([template])[0]
+    mean = score_shifted.mean(axis=0)
+    assert mean[5] < np.delete(mean, 5).min() - 0.2
+    assert_allclose(np.delete(score_shifted, 5, axis=1), np.delete(score[0], 5, axis=1))
+
+    # the scores are improved by refinement
+    initial = _loader(_perturbed(ts, 1.5), mole)
+    refined = initial.refine_tilt_series([(mole, template)])
+    before = initial.score_on_tilt([template]).mean()
+    assert refined.score_on_tilt([template]).mean() > before + 0.2
+
+
+def test_score_on_tilt_input(blob_tilt_series):
+    ntilts = blob_tilt_series.ntilts
+    loader = _loader(blob_tilt_series, Molecules(BLOBS + CENTER))
+    template = _particle_template(0.5, 16)
+    empty = loader.replace(molecules=Molecules.empty())
+    assert empty.score_on_tilt([template]).shape == (1, 0, ntilts)
+    assert loader.score_on_tilt([]).shape == (0, len(BLOBS), ntilts)
+    with pytest.raises(ValueError):
+        loader.score_on_tilt([template], method="pcc")  # type: ignore
+    with pytest.raises(ValueError):
+        loader.score_on_tilt([template], cutoff=0)
+    with pytest.raises(ValueError):
+        loader.score_on_tilt([template], batch_size=0)
 
 
 def test_with_tilt_series(blob_tilt_series):
