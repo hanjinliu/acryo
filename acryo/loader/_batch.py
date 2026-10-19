@@ -437,6 +437,17 @@ class BatchLoader(LoaderBase):
         out._sources = _sources
         return out
 
+    def extract_subtomograms(self, *args, **kwargs):
+        """Not supported. Extract the subtomograms of each loader in `loaders`.
+
+        The extracted subtomograms of different images have different tilt models,
+        which cannot be kept in a single `ExtractedSubvolumeLoader`.
+        """
+        raise NotImplementedError(
+            "Cannot extract subtomograms of a BatchLoader. Extract the subtomograms "
+            "of each loader in `loaders` instead."
+        )
+
     def _molecule_order(self) -> NDArray[np.intp] | None:
         """Indices to sort the outputs of `self.loaders` to the order of the molecules.
 

@@ -455,6 +455,19 @@ class BackProjectionLoader(LoaderBase):
         plan = self._plan_reconstruction(output_shape)
         return plan.to_dask(backend or Backend(), lazy=lazy)
 
+    def _construct_untransformed(
+        self, output_shape: tuple[pixel, pixel, pixel]
+    ) -> tuple[da.Array, NDArray[np.float32]]:
+        # the cubes aligned to the tomogram axes, from which the subtomograms are
+        # cropped
+        if self.molecules.count() == 0:
+            sidelength = _cube_sidelength(output_shape, self.order, self.corner_safe)
+            stack = da.zeros((0,) + (sidelength,) * 3, dtype=np.float32)
+            return stack, np.zeros((0, 4, 4), dtype=np.float32)
+        lazy = not self._images.cache.enabled
+        plan = self._plan_reconstruction(output_shape)
+        return plan.to_dask(Backend(), lazy=lazy, crop=False), plan.matrices
+
     def load_iter(
         self, output_shape: _ShapeType = None
     ) -> Iterator[NDArray[np.float32]]:
@@ -538,6 +551,7 @@ class BackProjectionLoader(LoaderBase):
             offsets,
             matrices.astype(np.float32),
             output_shape,
+            sidelength,
             self.order,
             self.batch_size or 1,
         )
@@ -980,6 +994,7 @@ class _ReconstructionPlan:
         offsets: NDArray[np.float64],
         matrices: NDArray[np.float32],
         output_shape: tuple[int, int, int],
+        sidelength: int,
         order: int,
         batch_size: int,
     ):
@@ -987,17 +1002,24 @@ class _ReconstructionPlan:
         self.offsets = offsets  # (N, T, 2) positions from the center of the images
         self.matrices = matrices  # (N, 4, 4) from the subtomograms to the cubes
         self.output_shape = tuple(output_shape)
+        self.sidelength = sidelength  # of the cubes
         self.order = order
         self.batch_size = batch_size
 
-    def to_dask(self, backend: Backend, lazy: bool = True) -> da.Array:
+    def to_dask(
+        self, backend: Backend, lazy: bool = True, crop: bool = True
+    ) -> da.Array:
         """Construct the dask array of the subtomograms.
 
         If ``lazy``, the reconstructor is created in the computation and released after
         that (see `_LazyReconstructor`). Otherwise, the reconstructor is created now
-        and shared by the tasks.
+        and shared by the tasks. If not ``crop``, the cubes are returned as they are,
+        from which the subtomograms are cropped by ``matrices``.
         """
-        output_shape = self.output_shape
+        if crop:
+            output_shape = self.output_shape
+        else:
+            output_shape = (self.sidelength,) * 3
         name = f"pseudo-subvolumes-{uuid.uuid4().hex}"
         nmole = self.offsets.shape[0]
         starts = range(0, nmole, self.batch_size)
@@ -1007,7 +1029,7 @@ class _ReconstructionPlan:
         else:
             reconstructor = self.get_reconstructor()
         zeros = (0,) * len(output_shape)
-        task = _ReconstructionTask(output_shape, self.order, backend)
+        task = _ReconstructionTask(self.output_shape, self.order, backend, crop)
         layer = {}
         sizes = []
         for ib, start in enumerate(starts):
@@ -1070,10 +1092,12 @@ class _ReconstructionTask:
         output_shape: tuple[int, int, int],
         order: int,
         backend: Backend,
+        crop: bool = True,
     ):
         self.output_shape = output_shape
         self.order = order
         self.backend = backend
+        self.crop = crop
 
     def __call__(
         self,
@@ -1101,6 +1125,8 @@ class _ReconstructionTask:
         cubes = reconstructor(positions)
         # the tilt images have dark densities on a light background
         cubes *= -1
+        if not self.crop:
+            return cubes
         subvolumes = [
             xp.rotated_crop(
                 xp.asarray(cube),

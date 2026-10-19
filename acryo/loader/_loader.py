@@ -1,15 +1,10 @@
 # pyright: reportPrivateImportUsage=false
 
 from __future__ import annotations
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 import numpy as np
 import polars as pl
-from scipy import ndimage as ndi
 from dask import array as da
-from dask.array.core import normalize_chunks
-from dask.base import tokenize
-from dask.highlevelgraph import HighLevelGraph
 
 from acryo._types import nm, pixel
 from acryo._reader import imread
@@ -18,11 +13,9 @@ from acryo.backend import Backend
 from acryo import _utils
 from acryo._polars_compat import bin_index
 from acryo.loader._base import LoaderBase, Unset, _ShapeType, INDEX_OPT
-from acryo.loader._extracted import ExtractedSubvolumeLoader, SUBVOLUME_INDEX
 from acryo.tilt import TiltSeriesModel, NoWedge
 from acryo._dask import (
     DaskArrayList,
-    map_subvolumes,
     region_stack,
     subvolume_array_list,
     subvolume_stack,
@@ -317,126 +310,14 @@ class SubtomogramLoader(LoaderBase):
             )
         return image, starts, stops, matrices
 
-    def extract_subtomograms(
-        self,
-        save_path: str | Path,
-        chunksize: int = 1,
-        apply_prefilter: bool = False,
-        pre_transform: bool = False,
-    ) -> ExtractedSubvolumeLoader:
-        """Extract subtomograms as npy files for fast loading.
-
-        Parameters
-        ----------
-        save_path : str | Path
-            The directory where the extracted subtomograms will be saved as npy files.
-        chunksize : int, default 1
-            The chunk size for the dask array.
-        apply_prefilter : bool, default False
-            Whether to pre-apply a spline filter to the subtomograms before saving. If
-            the subtomograms will be reused multiple times, applying the prefilter can
-            save computation time.
-        pre_transform : bool, default False
-            If true, subtomograms are cropped at integer pixels without rotation, so
-            that no interpolation is applied on extraction. The sub-pixel shifts and
-            rotations of the molecules are kept as the "pre-transform" and applied on
-            loading, together with the alignment results. This avoids the excessive
-            smoothing caused by interpolating twice, at the cost of larger files.
-
-        Returns
-        -------
-        ExtractedSubvolumeLoader
-            A loader for the extracted subtomograms.
-        """
-        store_target = ArrayStoreInterface(save_path)
-        num_mole = self.molecules.count()
-        # spline prefilter is not needed for order <= 1
-        is_array_prefiltered = apply_prefilter and self.order > 1
-        prefilter_order = self.order if is_array_prefiltered else -1
-        output_shape = self._get_output_shape(None)
-        if pre_transform:
-            image, starts, stops, matrices = self._prep_subvolumes(output_shape)
-            if num_mole > 0:
-                stack = region_stack(image, starts, stops, backend=Backend())
-                stored_shape = stack.shape[1:]
-            else:
-                stack = da.zeros((0, *output_shape), dtype=np.float32)
-                stored_shape = output_shape
-            tasks = map_subvolumes(
-                stack,
-                store_target.save,
-                var_kwarg={"i": np.arange(num_mole)},
-                prefilter_order=prefilter_order,
-            )
-            pre_transform_matrices = matrices
-        else:
-            tasks = self.construct_mapping_tasks(
-                store_target.save,
-                output_shape=output_shape,
-                var_kwarg={"i": np.arange(num_mole)},
-                prefilter_order=prefilter_order,
-            )
-            stored_shape = output_shape
-            pre_transform_matrices = None
-        tasks.compute()
-        dsk_round = store_target.to_dask(
-            num=num_mole,
-            shape=stored_shape,
-            chunksize=chunksize,
-        )
-        index = pl.arange(num_mole).alias(SUBVOLUME_INDEX)
-        # `ExtractedSubvolumeLoader` resamples the subvolumes using the molecules
-        # relative to these extracted ones, not the "align-d*" features. They are kept
-        # as is.
-        return ExtractedSubvolumeLoader(
-            dsk_round,
-            molecules=self.molecules.with_features(index),
-            order=self.order,
-            scale=self.scale,
-            tilt_model=self.tilt_model,
-            is_array_prefiltered=is_array_prefiltered,
-            pre_transform=pre_transform_matrices,
-            output_shape=output_shape,
-        )
+    def _construct_untransformed(
+        self, output_shape: tuple[pixel, pixel, pixel]
+    ) -> tuple[da.Array, NDArray[np.float32]]:
+        image, starts, stops, matrices = self._prep_subvolumes(output_shape)
+        if self.molecules.count() == 0:
+            return da.zeros((0, *output_shape), dtype=np.float32), matrices
+        return region_stack(image, starts, stops, backend=Backend()), matrices
 
     def _default_align_kwargs(self) -> dict[str, Any]:
         """Return default keyword arguments for alignment."""
         return {"tilt": self.tilt_model}
-
-
-class ArrayStoreInterface:
-    """Class for saving extracted subtomograms."""
-
-    def __init__(self, save_dir):
-        self._save_dir = Path(save_dir)
-        self._save_dir.mkdir()
-
-    def path_i(self, i: int) -> Path:
-        return self._save_dir / f"{i:08d}.npy"
-
-    def save(
-        self,
-        array: NDArray[np.float32],
-        i: int,
-        prefilter_order: int,
-    ) -> None:
-        if prefilter_order > 1:
-            array = ndi.spline_filter(array, order=prefilter_order, output=np.float32)
-        np.save(self.path_i(i), np.asarray(array, dtype=np.float32))
-
-    def to_dask(self, num: int, shape, chunksize: int = 50) -> da.Array:
-        if num == 0:
-            return da.zeros((0, *shape), dtype=np.float32)
-        chunks = normalize_chunks((max(chunksize, 1), *shape), (num, *shape))
-        name = "load-subvolumes-" + tokenize(str(self._save_dir), num, chunks)
-        zeros = (0,) * len(shape)
-        layer = {}
-        start = 0
-        for ib, size in enumerate(chunks[0]):
-            layer[(name, ib, *zeros)] = (self.load_arrays, start, start + size)
-            start += size
-        graph = HighLevelGraph.from_collections(name, layer, dependencies=[])
-        return da.Array(graph, name, chunks, dtype=np.float32)
-
-    def load_arrays(self, start: int, stop: int) -> NDArray[np.float32]:
-        return np.stack([np.load(self.path_i(i)) for i in range(start, stop)], axis=0)
