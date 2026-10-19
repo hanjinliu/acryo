@@ -49,6 +49,8 @@ _LOAD_MEMORY_BUDGET = 2e9
 # Only one tilt series is preprocessed at a time, so that the memory budget is kept
 # when many tilt series are loaded in parallel dask tasks.
 _LOAD_LOCK = threading.Lock()
+# (loader ID, binsize of the tilt images, output scale, sidelength of the cubes)
+_ReconstructorKey = tuple[uuid.UUID, int, float, int]
 
 
 class BackProjectionLoader(LoaderBase):
@@ -197,6 +199,9 @@ class BackProjectionLoader(LoaderBase):
         self._tomo_hand = int(tomo_hand)
         self._padding = float(padding)
         self._binsize = float(binsize)
+        # ID of the padding and the tilt series, which are never changed for the same ID
+        # (shared only by `replace`), so the reconstructors are cached by the ID.
+        self._id = uuid.uuid4()
         super().__init__(
             order=order,
             scale=tilt_series.scale * self._binsize,
@@ -328,8 +333,23 @@ class BackProjectionLoader(LoaderBase):
             padding=self.padding,
             binsize=binsize,
         )
-        out._images = self._images  # share the loaded tilt images
+        # share the loaded tilt images and the reconstructors
+        out._images = self._images
         out._default_tilt_model = self._default_tilt_model
+        # The reconstructors are cached by the ID instead of the padding and the tilt
+        # series. Do not add arguments that change them to this method. Use
+        # `_with_images` (a new ID) to change the tilt series.
+        out._id = self._id
+        return out
+
+    def _with_images(self, images: _TiltSeriesImages) -> Self:
+        """Return a new instance with other tilt images or another tilt series.
+
+        A new ID is assigned, so the reconstructors are not shared with this loader.
+        """
+        out = self.replace()
+        out._images = images
+        out._id = uuid.uuid4()
         return out
 
     def with_tilt_series(self, tilt_series: TiltSeries) -> Self:
@@ -340,12 +360,11 @@ class BackProjectionLoader(LoaderBase):
         shared with this loader, so updating the alignment is cheap.
         """
         tilt_series = _as_tilt_series(tilt_series)
-        out = self.replace()
         if _same_tilt_images(self.tilt_series, tilt_series):
-            out._images = self._images.with_tilt_series(tilt_series)
+            images = self._images.with_tilt_series(tilt_series)
         else:
-            out._images = _TiltSeriesImages(tilt_series, self._images.preprocessor)
-        return out
+            images = _TiltSeriesImages(tilt_series, self._images.preprocessor)
+        return self._with_images(images)
 
     def exclude_tilts(self, indices: SupportsIndex | Iterable[SupportsIndex]) -> Self:
         """Return a new instance without the given tilts.
@@ -383,8 +402,7 @@ class BackProjectionLoader(LoaderBase):
         keep = np.setdiff1d(np.arange(ntilts), excluded)
         if keep.size == 0:
             raise ValueError("Cannot exclude all the tilts.")
-        out = self.replace()
-        out._images = self._images.select_tilts(keep)
+        out = self._with_images(self._images.select_tilts(keep))
         if self._default_tilt_model:
             out._tilt_model = _default_tilt_model(out.tilt_series, self.tomo_hand)
         return out
@@ -528,7 +546,12 @@ class BackProjectionLoader(LoaderBase):
         binsize = self._images.binsize_for(self.binsize)
         sidelength = _cube_sidelength(output_shape, self.order, self.corner_safe)
         get_reconstructor = functools.partial(
-            self._images.reconstructor, binsize, self.scale, sidelength, self.padding
+            self._images.reconstructor,
+            self._id,
+            binsize,
+            self.scale,
+            sidelength,
+            self.padding,
         )
         tilt_series = self._images.binned_tilt_series(binsize)
         pos, rotations = self._to_tilt_series_frame(self.molecules)
@@ -772,7 +795,8 @@ class _ImageCache:
         self._depth = 0
         # (binsize, selection of the tilts) -> images
         self.images: dict[tuple[int, bytes | None], NDArray[np.float32]] = {}
-        self.reconstructors: dict[tuple[Any, ...], DirectFourierReconstructor] = {}
+        # (loader ID, binsize, output scale, sidelength) -> reconstructor
+        self.reconstructors: dict[_ReconstructorKey, DirectFourierReconstructor] = {}
 
     @property
     def enabled(self) -> bool:
@@ -791,7 +815,7 @@ class _ImageCache:
                 self.reconstructors.clear()
 
     def add_reconstructor(
-        self, key: tuple[Any, ...], reconstructor: DirectFourierReconstructor
+        self, key: _ReconstructorKey, reconstructor: DirectFourierReconstructor
     ) -> None:
         self.reconstructors[key] = reconstructor
         while len(self.reconstructors) > self._MAX_RECONSTRUCTORS:
@@ -880,17 +904,19 @@ class _TiltSeriesImages:
         return self.binned_tilt_series(binsize), images
 
     def reconstructor(
-        self, binsize: int, output_scale: nm, sidelength: int, padding: float
+        self,
+        loader_id: uuid.UUID,
+        binsize: int,
+        output_scale: nm,
+        sidelength: int,
+        padding: float,
     ) -> DirectFourierReconstructor:
-        """Get the reconstructor of cubes from the tilt images binned by binsize."""
-        rotations = self.tilt_series.local_detector2tomo
-        key = (
-            self._cache_key(binsize),
-            round(output_scale, 8),
-            sidelength,
-            padding,
-            rotations.tobytes(),
-        )
+        """Get the reconstructor of cubes from the tilt images binned by binsize.
+
+        The reconstructor is cached by ``loader_id`` instead of ``padding`` and the
+        tilt series of these images, which are fixed for the ID.
+        """
+        key = (loader_id, binsize, round(output_scale, 8), sidelength)
         cache = self.cache
         with cache.lock:
             if (out := cache.reconstructors.get(key)) is not None:
@@ -898,7 +924,7 @@ class _TiltSeriesImages:
             _, images = self.get(binsize)
             out = DirectFourierReconstructor(
                 images,
-                rotations,
+                self.tilt_series.local_detector2tomo,
                 input_spacing=self.scale * binsize,
                 output_spacing=output_scale,
                 sidelength=sidelength,

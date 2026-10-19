@@ -240,6 +240,37 @@ def test_reconstructor_is_cached(blob_tilt_series, monkeypatch):
     assert sidelengths == [15, 11]
 
 
+def test_reconstructor_not_shared_with_other_tilt_series(blob_tilt_series, monkeypatch):
+    from acryo.projection import DirectFourierReconstructor
+
+    created: list[DirectFourierReconstructor] = []
+    _init = DirectFourierReconstructor.__init__
+
+    def _init_record(self, *args, **kwargs):
+        _init(self, *args, **kwargs)
+        created.append(self)
+
+    monkeypatch.setattr(DirectFourierReconstructor, "__init__", _init_record)
+    mole = Molecules(BLOBS + CENTER, Rotation.random(len(BLOBS), random_state=4))
+    loader = _loader(blob_tilt_series, mole)
+    shifted = blob_tilt_series.replace(
+        sample_translations=blob_tilt_series.sample_translations + 1.0
+    )
+    # the ID is shared only by `replace`
+    assert loader.replace(binsize=2)._id == loader._id
+    assert loader.with_tilt_series(shifted)._id != loader._id
+    assert loader.with_tilt_series(blob_tilt_series)._id != loader._id
+    assert loader.exclude_tilts([0])._id != loader._id
+    with loader.cache_tilt_images():
+        loader.asnumpy()
+        loader.copy().asnumpy()
+        assert len(created) == 1
+        loader.with_tilt_series(shifted).asnumpy()
+        loader.exclude_tilts([0]).asnumpy()
+    assert len(created) == 3
+    assert created[2].images.shape[0] == TILT_ANGLES.size - 1
+
+
 # 4 x 4 x 4 grid of blobs with 4 nm spacing
 DENSE_BLOBS = np.stack(
     np.meshgrid(*[np.arange(4) * 4.0 - 6.0] * 3, indexing="ij"), axis=-1
