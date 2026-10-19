@@ -776,7 +776,7 @@ def _read_imod_local_alignment(
         names = tilt_com.get("LOCALFILE") or _read_imod_com(path / "align.com").get(
             "OUTPUTLOCALFILE"
         )
-        if names and Path(names[0]).exists():
+        if names:
             file = Path(names[0])
         else:
             return None
@@ -784,6 +784,8 @@ def _read_imod_local_alignment(
         file = Path(local_alignment)
     if not file.is_absolute():
         file = path / file
+    if not Path(file).exists():
+        return None
     if fullimage := tilt_com.get("FULLIMAGE"):
         image_shape = (int(fullimage[1]), int(fullimage[0]))
     else:
