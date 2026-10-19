@@ -870,7 +870,7 @@ class _TiltSeriesImages:
         self, binsize: int, output_scale: nm, sidelength: int, padding: float
     ) -> DirectFourierReconstructor:
         """Get the reconstructor of cubes from the tilt images binned by binsize."""
-        rotations = self.tilt_series.detector2tomo
+        rotations = self.tilt_series.local_detector2tomo
         key = (
             self._cache_key(binsize),
             round(output_scale, 8),

@@ -63,6 +63,17 @@ class LocalShiftModel(ABC):
     def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-serializable dict."""
 
+    def linear_part(self) -> NDArray[np.float64] | None:
+        """(T, 2, 2) linear transformation of the projected points of each tilt.
+
+        If the model transforms the projected (y, x) coordinates of each tilt by a
+        matrix everywhere on the detector, such as the change of magnification of
+        :class:`AffineShifts2D`, the matrices are returned. The shifts are evaluated
+        only at the centers of the patches of the tilt images in reconstruction, and
+        the patches are transformed by these matrices. None if there is no such part.
+        """
+        return None
+
     def select_tilts(self, indices: ArrayLike) -> LocalShiftModel:
         """Return the model of the selected tilts."""
         raise NotImplementedError(f"{type(self).__name__} cannot select tilts.")
@@ -191,6 +202,10 @@ class LocalShifts2D(LocalShiftModel):
         )
         return out if base is None else out + base
 
+    def linear_part(self) -> NDArray[np.float64] | None:
+        # the smooth shifts depend on the position
+        return _linear_part(self.base)
+
     def select_tilts(self, indices: ArrayLike) -> LocalShifts2D:
         idx = np.asarray(indices, dtype=np.intp)
         return LocalShifts2D(
@@ -272,6 +287,11 @@ class AffineShifts2D(LocalShiftModel):
         out = linear[:, :, 0] * projected[..., 0:1]
         out += linear[:, :, 1] * projected[..., 1:2] + self.translations
         return out if base is None else out + base
+
+    def linear_part(self) -> NDArray[np.float64] | None:
+        # the base is applied before this model
+        base = _linear_part(self.base)
+        return self.matrices if base is None else self.matrices @ base
 
     def select_tilts(self, indices: ArrayLike) -> AffineShifts2D:
         idx = np.asarray(indices, dtype=np.intp)
@@ -442,6 +462,10 @@ class LocalAlignment(LocalShiftModel):
         out = np.stack([c * dy + s * dx, -s * dy + c * dx], axis=-1)
         return out if base is None else out + base
 
+    def linear_part(self) -> NDArray[np.float64] | None:
+        # the alignments of the local areas depend on the position
+        return _linear_part(self.base)
+
     def _corners(self, yx: NDArray[np.float64]):
         """Indices and bilinear weights of the four nearest local areas."""
         axes = []
@@ -600,6 +624,10 @@ def _apply_base(
 
 def _select_tilts(model: LocalShiftModel | None, indices) -> LocalShiftModel | None:
     return None if model is None else model.select_tilts(indices)
+
+
+def _linear_part(model: LocalShiftModel | None) -> NDArray[np.float64] | None:
+    return None if model is None else model.linear_part()
 
 
 def _scope_matrices(theta: ArrayLike, alpha: ArrayLike) -> NDArray[np.float64]:

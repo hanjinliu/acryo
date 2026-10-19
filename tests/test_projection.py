@@ -25,16 +25,25 @@ PROJECTIONS = np.stack([_tilt_matrix(a) for a in TILT_ANGLES])
 ROTATIONS = np.linalg.inv(PROJECTIONS)  # from the tilt images to the volume
 
 
-def _gaussian_tilt_images(center, sigma: float, voxel_size: float) -> np.ndarray:
+def _gaussian_tilt_images(
+    center, sigma: float, voxel_size: float, mags=None
+) -> np.ndarray:
     """Projections of a 3D Gaussian of amplitude 1 at center (pixels of the images).
 
-    The projection is the sum over the voxels of the given size.
+    The projection is the sum over the voxels of the given size. If given, each image
+    is transformed by the (2, 2) matrix of ``mags`` around the center of the image.
     """
     yy, xx = np.indices(IMAGE_SHAPE, dtype=np.float64)
+    yy -= IMAGE_SHAPE[0] // 2
+    xx -= IMAGE_SHAPE[1] // 2
+    if mags is None:
+        mags = np.tile(np.eye(2), (len(PROJECTIONS), 1, 1))
     images = []
-    for mat in PROJECTIONS:
-        _, py, px = mat @ center + np.array([0, *IMAGE_SHAPE]) // 2
-        r2 = (yy - py) ** 2 + (xx - px) ** 2
+    for mat, mag in zip(PROJECTIONS, mags):
+        _, py, px = mat @ center
+        # the pixels in the coordinates of the untransformed image
+        (a, b), (c, d) = np.linalg.inv(mag)
+        r2 = (a * yy + b * xx - py) ** 2 + (c * yy + d * xx - px) ** 2
         amp = np.sqrt(2 * np.pi) * sigma / voxel_size
         images.append(amp * np.exp(-r2 / (2 * sigma**2)))
     return np.stack(images).astype(np.float32)
@@ -71,6 +80,41 @@ def test_reconstruct_gaussian(output_spacing, sidelength):
     coords = coords * output_spacing + point
     expected = np.exp(-np.sum((coords - center) ** 2, axis=-1) / (2 * sigma**2))
     assert_allclose(cube, expected, atol=0.04)
+
+
+@pytest.mark.parametrize("output_spacing", [1.0, 1.6])
+def test_reconstruct_magnified_gaussian(output_spacing):
+    # each tilt image is magnified (and sheared) around its center
+    rng = np.random.default_rng(0)
+    mags = 1.04 * np.eye(2) + rng.uniform(-0.04, 0.04, size=(len(PROJECTIONS), 2, 2))
+    sigma = 2.5
+    center = np.array([2.3, -5.7, 6.1])
+    point = np.array([1.0, 0.5, -0.5]) * output_spacing
+    # reconstructed from the images without magnification
+    expected = DirectFourierReconstructor(
+        _gaussian_tilt_images(center, sigma, output_spacing),
+        ROTATIONS,
+        1.0,
+        output_spacing,
+        24,
+    )(_projected_positions(point))
+
+    images = _gaussian_tilt_images(center, sigma, output_spacing, mags)
+    inverse = np.tile(np.eye(3), (len(mags), 1, 1))
+    inverse[:, 1:, 1:] = np.linalg.inv(mags)
+    origin = np.array(IMAGE_SHAPE) // 2
+    offsets = _projected_positions(point) - origin
+    positions = np.einsum("tij,tj->ti", mags, offsets) + origin
+    reconstructor = DirectFourierReconstructor(
+        images, ROTATIONS @ inverse, 1.0, output_spacing, 24
+    )
+    rigid = DirectFourierReconstructor(images, ROTATIONS, 1.0, output_spacing, 24)
+    # the patches are larger in the magnified images
+    assert reconstructor.patch_size > rigid.patch_size
+    error = np.abs(reconstructor(positions) - expected).max()
+    assert error < 0.05
+    # the error is much larger if the magnification is ignored
+    assert np.abs(rigid(positions) - expected).max() > 2 * error
 
 
 @pytest.mark.parametrize("padding", [2.0, 3.0])

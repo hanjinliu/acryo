@@ -25,7 +25,11 @@ class CentralSliceInsertion:
     ----------
     rotations : (T, 3, 3) array
         Matrices that map the (z, y, x) coordinates of each slice (z = 0) to the
-        (z, y, x) coordinates of the volume.
+        (z, y, x) coordinates of the volume. They are usually rotations, but the
+        image plane may also be scaled or sheared, such as a magnified image (see
+        :attr:`TiltSeries.local_detector2tomo`). Then, the frequencies are mapped by
+        the inverse transpose, and the image is normalized by the area of its pixels
+        in the volume.
     slice_shape : int or (int, int)
         Shape of the images whose rfft are inserted.
     volume_shape : int or (int, int, int)
@@ -61,7 +65,8 @@ class CentralSliceInsertion:
         freqs *= np.float32(scale)
         # Only up to the Nyquist frequency of the volume. Half of the frequencies of
         # x = 0 are redundant because of the Friedel symmetry.
-        keep = (np.linalg.norm(freqs, axis=-1) <= 0.5) & ~(
+        stretch_min = slice_stretch(rotations).min()
+        keep = (np.linalg.norm(freqs, axis=-1) <= 0.5 / stretch_min) & ~(
             (freqs[:, 2] == 0) & (freqs[:, 1] < 0)
         )
         self._keep = np.flatnonzero(keep)
@@ -71,15 +76,21 @@ class CentralSliceInsertion:
         self._dft_shape = dft_shape = vshape[:2] + (vshape[2] // 2 + 1,)
         direct: list[tuple[NDArray, NDArray, NDArray]] = []
         conjugate: list[tuple[NDArray, NDArray, NDArray]] = []
-        for t, rotation in enumerate(rotations.astype(np.float32)):
-            coords = freqs @ rotation.T
+        matrices = _frequency_matrices(rotations)
+        for t, matrix in enumerate(matrices.astype(np.float32)):
+            coords = freqs @ matrix.T
+            columns = t * nkeep + np.arange(nkeep)
+            # the frequencies of each slice beyond the Nyquist frequency of the volume
+            # (only if the slice is stretched)
+            inside = np.linalg.norm(coords, axis=-1) <= 0.5 * (1 + 1e-6)
+            if not inside.all():
+                coords, columns = coords[inside], columns[inside]
             # the rfft only has x >= 0, where the conjugate values are inserted
             is_conj = coords[:, 2] < 0
             coords[is_conj] *= -1
             index = coords * np.array(vshape, dtype=np.float32)
             base = np.floor(index).astype(np.int64)
             frac = index - base
-            columns = t * nkeep + np.arange(nkeep)
             for corner in np.ndindex(2, 2, 2):
                 weight = np.prod(
                     [f if c else 1 - f for c, f in zip(corner, frac.T)], axis=0
@@ -105,6 +116,13 @@ class CentralSliceInsertion:
         self._normalizer = np.zeros(weights.shape, dtype=np.float32)
         # normalize by the pixel area of the images
         self._normalizer[valid] = 1 / weights[valid] / scale**2
+        areas = _slice_areas(matrices)
+        if not np.allclose(areas, 1.0, rtol=0, atol=1e-6):
+            # The pixels of a stretched slice are smaller in the volume. The values
+            # of each slice are scaled after the weights are summed.
+            factors = sparse.diags(np.repeat(1 / areas, nkeep).astype(np.complex64))
+            self._direct = (self._direct @ factors).tocsr()
+            self._conjugate = (self._conjugate @ factors).tocsr()
 
     @property
     def nbytes(self) -> int:
@@ -191,6 +209,45 @@ def _normalize_shape(shape: int | Sequence[int], ndim: int) -> tuple[int, ...]:
     if len(out) != ndim:
         raise ValueError(f"Shape must be an integer or a {ndim}-tuple, got {shape!r}.")
     return out
+
+
+def slice_stretch(rotations: NDArray[np.floating]) -> NDArray[np.float64]:
+    """(T, 2) factors of the frequencies of each slice in the volume.
+
+    They are the singular values of the image plane of the matrices of
+    :class:`CentralSliceInsertion`, which are exactly 1 for rotations. The frequencies
+    of a magnified image are stretched (factor > 1).
+    """
+    rotations = np.asarray(rotations, dtype=np.float64)
+    if rotations.ndim != 3 or rotations.shape[1:] != (3, 3):
+        raise ValueError(
+            f"Shape of rotations must be (T, 3, 3), got {rotations.shape}."
+        )
+    if _is_orthogonal(rotations):
+        return np.ones((rotations.shape[0], 2))
+    planes = _frequency_matrices(rotations)[:, :, 1:]
+    return np.linalg.svd(planes, compute_uv=False)
+
+
+def _is_orthogonal(matrices: NDArray[np.float64]) -> bool:
+    gram = matrices @ matrices.transpose(0, 2, 1)
+    return bool(np.allclose(gram, np.eye(3), rtol=0, atol=1e-8))
+
+
+def _frequency_matrices(rotations: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Matrices that map the frequencies of the slices to those of the volume.
+
+    The frequencies are mapped by the inverse transpose of the matrices of the
+    coordinates, which are the same for rotations.
+    """
+    if _is_orthogonal(rotations):
+        return rotations
+    return np.linalg.inv(rotations).transpose(0, 2, 1)
+
+
+def _slice_areas(matrices: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Areas of the unit square of the frequencies of each slice in the volume."""
+    return np.linalg.norm(np.cross(matrices[:, :, 1], matrices[:, :, 2]), axis=-1)
 
 
 def _to_csr(entries, shape) -> sparse.csr_matrix:

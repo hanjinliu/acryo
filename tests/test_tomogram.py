@@ -2,7 +2,7 @@ import numpy as np
 from numpy.testing import assert_allclose
 import pytest
 
-from acryo.projection import TiltSeries, reconstruct_tomogram
+from acryo.projection import AffineShifts2D, TiltSeries, reconstruct_tomogram
 from acryo.projection import _io
 
 IMAGE_SHAPE = (96, 112)
@@ -14,21 +14,33 @@ BLOBS = np.array(
 )
 
 
-def _tilt_series_and_images(points: np.ndarray = BLOBS):
+def _tilt_series_and_images(points: np.ndarray = BLOBS, mags=None):
+    """Tilt series and its images of Gaussian blobs.
+
+    If given, each image is magnified by the (2, 2) matrix of ``mags``.
+    """
     rng = np.random.default_rng(0)
     angles = np.arange(-60.0, 61.0, 3.0)
     ts = TiltSeries(
         tilt_angles=angles,
         tilt_axis_angle=84.0,
         sample_translations=rng.normal(scale=1.0, size=(angles.size, 2)),
+        local_shifts_2d=None if mags is None else AffineShifts2D(mags),
         scale=IMAGE_SCALE,
     )
     projected = ts.project_points(points) / IMAGE_SCALE + np.array(IMAGE_SHAPE) // 2
+    if mags is None:
+        mags = np.tile(np.eye(2), (angles.size, 1, 1))
+    inverse = np.linalg.inv(mags).astype(np.float32)
     yy, xx = np.indices(IMAGE_SHAPE, dtype=np.float32)
     images = np.zeros((angles.size,) + IMAGE_SHAPE, dtype=np.float32)
     for proj in projected:
         for t, (py, px) in enumerate(proj):
-            images[t] += np.exp(-((yy - py) ** 2 + (xx - px) ** 2) / (2 * SIGMA**2))
+            # the blobs are also magnified
+            (a, b), (c, d) = inverse[t]
+            dy, dx = yy - py, xx - px
+            r2 = (a * dy + b * dx) ** 2 + (c * dy + d * dx) ** 2
+            images[t] += np.exp(-r2 / (2 * SIGMA**2))
     return ts, images
 
 
@@ -69,6 +81,24 @@ def test_patches_are_blended_seamlessly():
     for patch_size in [16, 24]:
         tomo = reconstruct_tomogram(ts, images, shape, patch_size=patch_size)
         assert np.corrcoef(tomo.ravel(), ref.ravel())[0, 1] > 0.95
+
+
+def test_magnified_tilt_images():
+    # The magnification of each tilt image is corrected inside the patches, so the
+    # tomogram is the same as that of the images without magnification.
+    rng = np.random.default_rng(1)
+    mags = 1.03 * np.eye(2) + rng.uniform(-0.03, 0.03, size=(41, 2, 2))
+    shape = (24, 60, 70)
+    ts_ref, images_ref = _tilt_series_and_images()
+    ts, images = _tilt_series_and_images(mags=mags)
+    for patch_size in [16, 80]:
+        kwargs = dict(patch_size=patch_size, dtype=np.float32)
+        ref = reconstruct_tomogram(ts_ref, images_ref, shape, **kwargs)
+        tomo = reconstruct_tomogram(ts, images, shape, **kwargs)
+        assert np.corrcoef(tomo.ravel(), ref.ravel())[0, 1] > 0.99
+        for pos in BLOBS / IMAGE_SCALE + np.array(shape) // 2:
+            error = np.abs(_local_center_of_mass(tomo, pos) - pos)
+            assert np.all(error < [0.25, 0.1, 0.1])
 
 
 def test_default_scale_and_workers():
