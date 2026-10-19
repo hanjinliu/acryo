@@ -11,6 +11,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from acryo._typed_scipy import fftn, ifftn
 from acryo._types import nm
+from acryo.backend._gpu import backend_of
 from acryo.deconv import wiener_deconv
 
 if TYPE_CHECKING:
@@ -103,8 +104,10 @@ class CTFModel:
     def simulate(self, freq):
         """Simulate the CTF at the given spatial frequencies (in 1/nm).
 
-        The output has the same floating point type as ``freq`` (float32 for float32).
+        The output has the same floating point type as ``freq`` (float32 for float32),
+        and is on the same device (numpy or cupy).
         """
+        xp = backend_of(freq).xp
         f2 = freq**2
         # Python floats so that the type of the arrays is kept
         cs = float(self.spherical_aberration) * 1e6  # mm -> nm
@@ -118,8 +121,8 @@ class CTFModel:
         # The CTF with amplitude contrast A is sqrt(1 - A²) * sin(χ) + A * cos(χ),
         # which is identical to sin(χ + arcsin(A)).
         amplitude_phase = math.asin(float(self.amplitude))
-        envelope = np.exp(-float(self.bfactor) * f2 / 4)
-        return np.sin(wave_aberration + amplitude_phase) * envelope
+        envelope = xp.exp(-float(self.bfactor) * f2 / 4)
+        return xp.sin(wave_aberration + amplitude_phase) * envelope
 
     def deconvolve(
         self,
@@ -218,11 +221,11 @@ class CTFCorrection:
             raise IndexError(
                 f"No CTF model for the tilt {index} ({len(self.models)} models)."
             )
-        freq_y = np.asarray(freq_y, dtype=np.float32)
-        freq_x = np.asarray(freq_x, dtype=np.float32)
-        ctf = model.simulate(np.sqrt(freq_y**2 + freq_x**2))
+        freq_y, freq_x = _as_float32(freq_y), _as_float32(freq_x)
+        xp = backend_of(freq_y).xp
+        ctf = model.simulate(xp.sqrt(freq_y**2 + freq_x**2))
         if self.method == "phase_flip":
-            return np.sign(ctf)
+            return xp.sign(ctf)
         return ctf / (ctf**2 + float(self.wiener_constant))
 
     def select_tilts(self, indices: ArrayLike) -> CTFCorrection:
@@ -433,8 +436,8 @@ class PatchCTFCorrection:
         ctf = self.ctf
         # the position changes the defocus u and v by the same amount
         phase = _CTFPhase(
-            np.asarray(freq_y, dtype=np.float32),
-            np.asarray(freq_x, dtype=np.float32),
+            _as_float32(freq_y),
+            _as_float32(freq_x),
             astigmatism=(ctf.defocus_u[index] - ctf.defocus_v[index]) / 2,
             astigmatism_angle=math.radians(ctf.astigmatism_angle[index]),
             wave_length=ctf.wave_length,
@@ -499,10 +502,11 @@ class _CTFPhase:
 
     def sign(self, defocus: float) -> NDArray[np.float32]:
         """Sign of the CTF of the mean defocus in μm (negative for underfocus)."""
+        xp = backend_of(self._f2).xp
         chi = self._f2 * np.float32(-math.pi * self._lmd * defocus * 1e3)
         chi += self._base
-        np.sin(chi, out=chi)
-        return np.sign(chi, out=chi)
+        xp.sin(chi, out=chi)
+        return xp.sign(chi, out=chi)
 
 
 @dataclass(frozen=True)
@@ -605,6 +609,13 @@ def _multiply_multi(
         return a * b
     newaxis = (np.newaxis,) * (b.ndim - a.ndim)
     return a[newaxis] * b
+
+
+def _as_float32(x: Any) -> Any:
+    """Convert to a float32 array, keeping the device (numpy or cupy)."""
+    if not hasattr(x, "astype"):
+        x = np.asarray(x)
+    return x.astype(np.float32, copy=False)
 
 
 def _readonly(arr: ArrayLike) -> NDArray:

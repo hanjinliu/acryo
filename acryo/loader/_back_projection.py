@@ -27,7 +27,7 @@ from dask.highlevelgraph import HighLevelGraph
 
 from acryo._types import nm, pixel
 from acryo._dask import DaskArrayList
-from acryo.backend import Backend
+from acryo.backend import NUMPY_BACKEND, Backend
 from acryo.loader._base import LoaderBase, Unset, _ShapeType, TemplateInputType
 from acryo.molecules import Molecules
 from acryo.ctf import CTFCorrection, PatchCTFCorrection
@@ -570,6 +570,7 @@ class BackProjectionLoader(LoaderBase):
         overwrite: bool = False,
         num_workers: int | None = None,
         dtype: DTypeLike = np.float16,
+        backend: Backend | None = None,
     ) -> NDArray[np.floating]:
         """Reconstruct the tomogram from the tilt series.
 
@@ -605,6 +606,10 @@ class BackProjectionLoader(LoaderBase):
         dtype : float16 or float32, default is float16
             Data type of the tomogram. If ``save_path`` is given, the MRC file is of
             mode 12 (float16) or mode 2 (float32).
+        backend : Backend, optional
+            Backend of the reconstruction. Default is the current backend, which is
+            also used to preprocess the tilt images (see
+            :class:`acryo.projection.TiltImagePreprocessor`).
 
         Returns
         -------
@@ -638,6 +643,7 @@ class BackProjectionLoader(LoaderBase):
             overwrite=overwrite,
             num_workers=num_workers,
             dtype=dtype,
+            backend=backend,
         )
 
     def refine_tilt_series(
@@ -867,6 +873,8 @@ class _TiltSeriesImages:
                 output_spacing=output_scale,
                 sidelength=sidelength,
                 padding=padding,
+                # the subtomograms are reconstructed on the host
+                backend=NUMPY_BACKEND,
             )
             if cache.enabled:
                 cache.add_reconstructor(key, out)

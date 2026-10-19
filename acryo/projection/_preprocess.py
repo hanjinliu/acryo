@@ -11,6 +11,8 @@ from numpy.typing import ArrayLike, NDArray
 from scipy import fft as sfft
 
 from acryo._types import nm
+from acryo.backend import AnyArray, Backend
+from acryo.backend._gpu import backend_of, run_on_device
 from acryo.ctf import CTFCorrection
 
 if TYPE_CHECKING:
@@ -45,7 +47,10 @@ class TiltImageFilter(Protocol):
             (y, x) spatial frequencies in 1/nm. They are broadcastable to the shape
             of the rfft of the (padded) patches. If the tilt image is binned in
             preprocessing, only the frequencies kept by the binning are given. Values
-            are multiplied in float32, so float32 values are enough.
+            are multiplied in float32, so float32 values are enough. They are numpy
+            or cupy arrays depending on the backend of the preprocessing, so the
+            filter should work with both (such as by the methods of the arrays and
+            the ufuncs of numpy), or return numpy arrays.
         index : int
             Index of the tilt in the tilt series, which corresponds to the tilt
             angles (not the index in the image file).
@@ -232,6 +237,8 @@ class TiltImagePreprocessor:
         index: int = 0,
         scale: nm = 1.0,
         binsize: int = 1,
+        *,
+        backend: Backend | None = None,
     ) -> NDArray[np.float32]:
         """Preprocess a tilt image.
 
@@ -248,24 +255,62 @@ class TiltImagePreprocessor:
             each patch. The image is cropped around the center in the same way as
             :func:`fourier_bin`, and the binned image is normalized by its own
             statistics.
+        backend : Backend, optional
+            Backend of the computation. Default is the current backend. With cupy, the
+            image is preprocessed on the GPU and the output is returned to the host.
+            Calls from parallel threads share the GPU memory within its capacity (see
+            :func:`acryo.backend._gpu.run_on_device`).
+
+        Returns
+        -------
+        (H', W') float32 array
+            The preprocessed image (numpy array).
         """
-        image = np.asarray(image, dtype=np.float32)
-        if image.ndim != 2:
-            raise ValueError(f"Image must be 2D, got shape {image.shape}.")
+        shape = np.shape(image) if not hasattr(image, "shape") else image.shape
+        if len(shape) != 2:
+            raise ValueError(f"Image must be 2D, got shape {shape}.")
         if binsize < 1 or int(binsize) != binsize:
             raise ValueError(f"'binsize' must be a positive integer, got {binsize!r}.")
         binsize = int(binsize)
+        backend = backend or Backend()
         layouts = [
             _axis_layout(size, binsize, n, self.overlap, self.padding)
-            for size, n in zip(image.shape, self.patch_grid)
+            for size, n in zip(shape, self.patch_grid)
         ]
+        nbytes = _device_nbytes(shape, layouts, binsize)
+        return run_on_device(
+            backend,
+            nbytes,
+            self._preprocess,
+            image,
+            index=index,
+            scale=scale,
+            binsize=binsize,
+            layouts=layouts,
+            backend=backend,
+        )
+
+    def _preprocess(
+        self,
+        image: NDArray[np.floating],
+        *,
+        index: int,
+        scale: nm,
+        binsize: int,
+        layouts: list[_AxisLayout],
+        backend: Backend,
+    ) -> NDArray[np.float32]:
+        xp, fft = backend.xp, backend.fft
+        image = xp.asarray(image, dtype=np.float32)
         fft_shape = (layouts[0].fft_size, layouts[1].fft_size)
         # the Fourier transform of the patches cropped to the binned size
         shape = (fft_shape[0] // binsize, fft_shape[1] // binsize)
         spacing = scale * binsize
         freq_y = sfft.fftfreq(shape[0], spacing).astype(np.float32)[:, np.newaxis]
         freq_x = sfft.rfftfreq(shape[1], spacing).astype(np.float32)[np.newaxis, :]
+        freq_y, freq_x = xp.asarray(freq_y), xp.asarray(freq_x)
         weight = _patch_bandpass(shape, binsize, self.low, self.high, self.falloff)
+        weight = xp.asarray(weight)
         if binsize > 1:
             # the inverse FFT of the smaller size is binsize**2 times larger
             weight = weight / np.float32(binsize**2)
@@ -273,19 +318,21 @@ class TiltImagePreprocessor:
         local_filters: list[Callable[..., NDArray[np.floating] | float]] = []
         for filt in self.filters:
             if not _is_position_dependent(filt):
-                weight = weight * np.asarray(filt(freq_y, freq_x, index), np.float32)
+                values = filt(freq_y, freq_x, index)
+                weight = weight * xp.asarray(values, dtype=np.float32)
             elif (for_tilt := getattr(filt, "_for_tilt", None)) is not None:
                 local_filters.append(for_tilt(freq_y, freq_x, index))
             else:
                 local_filters.append(partial(filt, freq_y, freq_x, index))
         terms = _plane_terms(image) if self.subtract_background else None
+        tapers = [xp.asarray(layout.taper) for layout in layouts]
         center = np.array(image.shape) // 2
-        out = np.zeros((layouts[0].size_out, layouts[1].size_out), dtype=np.float32)
-        buffer = np.empty(fft_shape, dtype=np.float32)
+        out = xp.zeros((layouts[0].size_out, layouts[1].size_out), dtype=np.float32)
+        buffer = xp.empty(fft_shape, dtype=np.float32)
         for patch_y in layouts[0].patches:
             for patch_x in layouts[1].patches:
-                _read_patch(image, layouts, (patch_y, patch_x), terms, buffer)
-                ft = sfft.rfft2(buffer)
+                _read_patch(image, (patch_y, patch_x), terms, tapers, buffer)
+                ft = fft.rfft2(buffer)
                 if binsize > 1:
                     ft = _crop_spectrum(ft, shape)
                 ft *= weight
@@ -295,16 +342,17 @@ class TiltImagePreprocessor:
                         float(patch_x.center - center[1]) * scale,
                     )
                     for func in local_filters:
-                        ft *= np.asarray(func(position=position), dtype=np.float32)
-                filtered = sfft.irfft2(ft, s=shape, overwrite_x=True)
+                        values = func(position=position)
+                        ft *= xp.asarray(values, dtype=np.float32)
+                filtered = fft.irfft2(ft, s=shape, overwrite_x=True)
                 _blend_patch(out, filtered, patch_y, patch_x)
         if self.normalize:
             mean, std = _central_crop_stats(out)
             out -= mean
             out /= std
         else:
-            out -= np.float32(out.mean(dtype=np.float64))
-        return out
+            out -= np.float32(float(out.mean(dtype=np.float64)))
+        return backend.asnumpy(out)
 
     def _workspace_nbytes(self, image_shape: tuple[int, int]) -> int:
         """Approximate memory in bytes used to preprocess an image (without binning)."""
@@ -487,34 +535,40 @@ def _reflect_runs(
 
 
 def _read_patch(
-    image: NDArray[np.float32],
-    layouts: Sequence[_AxisLayout],
+    image: AnyArray[np.float32],
     patches: tuple[_AxisPatch, _AxisPatch],
     terms: tuple[NDArray[np.float32], NDArray[np.float32]] | None,
-    out: NDArray[np.float32],
+    tapers: Sequence[AnyArray[np.float32]],
+    out: AnyArray[np.float32],
 ) -> None:
-    """Read the extended patch into ``out``, with the soft mask and zero padding."""
+    """Read the extended patch into ``out``, with the soft mask and zero padding.
+
+    ``image``, ``tapers`` and ``out`` are on the same device, and ``terms`` (the
+    background plane) are on the host.
+    """
+    xp = backend_of(out).xp
     patch_y, patch_x = patches
     ny, nx = patch_y.length, patch_x.length
     view = out[:ny, :nx]
     iy = _reflect_indices(patch_y.start, ny, image.shape[0])
     ix = _reflect_indices(patch_x.start, nx, image.shape[1])
     if terms is None:
-        term_y = np.zeros((ny, 1), dtype=np.float32)
+        term_y = xp.zeros((ny, 1), dtype=np.float32)
     else:
-        term_y = terms[0][iy, np.newaxis]
+        term_y = xp.asarray(terms[0][iy, np.newaxis])
     runs_y = _reflect_runs(patch_y.start, ny, image.shape[0])
     runs_x = _reflect_runs(patch_x.start, nx, image.shape[1])
     if runs_y is None or runs_x is None:
-        np.subtract(image[np.ix_(iy, ix)], term_y, out=view)
+        region = image[xp.ix_(xp.asarray(iy), xp.asarray(ix))]
+        xp.subtract(region, term_y, out=view)
     else:
         # the background plane is subtracted while reading
         for dst_y, src_y in runs_y:
             for dst_x, src_x in runs_x:
-                np.subtract(image[src_y, src_x], term_y[dst_y], out=view[dst_y, dst_x])
+                xp.subtract(image[src_y, src_x], term_y[dst_y], out=view[dst_y, dst_x])
     if terms is not None:
-        view -= terms[1][np.newaxis, ix]
-    taper_y, taper_x = layouts[0].taper, layouts[1].taper
+        view -= xp.asarray(terms[1][np.newaxis, ix])
+    taper_y, taper_x = tapers
     if (pad := taper_y.size) > 0:
         view[:pad] *= taper_y[:, np.newaxis]
         view[ny - pad :] *= taper_y[::-1, np.newaxis]
@@ -530,7 +584,7 @@ def _crop_spectrum(
 ) -> NDArray[np.complex64]:
     """Crop the rfft to that of the shape (even sizes), same as :func:`fourier_bin`."""
     ny, nx = shape
-    out = np.empty((ny, nx // 2 + 1), dtype=ft.dtype)
+    out = backend_of(ft).xp.empty((ny, nx // 2 + 1), dtype=ft.dtype)
     out[: ny // 2] = ft[: ny // 2, : nx // 2 + 1]
     out[ny // 2 :] = ft[ft.shape[0] - ny // 2 :, : nx // 2 + 1]
     return out
@@ -563,12 +617,13 @@ def _blend_patch(
 
 
 def _multiply_along(
-    arr: NDArray[np.float32], weight: NDArray[np.float32], sl: slice, axis: int
+    arr: AnyArray[np.float32], weight: NDArray[np.float32], sl: slice, axis: int
 ) -> None:
+    weight = backend_of(arr).xp.asarray(weight[sl])
     if axis == 0:
-        arr[sl] *= weight[sl, np.newaxis]
+        arr[sl] *= weight[:, np.newaxis]
     else:
-        arr[:, sl] *= weight[np.newaxis, sl]
+        arr[:, sl] *= weight[np.newaxis, :]
 
 
 def _subtract_plane(image: NDArray[np.float32]) -> NDArray[np.float32]:
@@ -580,14 +635,15 @@ def _subtract_plane(image: NDArray[np.float32]) -> NDArray[np.float32]:
 
 
 def _plane_terms(
-    image: NDArray[np.float32],
+    image: AnyArray[np.float32],
 ) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
-    """The terms ``a * y + c`` and ``b * x`` of the least-squares plane."""
+    """The terms ``a * y + c`` and ``b * x`` of the least-squares plane (on the host)."""
     h, w = image.shape
     y = np.arange(h, dtype=np.float64)
     x = np.arange(w, dtype=np.float64)
-    rows = image.sum(axis=1, dtype=np.float64)
-    cols = image.sum(axis=0, dtype=np.float64)
+    backend = backend_of(image)
+    rows = backend.asnumpy(image.sum(axis=1, dtype=np.float64))
+    cols = backend.asnumpy(image.sum(axis=0, dtype=np.float64))
     # normal equations of the design matrix [y, x, 1]
     lhs = np.array(
         [
@@ -601,14 +657,31 @@ def _plane_terms(
     return (a * y + c).astype(np.float32), (b * x).astype(np.float32)
 
 
-def _central_crop_stats(image: NDArray[np.float32]) -> tuple[np.float32, np.float32]:
+def _central_crop_stats(image: AnyArray[np.float32]) -> tuple[np.float32, np.float32]:
     """Mean and standard deviation of the central 25% crop."""
     h, w = image.shape
     crop = image[int(0.375 * h) : int(0.625 * h), int(0.375 * w) : int(0.625 * w)]
     # accumulated in float64 without float64 copies of the crop
-    mean = np.float32(crop.mean(dtype=np.float64))
-    var = np.square(crop - mean).mean(dtype=np.float64)
+    mean = np.float32(float(crop.mean(dtype=np.float64)))
+    var = float(((crop - mean) ** 2).mean(dtype=np.float64))
     return mean, np.float32(math.sqrt(var))
+
+
+def _device_nbytes(
+    image_shape: tuple[int, int], layouts: Sequence[_AxisLayout], binsize: int
+) -> int:
+    """Approximate peak device memory to preprocess an image."""
+    fy, fx = layouts[0].fft_size, layouts[1].fft_size
+    by, bx = fy // binsize, fx // binsize
+    out = layouts[0].size_out * layouts[1].size_out
+    return (
+        4 * image_shape[0] * image_shape[1]  # the image
+        + 4 * out
+        + 4 * fy * fx  # a patch
+        + 16 * fy * (fx // 2 + 1)  # its rfft and the plan
+        + 60 * by * (bx // 2 + 1)  # cropped rfft, filters and inverse plan
+        + 4 * by * bx
+    )
 
 
 @lru_cache(maxsize=4)

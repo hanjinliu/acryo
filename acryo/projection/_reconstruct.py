@@ -6,6 +6,8 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy import fft as sfft
 
+from acryo.backend import Backend
+from acryo.backend._gpu import run_on_device
 from acryo.projection._insertion import CentralSliceInsertion
 from acryo.projection._patch import centered_patches_rfft
 
@@ -36,6 +38,11 @@ class DirectFourierReconstructor:
         Size of the 3D DFT relative to the cube. Larger padding reduces the artifacts
         of interpolation and the aliasing of the densities outside the cube, but is
         slower.
+    backend : Backend, optional
+        Backend of the reconstruction. Default is the current backend. With cupy, the
+        patches of the images are read on the host and the cubes are reconstructed
+        on the GPU. The calls from parallel threads share the GPU memory within its
+        capacity (see :func:`acryo.backend._gpu.run_on_device`).
     """
 
     def __init__(
@@ -46,6 +53,7 @@ class DirectFourierReconstructor:
         output_spacing: float,
         sidelength: int,
         padding: float = 2.0,
+        backend: Backend | None = None,
     ):
         if len(images) != len(rotations):
             raise ValueError(
@@ -65,6 +73,9 @@ class DirectFourierReconstructor:
         self.insertion = CentralSliceInsertion(
             rotations, self.patch_size, padded, scale=ratio
         )
+        self.backend = backend or Backend()
+        # the operators are copied before the threads share them
+        self.insertion.to_device(self.backend)
 
     @property
     def nbytes(self) -> int:
@@ -82,8 +93,17 @@ class DirectFourierReconstructor:
 
         Returns
         -------
-        (..., L, L, L) array
-            The reconstructed cubes.
+        (..., L, L, L) float32 array
+            The reconstructed cubes (on the host).
         """
-        slices = centered_patches_rfft(self.images, positions, self.patch_size)
-        return self.insertion.reconstruct(slices, output_shape=self.sidelength)
+        positions = np.asarray(positions, dtype=np.float64)
+        nbatch = int(np.prod(positions.shape[:-2]))
+        nbytes = self.insertion._device_nbytes(nbatch, self.sidelength)
+        return run_on_device(self.backend, nbytes, self._reconstruct, positions)
+
+    def _reconstruct(self, positions: NDArray[np.float64]) -> NDArray[np.float32]:
+        slices = centered_patches_rfft(
+            self.images, positions, self.patch_size, backend=self.backend
+        )
+        cubes = self.insertion.reconstruct(slices, output_shape=self.sidelength)
+        return self.backend.asnumpy(cubes)

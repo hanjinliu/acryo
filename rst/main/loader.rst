@@ -515,6 +515,21 @@ tomograms (subvolumes are converted to float32).
 The same reconstruction is available for any tilt images and tilt series as
 :func:`acryo.projection.reconstruct_tomogram`.
 
+The preprocessing of the tilt images and the reconstruction of the tomogram run on GPU with
+the cupy backend. The tilt images are read on the host, and the results are returned to the
+host. The threads run on their own CUDA streams, and each task (a tilt image or a patch of
+the tomogram) reserves its estimated GPU memory before running, within 70% of the free GPU
+memory, so the parallel threads do not run out of the GPU memory. A task that still runs out
+of memory is retried alone after the cached memory is released. The subtomograms of
+:class:`BackProjectionLoader` are still reconstructed on the host.
+
+.. code-block:: python
+
+    from acryo.backend import using_backend
+
+    with using_backend("cupy"):
+        tomogram = loader.reconstruct_tomogram((D, H, W))
+
 Local Shifts of the Tilt Images
 -------------------------------
 
