@@ -770,18 +770,16 @@ def _read_imod_local_alignment(
     scale: nm,
     indices: NDArray[np.integer],
     nviews: int,
-) -> LocalAlignment:
+) -> LocalAlignment | None:
     """Read the local alignments of an etomo directory for the selected views."""
     if local_alignment is True:
         names = tilt_com.get("LOCALFILE") or _read_imod_com(path / "align.com").get(
             "OUTPUTLOCALFILE"
         )
-        if not names:
-            raise ValueError(
-                f"No local alignment file is specified in tilt.com or align.com in "
-                f"{path}."
-            )
-        file = Path(names[0])
+        if names and Path(names[0]).exists():
+            file = Path(names[0])
+        else:
+            return None
     else:
         file = Path(local_alignment)
     if not file.is_absolute():
