@@ -1,8 +1,13 @@
 # pyright: reportPrivateImportUsage=false
 from __future__ import annotations
+from pathlib import Path
 from typing import TYPE_CHECKING
 from dask import array as da
+from dask.array.core import normalize_chunks
+from dask.base import tokenize
+from dask.highlevelgraph import HighLevelGraph
 import numpy as np
+from scipy import ndimage as ndi
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
 from acryo.alignment._base import AlignmentResult
@@ -322,6 +327,44 @@ class ExtractedSubvolumeLoader(LoaderBase):
         ref_rot = ref.rotator[rows]
         dpos = self.molecules.pos.astype(np.float64) - ref.pos[rows]
         return ref_rot.apply(dpos, inverse=True), ref_rot.inv() * self.molecules.rotator
+
+
+class ArrayStoreInterface:
+    """Class for saving extracted subtomograms."""
+
+    def __init__(self, save_dir):
+        self._save_dir = Path(save_dir)
+        self._save_dir.mkdir()
+
+    def path_i(self, i: int) -> Path:
+        return self._save_dir / f"{i:08d}.npy"
+
+    def save(
+        self,
+        array: NDArray[np.float32],
+        i: int,
+        prefilter_order: int,
+    ) -> None:
+        if prefilter_order > 1:
+            array = ndi.spline_filter(array, order=prefilter_order, output=np.float32)
+        np.save(self.path_i(i), np.asarray(array, dtype=np.float32))
+
+    def to_dask(self, num: int, shape, chunksize: int = 50) -> da.Array:
+        if num == 0:
+            return da.zeros((0, *shape), dtype=np.float32)
+        chunks = normalize_chunks((max(chunksize, 1), *shape), (num, *shape))
+        name = "load-subvolumes-" + tokenize(str(self._save_dir), num, chunks)
+        zeros = (0,) * len(shape)
+        layer = {}
+        start = 0
+        for ib, size in enumerate(chunks[0]):
+            layer[(name, ib, *zeros)] = (self.load_arrays, start, start + size)
+            start += size
+        graph = HighLevelGraph.from_collections(name, layer, dependencies=[])
+        return da.Array(graph, name, chunks, dtype=np.float32)
+
+    def load_arrays(self, start: int, stop: int) -> NDArray[np.float32]:
+        return np.stack([np.load(self.path_i(i)) for i in range(start, stop)], axis=0)
 
 
 def _bin_subvolumes(dsk: da.Array, binsize: int) -> da.Array:

@@ -48,8 +48,10 @@ from acryo.pipe._classes import ImageProvider, ImageConverter
 from acryo.tilt import NoWedge
 
 if TYPE_CHECKING:
+    from pathlib import Path
     from typing_extensions import Self
     from acryo.alignment._base import MaskType
+    from acryo.loader._extracted import ExtractedSubvolumeLoader
 
 _R = TypeVar("_R")
 
@@ -608,9 +610,93 @@ class LoaderBase(ABC):
             ),
         )
 
-    def extract_subtomograms(self, save_path) -> LoaderBase:
-        """Create a new loader that directly loads extracted subtomograms."""
-        raise NotImplementedError("Not implemented for this loader type.")
+    def extract_subtomograms(
+        self,
+        save_path: str | Path,
+        chunksize: int = 1,
+        apply_prefilter: bool = False,
+        pre_transform: bool = False,
+    ) -> ExtractedSubvolumeLoader:
+        """Extract subtomograms as npy files for fast loading.
+
+        Parameters
+        ----------
+        save_path : str | Path
+            The directory where the extracted subtomograms will be saved as npy files.
+        chunksize : int, default 1
+            The chunk size for the dask array.
+        apply_prefilter : bool, default False
+            Whether to pre-apply a spline filter to the subtomograms before saving. If
+            the subtomograms will be reused multiple times, applying the prefilter can
+            save computation time.
+        pre_transform : bool, default False
+            If true, subtomograms are cropped at integer pixels without rotation, so
+            that no interpolation is applied on extraction. The sub-pixel shifts and
+            rotations of the molecules are kept as the "pre-transform" and applied on
+            loading, together with the alignment results. This avoids the excessive
+            smoothing caused by interpolating twice, at the cost of larger files. Only
+            supported by ``SubtomogramLoader`` and ``BackProjectionLoader``.
+
+        Returns
+        -------
+        ExtractedSubvolumeLoader
+            A loader for the extracted subtomograms.
+        """
+        from acryo.loader._extracted import (
+            ArrayStoreInterface,
+            ExtractedSubvolumeLoader,
+            SUBVOLUME_INDEX,
+        )
+
+        num_mole = self.molecules.count()
+        # spline prefilter is not needed for order <= 1
+        is_array_prefiltered = apply_prefilter and self.order > 1
+        prefilter_order = self.order if is_array_prefiltered else -1
+        output_shape = self._get_output_shape(None)
+        if pre_transform:
+            stack, pre_transform_matrices = self._construct_untransformed(output_shape)
+        else:
+            stack = self.construct_dask(output_shape=output_shape)
+            pre_transform_matrices = None
+        store_target = ArrayStoreInterface(save_path)
+        map_subvolumes(
+            stack,
+            store_target.save,
+            var_kwarg={"i": np.arange(num_mole)},
+            prefilter_order=prefilter_order,
+        ).compute()
+        dsk_round = store_target.to_dask(
+            num=num_mole,
+            shape=stack.shape[1:],
+            chunksize=chunksize,
+        )
+        index = pl.arange(num_mole).alias(SUBVOLUME_INDEX)
+        # `ExtractedSubvolumeLoader` resamples the subvolumes using the molecules
+        # relative to these extracted ones, not the "align-d*" features. They are kept
+        # as is.
+        return ExtractedSubvolumeLoader(
+            dsk_round,
+            molecules=self.molecules.with_features(index),
+            order=self.order,
+            scale=self.scale,
+            tilt_model=self._default_align_kwargs().get("tilt"),
+            is_array_prefiltered=is_array_prefiltered,
+            pre_transform=pre_transform_matrices,
+            output_shape=output_shape,
+        )
+
+    def _construct_untransformed(
+        self, output_shape: tuple[pixel, pixel, pixel]
+    ) -> tuple[da.Array, NDArray[np.float32]]:
+        """Construct the subvolumes for ``extract_subtomograms(pre_transform=True)``.
+
+        Returns the stack of the subvolumes around the molecules, which are not
+        rotated, and the (N, 4, 4) affine matrices that map the output coordinates to
+        the coordinates of each subvolume.
+        """
+        raise NotImplementedError(
+            f"pre_transform is not supported for {type(self).__name__}."
+        )
 
     def score(
         self,

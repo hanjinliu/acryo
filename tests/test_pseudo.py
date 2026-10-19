@@ -6,6 +6,7 @@ from scipy.spatial.transform import Rotation
 
 from acryo import Molecules, SubtomogramLoader, BackProjectionLoader, BatchLoader
 from acryo.backend import Backend
+from acryo.loader import ExtractedSubvolumeLoader
 from acryo.projection import (
     LocalAlignment,
     LocalShifts2D,
@@ -1128,6 +1129,60 @@ def test_batch_loader_image_id(blob_tilt_series):
     nested.add_loader(batch).add_loader(BatchLoader().add_loader(loader0))
     assert len(nested.loaders) == 3
     assert nested.molecules.count() == 13
+
+
+@pytest.mark.parametrize("apply_prefilter", [False, True])
+@pytest.mark.parametrize("pre_transform", [False, True])
+def test_extract_subtomograms(tmp_path, pre_transform, apply_prefilter):
+    # blobs are at the local (0, 0, 2) nm position of the molecules
+    rot = Rotation.random(len(BLOBS), random_state=2)
+    offset = np.array([0.0, 0.0, 2.0])
+    ts = _make_tilt_series(tmp_path / "rotated.mrc", BLOBS + rot.apply(offset))
+    mole = Molecules(BLOBS + CENTER, rot)
+    loader = _loader(ts, mole, output_shape=(11, 12, 15))
+    extracted = loader.extract_subtomograms(
+        tmp_path / "ext", apply_prefilter=apply_prefilter, pre_transform=pre_transform
+    )
+    assert isinstance(extracted, ExtractedSubvolumeLoader)
+    assert extracted.tilt_model is loader.tilt_model
+    assert extracted.output_shape == loader.output_shape
+    assert extracted.scale == loader.scale
+    # the cubes are cropped by the same matrices on loading
+    assert_allclose(extracted.asnumpy(), loader.asnumpy(), rtol=1e-4, atol=1e-4)
+
+    # subvolumes are resampled at the moved molecules
+    moved = extracted.molecules.translate_internal([0.0, 0.0, 1.0])
+    for subtomo in extracted.replace(molecules=moved).asnumpy():
+        assert_allclose(_center_of_mass(subtomo), [5, 5.5, 9], atol=0.2)
+
+    empty = loader.replace(molecules=Molecules.empty()).extract_subtomograms(
+        tmp_path / "empty", pre_transform=pre_transform
+    )
+    assert empty.asnumpy().shape == (0, 11, 12, 15)
+
+
+def test_extract_subtomograms_in_batch_loader(blob_tilt_series, tmp_path):
+    # the subtomograms of each loader in a batch loader are extracted
+    rng = np.random.default_rng(0)
+    mole = Molecules(BLOBS + CENTER, Rotation.random(len(BLOBS), random_state=11))
+    tomo = rng.normal(size=(40, 120, 140)).astype(np.float32)
+    batch = BatchLoader.from_loaders(
+        [
+            _loader(blob_tilt_series, mole[:3]),
+            _loader(blob_tilt_series, mole[3:], tomo_hand=-1),
+            SubtomogramLoader(tomo, mole, scale=IMAGE_SCALE),
+        ],
+        scale=IMAGE_SCALE,
+        output_shape=(13, 13, 13),
+    )
+    for img_id, sub in batch.loaders.iter_loaders():
+        extracted = sub.extract_subtomograms(
+            tmp_path / f"image-{img_id}", chunksize=2, apply_prefilter=True
+        )
+        assert extracted.tilt_model is batch.tilt_models[img_id]
+        assert_allclose(extracted.asnumpy(), sub.asnumpy(), rtol=1e-4, atol=1e-4)
+    with pytest.raises(NotImplementedError):
+        batch.extract_subtomograms(tmp_path / "batch")
 
 
 @pytest.fixture
