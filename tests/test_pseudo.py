@@ -392,6 +392,19 @@ def test_reconstruct_tomogram(blob_tilt_series, scale):
         assert_allclose(_local_center_of_mass(tomo, pos), pos, atol=0.15)
 
 
+@pytest.mark.parametrize(
+    "tilt_axis_angle, yx_shape",
+    [(85.0, IMAGE_SHAPE[::-1]), (-95.0, IMAGE_SHAPE[::-1]), (5.0, IMAGE_SHAPE)],
+)
+def test_reconstruct_tomogram_image_shape(blob_tilt_series, tilt_axis_angle, yx_shape):
+    ts = blob_tilt_series.replace(tilt_axis_angle=tilt_axis_angle)
+    loader = _loader(ts, Molecules(BLOBS + CENTER))
+    tomo = loader.reconstruct_tomogram((10, -1, -1), patch_size=64)
+    assert tomo.shape == (10,) + yx_shape
+    tomo = loader.reconstruct_tomogram((10, 20, -1), patch_size=64)
+    assert tomo.shape == (10, 20, yx_shape[1])
+
+
 def test_reconstruct_tomogram_invalid_input(blob_tilt_series):
     loader = _loader(blob_tilt_series, Molecules(BLOBS + CENTER))
     with pytest.raises(ValueError):
