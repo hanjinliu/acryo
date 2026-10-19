@@ -585,6 +585,61 @@ def test_refine_with_multiple_references(tmp_path):
     assert np.abs(error).max() < 0.1
 
 
+@pytest.mark.parametrize("grid_shape", [(1, 1), (2, 2)])
+def test_refine_rotation(tmp_path, grid_shape):
+    centers, rot = _random_particles(30, seed=10)
+    ts = _make_tilt_series(tmp_path / "ts.mrc", _particle_points(centers, rot))
+    mole = Molecules(centers + CENTER, rot)
+    rng = np.random.default_rng(11)
+    # rotations on the grid of the search, up to ~1.3 nm at the edge of the particles
+    rotations = rng.integers(-2, 3, size=ts.ntilts).astype(np.float64)
+    initial = _perturbed(ts, 1.0).replace(
+        tilt_axis_angle=ts.tilt_axis_angle + rotations
+    )
+    loader = _loader(initial, mole)
+    refined = loader.refine_tilt_series(
+        [(mole, _particle_template(0.5, 16))],
+        rotation=(3.0, 1.0),
+        grid_shape=grid_shape,
+    )
+    assert_allclose(refined.tilt_series.tilt_axis_angle, ts.tilt_axis_angle)
+    true_pos = ts.project_points(centers)
+    error = np.linalg.norm(
+        refined.tilt_series.project_points(centers) - true_pos, axis=-1
+    )
+    assert error.mean() < 0.05  # nm
+
+    # the rotation is not refined by default, and cannot be refined by uniform shifts
+    # (bilinear local shifts can approximate the rotation)
+    refined = loader.refine_tilt_series(
+        [(mole, _particle_template(0.5, 16))], grid_shape=grid_shape
+    )
+    assert_allclose(refined.tilt_series.tilt_axis_angle, initial.tilt_axis_angle)
+    if grid_shape == (1, 1):
+        error = np.linalg.norm(
+            refined.tilt_series.project_points(centers) - true_pos, axis=-1
+        )
+        assert error.mean() > 0.2
+
+
+def test_rotation_candidates():
+    from acryo.loader._tilt_refine import _rotation_candidates
+
+    assert_allclose(_rotation_candidates((0.0, 0.0)), [0.0])
+    assert_allclose(_rotation_candidates((2.0, 0.0)), [0.0])
+    assert_allclose(_rotation_candidates((0.5, 1.0)), [0.0])
+    assert_allclose(_rotation_candidates((2.5, 1.0)), [0, -1, 1, -2, 2])
+    assert_allclose(
+        _rotation_candidates((0.3, 0.1)), [0, -0.1, 0.1, -0.2, 0.2, -0.3, 0.3]
+    )
+    with pytest.raises(ValueError):
+        _rotation_candidates((-1.0, 0.5))
+    with pytest.raises(ValueError):
+        _rotation_candidates((1.0, -0.5))
+    with pytest.raises(ValueError):
+        _rotation_candidates((1.0,))  # type: ignore
+
+
 def test_refined_loader(tmp_path):
     centers, rot = _random_particles(20, seed=6)
     ts = _make_tilt_series(tmp_path / "ts.mrc", _particle_points(centers, rot))
@@ -645,6 +700,10 @@ def test_refine_invalid_input(blob_tilt_series):
     with pytest.raises(ValueError):
         loader.refine_tilt_series(
             [(Molecules(BLOBS + CENTER), template)], grid_shape=(0, 2)
+        )
+    with pytest.raises(ValueError):
+        loader.refine_tilt_series(
+            [(Molecules(BLOBS + CENTER), template)], rotation=(-1.0, 0.5)
         )
 
 

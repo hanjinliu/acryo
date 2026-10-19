@@ -13,7 +13,7 @@ from scipy import fft as sfft
 from scipy import ndimage as ndi
 from scipy import optimize
 
-from acryo._types import nm
+from acryo._types import degree, nm
 from acryo.projection import LocalShifts2D, TiltSeries, centered_patches_rfft
 from acryo.projection._projector import VolumeProjector, _face_average
 
@@ -32,6 +32,7 @@ def refine_tilt_series(
     particle_sets: Sequence[ParticleSet],
     scale: nm,
     max_shift: nm,
+    rotation: tuple[degree, degree] = (0.0, 0.0),
     grid_shape: tuple[int, int] = (1, 1),
     smoothness: float = 0.01,
     niter: int = 100,
@@ -42,6 +43,8 @@ def refine_tilt_series(
     For each particle and tilt, the projection of the template is compared with the
     tilt image around the projected position by normalized cross correlation (NCC).
     The shift of each tilt image is the peak of the NCC maps summed over particles.
+    If ``rotation`` is given, the NCC maps are computed for each candidate of the
+    tilt axis angle, and the angle with the highest peak is chosen for each tilt.
     If ``grid_shape`` is larger than ``(1, 1)``, the shifts are modeled as a smooth
     field over each tilt image, interpolated from a grid of control points, and the
     control points are optimized to maximize the NCC with a smoothness prior.
@@ -60,6 +63,10 @@ def refine_tilt_series(
         Pixel size of the templates in nm.
     max_shift : float
         Maximum shift of the tilt images in nm.
+    rotation : (float, float), default is (0.0, 0.0)
+        (max, step) of the rotation of the tilt images in degrees. The tilt axis
+        angle of each tilt is searched from ``-max`` to ``max`` by ``step`` around the
+        current one. No rotation is searched if ``max`` or ``step`` is 0.
     grid_shape : (int, int), default is (1, 1)
         Number of control points of the local shifts along y and x.
     smoothness : float, default is 0.01
@@ -74,9 +81,9 @@ def refine_tilt_series(
     Returns
     -------
     TiltSeries
-        A tilt series with refined ``sample_translations`` (and ``local_shifts_2d``
-        if ``grid_shape`` is larger than ``(1, 1)``, whose base is the local shifts of
-        the input).
+        A tilt series with refined ``sample_translations`` (``tilt_axis_angle`` if
+        ``rotation`` is given, and ``local_shifts_2d`` if ``grid_shape`` is larger
+        than ``(1, 1)``, whose base is the local shifts of the input).
     """
     if len(particle_sets) == 0 or all(len(ps.points) == 0 for ps in particle_sets):
         raise ValueError("No particle is given.")
@@ -84,6 +91,7 @@ def refine_tilt_series(
         raise ValueError(f"'grid_shape' must be positive, got {grid_shape!r}.")
     if tilt_series.scale is None:
         raise ValueError("The pixel size of the tilt series is not set.")
+    angles = _rotation_candidates(rotation)
     input_spacing = tilt_series.scale
     max_shift_px = math.ceil(max_shift / scale)
     cubes = [_centered_cube(ps.template) for ps in particle_sets]
@@ -94,13 +102,19 @@ def refine_tilt_series(
     spacing = input_spacing * native / box  # true pixel spacing of the patches
     radius = math.ceil(max_shift / spacing)
 
-    # rotations from the detector to the tomogram, as used in reconstruction
-    rot_detector = tilt_series.detector2tomo
     image_center = np.array(images.shape[1:]) // 2
+    # the templates without the background, which is zero after padding
+    projectors = [VolumeProjector(cube - _face_average(cube)) for cube in cubes]
 
-    def _batch(ps: ParticleSet, projector: VolumeProjector, sl: slice):
+    def _batch(
+        ts: TiltSeries,
+        rot_detector: NDArray[np.float64],
+        ps: ParticleSet,
+        projector: VolumeProjector,
+        sl: slice,
+    ):
         # (b, T, 2) projected positions in nm, including the local shifts
-        projected = tilt_series.project_points(ps.points[sl])
+        projected = ts.project_points(ps.points[sl])
         maps = _correlation_maps(
             images,
             projected / input_spacing + image_center,
@@ -113,17 +127,47 @@ def refine_tilt_series(
         )
         return maps, projected
 
-    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        futures = []
-        for ps, cube in zip(particle_sets, cubes):
-            # the template without the background, which is zero after padding
-            projector = VolumeProjector(cube - _face_average(cube))
-            for start in range(0, len(ps.points), batch_size):
-                sl = slice(start, start + batch_size)
-                futures.append(executor.submit(_batch, ps, projector, sl))
+    def _all_maps(executor: ThreadPoolExecutor, ts: TiltSeries):
+        # rotations from the detector to the tomogram, as used in reconstruction
+        rot_detector = ts.detector2tomo
+        futures = [
+            executor.submit(
+                _batch,
+                ts,
+                rot_detector,
+                ps,
+                projector,
+                slice(start, start + batch_size),
+            )
+            for ps, projector in zip(particle_sets, projectors)
+            for start in range(0, len(ps.points), batch_size)
+        ]
         results = [future.result() for future in futures]
-    maps = np.concatenate([r[0] for r in results])  # (N, T, W, W)
-    positions = np.concatenate([r[1] for r in results])  # (N, T, 2), in nm
+        maps = np.concatenate([r[0] for r in results])  # (N, T, W, W)
+        positions = np.concatenate([r[1] for r in results])  # (N, T, 2), in nm
+        return maps, positions
+
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+        maps, positions = _all_maps(executor, tilt_series)  # angles[0] is 0
+        # For each tilt, keep the maps of the tilt axis angle with the highest peak
+        # of the NCC summed over particles.
+        best_score = maps.sum(axis=0).max(axis=(-2, -1))  # (T,)
+        best_angle = np.zeros(tilt_series.ntilts)
+        for angle in angles[1:]:
+            rotated = tilt_series.replace(
+                tilt_axis_angle=tilt_series.tilt_axis_angle + angle
+            )
+            maps_a, positions_a = _all_maps(executor, rotated)
+            score = maps_a.sum(axis=0).max(axis=(-2, -1))
+            better = score > best_score
+            maps[:, better] = maps_a[:, better]
+            positions[:, better] = positions_a[:, better]
+            best_score[better] = score[better]
+            best_angle[better] = angle
+    if np.any(best_angle != 0):
+        tilt_series = tilt_series.replace(
+            tilt_axis_angle=tilt_series.tilt_axis_angle + best_angle
+        )
     shifts = _subpixel_peak(maps.sum(axis=0))  # (T, 2), in pixel
 
     if tuple(grid_shape) == (1, 1):
@@ -149,6 +193,20 @@ def refine_tilt_series(
             base=tilt_series.local_shifts_2d,
         ),
     )
+
+
+def _rotation_candidates(rotation: tuple[degree, degree]) -> NDArray[np.float64]:
+    """Candidate rotation angles in degrees from (max, step), the smallest first."""
+    if len(rotation) != 2:
+        raise ValueError(f"'rotation' must be (max, step), got {rotation!r}.")
+    max_rot, step = float(rotation[0]), float(rotation[1])
+    if max_rot < 0 or step < 0:
+        raise ValueError(f"'rotation' must be non-negative, got {rotation!r}.")
+    if step == 0:
+        return np.zeros(1)
+    n = int(max_rot / step + 1e-8)  # tolerate the rounding error such as 0.3 / 0.1
+    indices = np.arange(-n, n + 1)
+    return indices[np.argsort(np.abs(indices), kind="stable")] * step
 
 
 def _patch_geometry(min_size: int, ratio: float) -> tuple[int, int]:
