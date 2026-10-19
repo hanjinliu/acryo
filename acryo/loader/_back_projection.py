@@ -30,6 +30,7 @@ from acryo._dask import DaskArrayList
 from acryo.backend import Backend
 from acryo.loader._base import LoaderBase, Unset, _ShapeType, TemplateInputType
 from acryo.molecules import Molecules
+from acryo.ctf import CTFCorrection, PatchCTFCorrection
 from acryo.projection import (
     DirectFourierReconstructor,
     TiltImagePreprocessor,
@@ -43,8 +44,7 @@ from acryo.tilt import TiltSeriesModel, single_axis
 if TYPE_CHECKING:
     from typing_extensions import Self
 
-# Memory budget (bytes) of the tilt images being preprocessed in parallel. Each
-# thread needs about five times the size of the (padded) tilt image.
+# Memory budget (bytes) of the tilt images being preprocessed in parallel.
 _LOAD_MEMORY_BUDGET = 2e9
 # Only one tilt series is preprocessed at a time, so that the memory budget is kept
 # when many tilt series are loaded in parallel dask tasks.
@@ -61,8 +61,9 @@ class BackProjectionLoader(LoaderBase):
     transform), as in ``torch-reconstruct-tomogram``. A cube aligned to the tomogram
     axes is reconstructed around each molecule, and the subtomogram is cropped from
     the cube in the same way as ``SubtomogramLoader``. Subtomograms are reconstructed
-    lazily in dask tasks. CTF can be corrected in preprocessing (see ``preprocess``).
-    Reading the tilt images requires ``mrcfile``.
+    lazily in dask tasks. The CTF of the tilt images is corrected in preprocessing if
+    the tilt series has the CTF parameters (see ``preprocess``). Reading the tilt
+    images requires ``mrcfile``.
 
     Parameters
     ----------
@@ -104,9 +105,14 @@ class BackProjectionLoader(LoaderBase):
     preprocess : bool or TiltImagePreprocessor, default is True
         Preprocessing of the tilt images. If true, the tilt images are preprocessed by
         the default ``TiltImagePreprocessor()``. Give a ``TiltImagePreprocessor`` to
-        change the parameters or to add filters such as CTF correction (see
-        ``TiltImagePreprocessor.with_ctf``). If false, the tilt images are not
-        preprocessed.
+        change the parameters or to add filters (see
+        ``TiltImagePreprocessor.with_filters``). If the tilt series has the CTF
+        parameters (``tilt_series.ctf``, which is read by ``TiltSeries.from_*`` by
+        default), the CTF correction of each patch (``tilt_series.ctf_correction()``,
+        whose defocus gradient is of the standard handedness) is added to the
+        filters, unless the preprocessor already has a CTF correction
+        (``acryo.ctf.CTFCorrection`` or ``acryo.ctf.PatchCTFCorrection``). If false, the tilt
+        images are not preprocessed (and the CTF is not corrected).
     batch_size : int, optional
         Number of subtomograms reconstructed in one dask task. Default is 1.
     tomo_hand : int, default is 1
@@ -210,8 +216,8 @@ class BackProjectionLoader(LoaderBase):
 
     @property
     def preprocessor(self) -> TiltImagePreprocessor | None:
-        """Return the preprocessor of the tilt images."""
-        return self._images.preprocessor
+        """Return the preprocessor of the tilt images, including the CTF correction."""
+        return self._images.effective_preprocessor()
 
     @property
     def molecules(self) -> Molecules:
@@ -336,7 +342,7 @@ class BackProjectionLoader(LoaderBase):
         if _same_tilt_images(self.tilt_series, tilt_series):
             out._images = self._images.with_tilt_series(tilt_series)
         else:
-            out._images = _TiltSeriesImages(tilt_series, self.preprocessor)
+            out._images = _TiltSeriesImages(tilt_series, self._images.preprocessor)
         return out
 
     def exclude_tilts(self, indices: SupportsIndex | Iterable[SupportsIndex]) -> Self:
@@ -782,6 +788,20 @@ class _TiltSeriesImages:
         sel = self.selection
         return binsize, None if sel is None else sel.tobytes()
 
+    def effective_preprocessor(self) -> TiltImagePreprocessor | None:
+        """The preprocessor with the CTF correction of the tilt series, if any."""
+        preprocessor = self.preprocessor
+        if (
+            preprocessor is None
+            or self.tilt_series.ctf is None
+            or any(
+                isinstance(f, (CTFCorrection, PatchCTFCorrection))
+                for f in preprocessor.filters
+            )
+        ):
+            return preprocessor
+        return preprocessor.with_filters(self.tilt_series.ctf_correction())
+
     @property
     def scale(self) -> nm:
         """Pixel size of the raw tilt images in nm."""
@@ -879,12 +899,11 @@ class _TiltSeriesImages:
         )
         ntilts = tilt_series.ntilts
         out: NDArray[np.float32] | None = None
+        preprocessor = self.effective_preprocessor()
 
         def _process(t: int, image: NDArray[np.float32]):
-            if self.preprocessor is not None:
-                image = self.preprocessor(
-                    image, index=t, scale=self.scale, binsize=binsize
-                )
+            if preprocessor is not None:
+                image = preprocessor(image, index=t, scale=self.scale, binsize=binsize)
             else:
                 image = fourier_bin(image, binsize)
             return t, image
@@ -899,7 +918,7 @@ class _TiltSeriesImages:
 
         # The tilt images are read one by one, and processed in parallel. The number
         # of the images being processed is limited to save memory.
-        num_workers = _num_load_workers(source.image_shape, self.preprocessor)
+        num_workers = _num_load_workers(source.image_shape, preprocessor)
         with _LOAD_LOCK, ThreadPoolExecutor(num_workers) as executor:
             pending: set[Future] = set()
             for t, image in enumerate(source.iter_images()):
@@ -918,9 +937,13 @@ def _num_load_workers(
     image_shape: tuple[int, int], preprocessor: TiltImagePreprocessor | None
 ) -> int:
     """Number of threads to preprocess tilt images within the memory budget."""
-    pad = 0 if preprocessor is None else preprocessor.padding
-    image_bytes = (image_shape[0] + 2 * pad) * (image_shape[1] + 2 * pad) * 4
-    by_memory = int(_LOAD_MEMORY_BUDGET // (5 * image_bytes))
+    # each thread has a tilt image and the workspace to preprocess it
+    image_bytes = image_shape[0] * image_shape[1] * 4
+    if preprocessor is None:
+        thread_bytes = 5 * image_bytes  # the image and its Fourier binning
+    else:
+        thread_bytes = image_bytes + preprocessor._workspace_nbytes(image_shape)
+    by_memory = int(_LOAD_MEMORY_BUDGET // thread_bytes)
     return max(min(by_memory, os.cpu_count() or 1), 1)
 
 

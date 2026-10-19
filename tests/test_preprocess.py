@@ -5,9 +5,16 @@ from numpy.testing import assert_allclose
 import pytest
 from scipy import ndimage as ndi
 
-from acryo.ctf import CTFModel
-from acryo.projection import CTFCorrection, TiltImagePreprocessor, fourier_bin
-from acryo.projection._preprocess import _bandpass, _soft_rectangle, _subtract_plane
+from acryo.ctf import CTFCorrection, CTFModel
+from acryo.projection import TiltImagePreprocessor, fourier_bin
+from acryo.projection._preprocess import (
+    _axis_layout,
+    _bandpass,
+    _fft_size,
+    _reflect_indices,
+    _reflect_runs,
+    _subtract_plane,
+)
 
 
 def _image(shape, seed=0) -> np.ndarray:
@@ -26,8 +33,15 @@ def test_subtract_plane():
     assert_allclose(_subtract_plane(image), expected, atol=1e-5)
 
 
+def _taper(size: int, pad: int) -> np.ndarray:
+    """1 on the image, and cosine falloff over the padding of the width ``pad``."""
+    dist = np.maximum(np.maximum(pad - np.arange(size + 2 * pad), 0), 0)
+    dist = np.maximum(dist, np.arange(size + 2 * pad) - (size + pad - 1))
+    return np.cos(np.pi / 2 * np.minimum(dist / max(pad, 1), 1.0))
+
+
 def _reference_preprocess(image: np.ndarray, pre: TiltImagePreprocessor) -> np.ndarray:
-    """Preprocessing written step by step in numpy (float64)."""
+    """Preprocessing of the whole image written step by step in numpy (float64)."""
     image = image.astype(np.float64)
     h, w = image.shape
     if pre.subtract_background:
@@ -35,13 +49,21 @@ def _reference_preprocess(image: np.ndarray, pre: TiltImagePreprocessor) -> np.n
         design = np.stack([y.ravel(), x.ravel(), np.ones(h * w)], axis=1)
         coef = np.linalg.lstsq(design, image.ravel(), rcond=None)[0]
         image = image - (design @ coef).reshape(h, w)
-    pad = max(0, min(pre.padding, h - 1, w - 1))
-    padded = np.pad(image, pad, mode="reflect") * _soft_rectangle((h, w), pad)
-    ft = np.fft.rfft2(padded) * _bandpass(padded.shape, pre.low, pre.high, pre.falloff)
-    out = np.fft.irfft2(ft, s=padded.shape)[pad : pad + h, pad : pad + w]
+    pad_y, pad_x = (max(0, min(pre.padding, size - 1)) for size in image.shape)
+    padded = np.pad(image, ((pad_y, pad_y), (pad_x, pad_x)), mode="reflect")
+    padded *= np.outer(_taper(h, pad_y), _taper(w, pad_x))
+    # zero-padded to the size for FFT
+    shape = tuple(_fft_size(size, 2) for size in padded.shape)
+    band = _bandpass(shape, pre.low, pre.high, pre.falloff).copy()
+    if pre.low <= 0:
+        band[0, 0] = 1.0  # the mean is subtracted later
+    ft = np.fft.rfft2(padded, s=shape) * band
+    out = np.fft.irfft2(ft, s=shape)[pad_y : pad_y + h, pad_x : pad_x + w]
     if pre.normalize:
         crop = out[int(0.375 * h) : int(0.625 * h), int(0.375 * w) : int(0.625 * w)]
         out = (out - crop.mean()) / crop.std()
+    else:
+        out = out - out.mean()
     return out
 
 
@@ -58,35 +80,110 @@ def _reference_preprocess(image: np.ndarray, pre: TiltImagePreprocessor) -> np.n
 )
 def test_preprocess(shape, kwargs):
     image = _image(shape)
-    preprocessor = TiltImagePreprocessor(**kwargs)
+    preprocessor = TiltImagePreprocessor(patch_grid=(1, 1), **kwargs)
     ref = _reference_preprocess(image, preprocessor)
     assert_allclose(preprocessor(image), ref, atol=1e-4)
 
 
-@pytest.mark.parametrize("shape", [(30, 40), (31, 43)])
-@pytest.mark.parametrize("pad", [0, 5])
-def test_soft_rectangle(shape, pad):
-    mask = _soft_rectangle(shape, pad)
-    assert mask.shape == (shape[0] + 2 * pad, shape[1] + 2 * pad)
-    # symmetric around the center (size // 2) of the padded image
-    cy, cx = np.array(mask.shape) // 2
-    ny = min(cy, mask.shape[0] - 1 - cy)
-    nx = min(cx, mask.shape[1] - 1 - cx)
-    sub = mask[cy - ny : cy + ny + 1, cx - nx : cx + nx + 1]
-    assert_allclose(sub, sub[::-1, ::-1])
-    # 1 strictly within half the size from the center, cosine edge of the width pad
-    for axis, size in enumerate(shape):
-        line = mask[:, cx] if axis == 0 else mask[cy, :]
-        coords = np.arange(line.size) - line.size // 2
-        inside = np.abs(coords) < size / 2
-        assert_allclose(line[inside], 1.0)
-        dist = np.abs(coords) - np.abs(coords[inside]).max()
-        edge = ~inside & (dist <= pad)
-        assert_allclose(line[edge], np.cos(np.pi / 2 * dist[edge] / pad), atol=1e-6)
-        assert_allclose(line[dist > pad], 0.0)
-    if shape[0] % 2 == 1 and shape[1] % 2 == 1:
-        # odd-sized images are exactly the region of the value 1
-        assert_allclose(mask[pad : pad + shape[0], pad : pad + shape[1]], 1.0)
+def _smooth_image(shape, seed=0) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    gradient = np.linspace(0, 3, shape[1])[np.newaxis, :]
+    return (ndi.gaussian_filter(rng.normal(size=shape), 1.5) + gradient).astype(
+        np.float32
+    )
+
+
+@pytest.mark.parametrize("patch_grid", [(3, 3), (2, 4), (4, 1)])
+@pytest.mark.parametrize("binsize", [1, 2, 3])
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {},
+        {"low": 0.02, "normalize": False},
+        {"overlap": 0, "subtract_background": False},
+    ],
+)
+def test_patches_same_as_whole_image(patch_grid, binsize, kwargs):
+    image = _smooth_image((260, 300))
+    # band-limited below the Nyquist frequency of the binned image, otherwise the
+    # Fourier binning cuts the frequencies sharply on the grids of different sizes
+    high = min(0.3, 0.5 / binsize - 0.05)
+    whole = TiltImagePreprocessor(
+        patch_grid=(1, 1), padding=32, high=high, falloff=0.04, **kwargs
+    )
+    patched = whole.replace(patch_grid=patch_grid)
+    ref = whole(image, binsize=binsize)
+    out = patched(image, binsize=binsize)
+    assert out.shape == ref.shape
+    assert out.dtype == np.float32
+    assert_allclose(out, ref, atol=0.02 * ref.std())
+
+
+@pytest.mark.parametrize("shape", [(260, 300), (257, 301)])
+@pytest.mark.parametrize("binsize", [2, 3])
+def test_binning_same_as_fourier_bin(shape, binsize):
+    # band-limited below the binned Nyquist frequency
+    image = _smooth_image(shape)
+    preprocessor = TiltImagePreprocessor(high=0.1, falloff=0.05, normalize=False)
+    full = preprocessor(image)
+    out = preprocessor(image, binsize=binsize)
+    assert out.shape == fourier_bin(full, binsize).shape
+    # Binning of band-limited images is sampling of every `binsize` pixels from the
+    # same start as `fourier_bin` (but without its edge artifacts).
+    slices = []
+    for size, nout in zip(shape, out.shape):
+        cropped = size - size % (2 * binsize)
+        start = size // 2 - cropped // 2
+        slices.append(slice(start, start + nout * binsize, binsize))
+    ref = full[tuple(slices)]
+    assert_allclose(out, ref - ref.mean(), atol=0.005 * ref.std())
+
+
+@pytest.mark.parametrize("size", [5, 64, 255, 1000])
+@pytest.mark.parametrize("binsize", [1, 2, 3])
+@pytest.mark.parametrize("npatches", [1, 3, 4])
+@pytest.mark.parametrize("overlap, padding", [(64, 128), (0, 0), (10, 7)])
+def test_axis_layout(size, binsize, npatches, overlap, padding):
+    if size < 2 * binsize:
+        with pytest.raises(ValueError):
+            _axis_layout(size, binsize, npatches, overlap, padding)
+        return
+    layout = _axis_layout(size, binsize, npatches, overlap, padding)
+    cropped = size if binsize == 1 else size - size % (2 * binsize)
+    start = size // 2 - cropped // 2
+    assert layout.size_out == cropped // binsize
+    assert layout.fft_size % (2 * binsize) == 0
+    total = np.zeros(layout.size_out)
+    for patch in layout.patches:
+        assert patch.length <= layout.fft_size
+        # the output pixels are on the grid of the binned patch
+        assert patch.start + patch.offset * binsize == start + patch.out_start * binsize
+        total[patch.out_start : patch.out_stop] += patch.weight
+        n0, n1 = patch.blend
+        assert np.all(patch.weight[n0 : patch.weight.size - n1] == 1)
+        assert patch.out_start * binsize <= patch.center - start
+        assert patch.center - start <= patch.out_stop * binsize
+    # the weights are a partition of unity
+    assert_allclose(total, 1.0, rtol=1e-6)
+    assert layout.patches[0].out_start == 0
+    assert layout.patches[-1].out_stop == layout.size_out
+
+
+@pytest.mark.parametrize("size", [1, 2, 7, 30])
+def test_reflect_indices_and_runs(size):
+    image = np.arange(size * 3, dtype=np.float32).reshape(size, 3)
+    padded = np.pad(np.arange(size), 3 * size, mode="reflect")
+    for start in range(-2 * size, 2 * size):
+        for length in [1, size, 2 * size]:
+            idx = _reflect_indices(start, length, size)
+            assert_allclose(idx, padded[start + 3 * size : start + 3 * size + length])
+            runs = _reflect_runs(start, length, size)
+            if runs is None:
+                continue
+            out = np.full((length, 3), np.nan, dtype=np.float32)
+            for dst, src in runs:
+                out[dst] = image[src]
+            assert_allclose(out, image[idx])
 
 
 @pytest.mark.parametrize("shape", [(30, 40), (31, 43)])
@@ -156,9 +253,10 @@ def test_fourier_bin_band_limited(shape, binsize):
         fourier_bin(binned, 0)
 
 
-def test_filters_are_multiplied():
+@pytest.mark.parametrize("patch_grid", [(1, 1), (3, 3)])
+def test_filters_are_multiplied(patch_grid):
     image = _image((50, 60))
-    base = TiltImagePreprocessor(normalize=False, padding=8)
+    base = TiltImagePreprocessor(normalize=False, padding=8, patch_grid=patch_grid)
     calls = []
 
     def _double(freq_y, freq_x, index):
@@ -167,7 +265,12 @@ def test_filters_are_multiplied():
 
     out = base.with_filters(_double)(image, index=3, scale=0.5)
     assert_allclose(out, base(image) * 2, rtol=1e-5, atol=1e-5)
-    assert calls == [((66, 1), (1, 39), 3)]
+    # called once for each image
+    if patch_grid == (1, 1):
+        # padded to (66, 76), and to the sizes for FFT
+        assert calls == [((72, 1), (1, 41), 3)]
+    else:
+        assert len(calls) == 1
 
 
 def test_filter_frequency_unit():
@@ -177,8 +280,76 @@ def test_filter_frequency_unit():
         seen["max"] = (np.abs(freq_y).max(), np.abs(freq_x).max())
         return 1.0
 
-    TiltImagePreprocessor(padding=0).with_filters(_record)(_image((40, 40)), scale=0.25)
+    preprocessor = TiltImagePreprocessor(padding=0).with_filters(_record)
+    preprocessor(_image((40, 40)), scale=0.25)
     assert_allclose(seen["max"], [0.5 / 0.25, 0.5 / 0.25])  # Nyquist in 1/nm
+    # only the frequencies kept by binning
+    preprocessor(_image((40, 40)), scale=0.25, binsize=2)
+    assert_allclose(seen["max"], [0.5 / 0.5, 0.5 / 0.5])
+
+
+class _PositionRecorder:
+    """A position-dependent filter that scales each patch by a factor."""
+
+    position_dependent = True
+
+    def __init__(self, factor=lambda position: 1.0):
+        self.calls: list[tuple[int, tuple[float, float]]] = []
+        self.factor = factor
+
+    def __call__(self, freq_y, freq_x, index, position):
+        self.calls.append((index, position))
+        return self.factor(position)
+
+
+@pytest.mark.parametrize("binsize", [1, 2])
+def test_position_dependent_filter(binsize):
+    shape, scale = (90, 120), 0.5
+    recorder = _PositionRecorder()
+    preprocessor = TiltImagePreprocessor(patch_grid=(3, 4)).with_filters(recorder)
+    preprocessor(_image(shape), index=2, scale=scale, binsize=binsize)
+    assert [index for index, _ in recorder.calls] == [2] * 12
+    positions = np.array([position for _, position in recorder.calls])
+    # centers of the patches in nm from the center of the image
+    for axis, (size, npatches) in enumerate(zip(shape, (3, 4))):
+        coords = np.unique(np.round(positions[:, axis], 6))
+        expected = (np.arange(npatches) + 0.5) * size / npatches - size // 2
+        assert_allclose(coords, expected * scale, atol=binsize * scale)
+
+
+def test_position_dependent_filter_is_applied_to_each_patch():
+    image = _smooth_image((120, 150))
+    # (y, x) factors of each patch of the 2x3 grid
+    factors = {(0, 0): 1.0, (0, 1): 2.0, (0, 2): 3.0, (1, 0): -1.0, (1, 1): 0.5}
+
+    def _factor(position):
+        key = (int(position[0] > 0), int(np.round(position[1] / 50 + 1)))
+        return factors.get(key, 4.0)
+
+    plain = TiltImagePreprocessor(patch_grid=(2, 3), overlap=10, normalize=False)
+    scaled = plain.with_filters(_PositionRecorder(_factor))
+    out_plain, out_scaled = plain(image), scaled(image)
+    # the cores of the patches (without the overlaps) are scaled up to a constant
+    for iy, ys in enumerate([slice(0, 55), slice(65, 120)]):
+        for ix, xs in enumerate([slice(0, 45), slice(55, 95), slice(105, 150)]):
+            factor = factors.get((iy, ix), 4.0)
+            diff = out_scaled[ys, xs] - factor * out_plain[ys, xs]
+            assert diff.std() < 1e-4 * out_plain.std()
+
+
+@pytest.mark.parametrize("shape", [(2, 3), (5, 7), (17, 4)])
+@pytest.mark.parametrize("patch_grid", [(1, 1), (3, 3), (8, 8)])
+def test_small_images(shape, patch_grid):
+    image = _image(shape)
+    preprocessor = TiltImagePreprocessor(
+        patch_grid=patch_grid, normalize=False, high=1.0
+    )
+    out = preprocessor(image)
+    assert out.shape == shape
+    assert np.all(np.isfinite(out))
+    # the bandpass filter passes all the frequencies
+    ref = _subtract_plane(image)
+    assert_allclose(out, ref - ref.mean(), atol=1e-4)
 
 
 CTF = CTFModel.from_kv(300, spherical_aberration=2.7, defocus=-2.0)
@@ -189,9 +360,11 @@ def test_ctf_correction_values():
     flip = CTFCorrection(CTF)
     assert flip.models == (CTF,)
     ctf = CTF.simulate(freq)
+    # computed in float32
+    assert flip(freq, 0.0, index=5).dtype == np.float32
     assert_allclose(flip(freq, 0.0, index=5), np.sign(ctf))
     wiener = CTFCorrection(CTF, method="wiener", wiener_constant=0.2)
-    assert_allclose(wiener(0.0, freq, index=0), ctf / (ctf**2 + 0.2))
+    assert_allclose(wiener(0.0, freq, index=0), ctf / (ctf**2 + 0.2), atol=1e-4)
 
 
 def test_ctf_correction_per_tilt():
@@ -283,17 +456,16 @@ def test_invalid_preprocessor():
         TiltImagePreprocessor(falloff=-0.1)
     with pytest.raises(ValueError):
         TiltImagePreprocessor()(np.zeros((3, 4, 5)))
-
-
-@pytest.mark.parametrize("shape", [(2, 3), (5, 7), (64, 81), (100, 37)])
-@pytest.mark.parametrize("subtract_background", [False, True])
-def test_pad_reflect(shape, subtract_background):
-    from acryo.projection._preprocess import _pad_reflect
-
-    image = _image(shape)
-    for pad in sorted({0, 1, min(shape) - 1, min(4, min(shape) - 1)}):
-        ref = _subtract_plane(image) if subtract_background else image
-        ref = np.pad(ref, pad, mode="reflect")
-        out = _pad_reflect(image, pad, subtract_background)
-        assert out.dtype == np.float32
-        assert_allclose(out, ref, atol=1e-6)
+    with pytest.raises(ValueError):
+        TiltImagePreprocessor(overlap=-1)
+    with pytest.raises(ValueError):
+        TiltImagePreprocessor(patch_grid=0)
+    with pytest.raises(ValueError):
+        TiltImagePreprocessor(patch_grid=(1, 2, 3))  # type: ignore
+    with pytest.raises(ValueError):
+        TiltImagePreprocessor()(_image((10, 10)), binsize=0)
+    with pytest.raises(ValueError):
+        TiltImagePreprocessor()(_image((10, 10)), binsize=1.5)  # type: ignore
+    with pytest.raises(ValueError):
+        TiltImagePreprocessor()(_image((10, 10)), binsize=6)  # too small to bin
+    assert TiltImagePreprocessor(patch_grid=2).patch_grid == (2, 2)

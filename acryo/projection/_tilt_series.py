@@ -6,11 +6,13 @@ from pathlib import Path
 import json
 from typing import TYPE_CHECKING, Any, Sequence
 import warnings
+import polars as pl
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from acryo._types import nm
+from acryo.ctf import PatchCTFCorrection, TiltSeriesCTF, _ImodDefocus, _warn_ignored
 from acryo.projection._local_shifts import (
     AffineShifts2D,
     LocalAlignment,
@@ -77,6 +79,9 @@ class TiltSeries:
         default).
     scale : float, optional
         Pixel size of the tilt images in nm.
+    ctf : TiltSeriesCTF, optional
+        CTF parameters of each tilt. If given, the CTF of the tilt images is corrected
+        by :class:`BackProjectionLoader` (see :meth:`ctf_correction`).
     """
 
     tilt_angles: NDArray[np.float64]
@@ -90,6 +95,7 @@ class TiltSeries:
     image_path: Path | tuple[Path, ...] | None = None
     image_indices: NDArray[np.intp] | None = None
     scale: nm | None = None
+    ctf: TiltSeriesCTF | None = None
 
     def __post_init__(self):
         tilt_angles = _readonly(np.asarray(self.tilt_angles, dtype=np.float64))
@@ -139,6 +145,14 @@ class TiltSeries:
             if self.scale <= 0:
                 raise ValueError(f"'scale' must be positive, got {self.scale}.")
             _set(self, "scale", float(self.scale))
+        if self.ctf is not None:
+            if not isinstance(self.ctf, TiltSeriesCTF):
+                raise TypeError(f"'ctf' must be a TiltSeriesCTF, got {type(self.ctf)}.")
+            if self.ctf.ntilts != ntilts:
+                raise ValueError(
+                    f"'ctf' has the parameters of {self.ctf.ntilts} tilts, but the "
+                    f"tilt series has {ntilts} tilts."
+                )
 
     def __repr__(self) -> str:
         angles = self.tilt_angles
@@ -165,9 +179,9 @@ class TiltSeries:
     def select_tilts(self, indices: ArrayLike) -> Self:
         """Return the tilt series of the selected tilts.
 
-        The alignment, ``local_shifts_2d``, ``image_path`` and ``image_indices`` of the
-        selected tilts are kept, so the selected tilts are projected and read from the
-        same images as before.
+        The alignment, ``local_shifts_2d``, ``image_path``, ``image_indices`` and
+        ``ctf`` of the selected tilts are kept, so the selected tilts are projected and
+        read from the same images as before.
 
         Parameters
         ----------
@@ -202,6 +216,7 @@ class TiltSeries:
             ),
             image_path=image_path,
             image_indices=image_indices,
+            ctf=self.ctf.select_tilts(idx) if self.ctf is not None else None,
         )
 
     @property
@@ -270,6 +285,34 @@ class TiltSeries:
             projected = projected + self.local_shifts_2d.shifts(self, points, projected)
         return projected.reshape(batch_shape + projected.shape[1:])
 
+    def ctf_correction(self, hand: int = -1) -> PatchCTFCorrection:
+        """The CTF correction of the tilt images by phase flipping of each patch.
+
+        The returned filter can be added to :class:`TiltImagePreprocessor`. Each patch
+        of the tilt images is phase-flipped by the CTF at the center of the patch. The
+        defocus there is that of the plane z = 0 of the tomogram, which is the defocus
+        of ``ctf`` at the projection of the tomogram center, changed by the depth of
+        the plane in the microscope (by the tilt angle and the position). The local
+        shifts are not considered.
+
+        Parameters
+        ----------
+        hand : {1, -1}, default is -1
+            Handedness of the defocus gradient (see
+            :class:`acryo.ctf.PatchCTFCorrection`). -1 is the standard geometry, as
+            ``rlnTomoHand = -1`` of RELION, or IMOD without ``InvertTiltAngles``.
+        """
+        if self.ctf is None:
+            raise ValueError("'ctf' of the tilt series is not set.")
+        mtx = self.projection_matrices @ self.tomo2sample  # (T, 4, 4)
+        # The plane z = 0 of the tomogram is projected to the detector by `linear`
+        # (relative to the projection of the tomogram center), and its depth is
+        # `depth` @ (y, x).
+        linear = mtx[:, 1:3, 1:3]
+        depth = mtx[:, 0, 1:3]
+        gradient = np.linalg.solve(linear.transpose(0, 2, 1), depth[..., np.newaxis])
+        return PatchCTFCorrection(self.ctf, gradient[..., 0], mtx[:, 1:3, 3], hand=hand)
+
     @classmethod
     def from_etomo_directory(
         cls,
@@ -277,6 +320,7 @@ class TiltSeries:
         scale: nm,
         *,
         local_alignment: bool | str | Path = False,
+        ctf: bool | str | Path = True,
     ) -> TiltSeries:
         """Read the alignment of an IMOD etomo directory.
 
@@ -297,6 +341,17 @@ class TiltSeries:
             (or ``OutputLocalFile`` of align.com). A path to the file can also be
             given. As ``tilt`` of IMOD, the Z factors of the local alignments are used
             only if tilt.com has ``ZFACTORFILE``.
+        ctf : bool, str or Path, default is True
+            Whether to read the CTF parameters as ``ctf``, so that the CTF is
+            corrected by :class:`BackProjectionLoader`. The defocus of each view is
+            read from the defocus file of ctfplotter (``DefocusFile`` of
+            ctfcorrection.com or ctfplotter.com, or ``<dataset>.defocus``), and the
+            voltage, spherical aberration and amplitude contrast from
+            ctfcorrection.com or ctfplotter.com. A path to the defocus file can also
+            be given. If True and they are not found, a warning is issued and
+            ``ctf`` is not set. The handedness of the defocus gradient is not read
+            (see :meth:`ctf_correction`), and a warning is issued if
+            ``InvertTiltAngles`` is set.
         """
         import etomofiles
 
@@ -345,6 +400,15 @@ class TiltSeries:
         # transformed by the inverse of .xf
         if not np.allclose(affine, np.eye(2), rtol=0, atol=1e-7):
             local_shifts_2d = AffineShifts2D(affine, offsets, base=local_shifts_2d)
+        tilt_ctf = None
+        if ctf is not False:
+            tilt_ctf = _read_imod_ctf(
+                path,
+                ctf,
+                image_path=image_path,
+                indices=df["idx_tilt"].to_numpy(),
+                tilt_axis_angle=tilt_axis_angle,
+            )
         return cls(
             tilt_angles=df["tlt"].to_numpy(),
             tilt_axis_angle=tilt_axis_angle,
@@ -354,6 +418,7 @@ class TiltSeries:
             image_path=image_path,
             image_indices=df["idx_tilt"].to_numpy(),
             scale=scale,
+            ctf=tilt_ctf,
         )
 
     @classmethod
@@ -400,6 +465,7 @@ class TiltSeries:
         *,
         project_dir: str | Path | None = None,
         scale: nm | None = None,
+        ctf: bool = True,
     ) -> TiltSeries:
         """Read a tilt series of RELION 5.
 
@@ -430,11 +496,21 @@ class TiltSeries:
             Pixel size of the tilt images in nm. By default,
             ``rlnTomoTiltSeriesPixelSize`` of the global data block, or the pixel
             size in the header of the first tilt image.
+        ctf : bool, default is True
+            Whether to read the CTF parameters as ``ctf``, so that the CTF is
+            corrected by :class:`BackProjectionLoader`. The defocus of each tilt
+            (``rlnDefocusU``, ``rlnDefocusV`` and ``rlnDefocusAngle``) is read from
+            the tilt series, and ``rlnVoltage``, ``rlnSphericalAberration`` and
+            ``rlnAmplitudeContrast`` from the global data block. If they are not
+            found, a warning is issued and ``ctf`` is not set. The handedness of the
+            defocus gradient is not read (see :meth:`ctf_correction`), and a warning
+            is issued if ``rlnTomoHand`` is 1.
         """
         from starfile_rs import read_star
 
         path = Path(path)
         star = read_star(path)
+        series: dict[str, Any] | None = None
         if (block := star.get("global")) is not None and (
             "rlnTomoTiltSeriesStarFile" in block.columns
         ):
@@ -507,6 +583,7 @@ class TiltSeries:
             image_path=tuple(image_paths),
             image_indices=None if not any(image_indices) else image_indices,
             scale=scale,
+            ctf=_read_relion_ctf(df, series, path) if ctf else None,
         )
 
     @classmethod
@@ -524,6 +601,7 @@ class TiltSeries:
         sample2levelled = data.get("sample2levelled")
         levelled2tomo = data.get("levelled2tomo")
         local_shifts_2d = data.get("local_shifts_2d")
+        ctf = data.get("ctf")
         return cls(
             tilt_angles=np.array(data["tilt_angles"], dtype=np.float64),
             tilt_axis_angle=np.array(data["tilt_axis_angle"], dtype=np.float64),
@@ -547,6 +625,7 @@ class TiltSeries:
             image_path=image_path,
             image_indices=image_indices,
             scale=data["scale"],
+            ctf=TiltSeriesCTF.from_dict(ctf) if ctf is not None else None,
         )
 
     def dump_json(self) -> str:
@@ -579,6 +658,7 @@ class TiltSeries:
                 "image_path": image_path,
                 "image_indices": image_indices,
                 "scale": self.scale,
+                "ctf": self.ctf.to_dict() if self.ctf is not None else None,
             }
         )
 
@@ -722,6 +802,132 @@ def _read_imod_local_alignment(
     raise ValueError(
         f"{file} has the local alignments of {local.ntilts} views, but the tilt series "
         f"has {nviews} views ({len(indices)} views are not excluded)."
+    )
+
+
+_IMOD_CTF_OPTIONS = ("VOLTAGE", "SPHERICALABERRATION", "AMPLITUDECONTRAST")
+
+
+def _read_imod_ctf(
+    path: Path,
+    ctf: bool | str | Path,
+    *,
+    image_path: Path,
+    indices: NDArray[np.integer],
+    tilt_axis_angle: NDArray[np.float64],
+) -> TiltSeriesCTF | None:
+    """Read the CTF parameters of the selected views from an etomo directory.
+
+    None is returned with a warning if ``ctf`` is True and they are not found.
+    """
+    explicit = ctf is not True
+    plotter_com = _read_imod_com(path / "ctfplotter.com")
+    # ctfcorrection.com (ctfphaseflip) is the one used for the correction
+    params = {**plotter_com, **_read_imod_com(path / "ctfcorrection.com")}
+    if explicit:
+        file = Path(ctf)
+    elif names := params.get("DEFOCUSFILE"):
+        file = Path(names[0])
+    else:
+        file = Path(f"{image_path.stem}.defocus")
+    if not file.is_absolute():
+        file = path / file
+    missing = [key for key in _IMOD_CTF_OPTIONS if not params.get(key)]
+    if not file.exists() or missing:
+        if not file.exists():
+            msg = f"Defocus file {file} is not found"
+        else:
+            msg = (
+                f"{', '.join(missing)} not found in ctfcorrection.com or "
+                f"ctfplotter.com in {path}"
+            )
+        if explicit:
+            raise (ValueError if file.exists() else FileNotFoundError)(f"{msg}.")
+        warnings.warn(
+            f"{msg}, so the CTF parameters are not read. Run ctfplotter in etomo, "
+            "or give 'ctf=False' to suppress this warning.",
+            UserWarning,
+            stacklevel=3,
+        )
+        return None
+    defocus = _ImodDefocus.read(file)
+    if np.any(defocus.phase_shift != 0):
+        _warn_ignored(f"Phase shifts in {file} are not supported and ignored.")
+    defocus1, defocus2, angle = defocus.at_views(np.asarray(indices) + 1)
+    stack = plotter_com.get("INPUTSTACK")
+    if stack and stack[0].endswith(".ali"):
+        # astigmatism angles of the aligned stack, whose tilt axis is vertical
+        angle = angle + tilt_axis_angle
+    invert = params.get("INVERTTILTANGLES")
+    if invert is not None and (not invert or invert[0] != "0"):
+        _warn_ignored(_inverted_hand_message(f"InvertTiltAngles in {path}"))
+    return TiltSeriesCTF(
+        defocus_u=-defocus1 / 1000,  # nm (underfocus positive) -> μm
+        defocus_v=-defocus2 / 1000,
+        astigmatism_angle=angle,
+        voltage=float(params["VOLTAGE"][0]),
+        spherical_aberration=float(params["SPHERICALABERRATION"][0]),
+        amplitude_contrast=float(params["AMPLITUDECONTRAST"][0]),
+    )
+
+
+_RELION_DEFOCUS_COLUMNS = ("rlnDefocusU", "rlnDefocusV", "rlnDefocusAngle")
+_RELION_OPTICS_COLUMNS = (
+    "rlnVoltage",
+    "rlnSphericalAberration",
+    "rlnAmplitudeContrast",
+)
+
+
+def _read_relion_ctf(
+    df: pl.DataFrame,
+    series: dict[str, Any] | None,
+    path: Path,
+) -> TiltSeriesCTF | None:
+    """Read the CTF parameters from the tilt series and its row in the global block.
+
+    None is returned with a warning if they are not found.
+    """
+    if not all(c in df.columns for c in _RELION_DEFOCUS_COLUMNS):
+        msg = f"{', '.join(_RELION_DEFOCUS_COLUMNS)} are not found in {path}"
+    elif series is None or any(series.get(c) is None for c in _RELION_OPTICS_COLUMNS):
+        msg = (
+            f"{', '.join(_RELION_OPTICS_COLUMNS)} are not found in the global data "
+            f"block of {path}"
+        )
+    else:
+        msg = None
+    if msg is not None:
+        warnings.warn(
+            f"{msg}, so the CTF parameters are not read. Read the STAR file of the "
+            "tilt series after CTF estimation (such as tilt_series.star of a "
+            "CtfFind job), or give 'ctf=False' to suppress this warning.",
+            UserWarning,
+            stacklevel=3,
+        )
+        return None
+    assert series is not None
+    if "rlnPhaseShift" in df.columns and np.any(df["rlnPhaseShift"].to_numpy() != 0):
+        _warn_ignored(f"Phase shifts in {path} are not supported and ignored.")
+    if (hand := series.get("rlnTomoHand")) is not None and float(hand) > 0:
+        _warn_ignored(_inverted_hand_message(f"rlnTomoHand = {hand} in {path}"))
+    angst2um = 1e-4
+    return TiltSeriesCTF(
+        defocus_u=-df["rlnDefocusU"].to_numpy().astype(np.float64) * angst2um,
+        defocus_v=-df["rlnDefocusV"].to_numpy().astype(np.float64) * angst2um,
+        astigmatism_angle=df["rlnDefocusAngle"].to_numpy().astype(np.float64),
+        voltage=float(series["rlnVoltage"]),
+        spherical_aberration=float(series["rlnSphericalAberration"]),
+        amplitude_contrast=float(series["rlnAmplitudeContrast"]),
+    )
+
+
+def _inverted_hand_message(source: str) -> str:
+    return (
+        f"The defocus gradient is inverted by {source}, but the handedness is not "
+        "read. Give the CTF correction with hand=1 to BackProjectionLoader, such as "
+        "preprocess=TiltImagePreprocessor().with_filters(tilt_series.ctf_correction("
+        "hand=1))."
     )
 
 

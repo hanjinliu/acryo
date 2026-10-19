@@ -1,5 +1,7 @@
 """Tilt series, projection and back-projection of images."""
 
+# CTFCorrection is in acryo.ctf, and also exported here for compatibility
+from acryo.ctf import CTFCorrection
 from acryo.projection._insertion import CentralSliceInsertion
 from acryo.projection._local_shifts import (
     AffineShifts2D,
@@ -11,7 +13,6 @@ from acryo.projection._local_shifts import (
 from acryo.projection._patch import centered_patches_rfft, read_patch
 from acryo.projection._projector import VolumeProjector
 from acryo.projection._preprocess import (
-    CTFCorrection,
     TiltImageFilter,
     TiltImagePreprocessor,
     fourier_bin,
