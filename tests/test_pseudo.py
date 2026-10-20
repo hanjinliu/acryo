@@ -1,3 +1,4 @@
+import dask
 import numpy as np
 from numpy.testing import assert_allclose
 import polars as pl
@@ -769,6 +770,26 @@ def test_score_on_tilt(tmp_path):
     refined = initial.refine_tilt_series([(mole, template)])
     before = initial.score_on_tilt([template]).mean()
     assert refined.score_on_tilt([template]).mean() > before + 0.2
+
+
+def test_tilt_comparison_in_dask(blob_tilt_series):
+    from dask.callbacks import Callback
+
+    loader = _loader(blob_tilt_series, Molecules(BLOBS + CENTER))
+    template = _particle_template(0.5, 16)
+    with loader.cache_tilt_images():
+        expected = loader.score_on_tilt([template], batch_size=2)
+        refined = loader.refine_tilt_series([(loader.molecules, template)])
+        finished = []
+        with Callback(posttask=lambda key, *_: finished.append(key)):
+            with dask.config.set(scheduler="synchronous"):
+                score = loader.score_on_tilt([template], batch_size=2)
+                assert len(finished) == 3  # batches of 2, 2 and 1 molecules
+                again = loader.refine_tilt_series([(loader.molecules, template)])
+    assert_allclose(score, expected)
+    assert_allclose(
+        again.tilt_series.sample_translations, refined.tilt_series.sample_translations
+    )
 
 
 def test_score_on_tilt_input(blob_tilt_series):

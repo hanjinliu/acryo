@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 import math
-import os
 import threading
 from typing import Callable, Literal, NamedTuple, Sequence
 
+import dask
 import numpy as np
 from numpy.typing import NDArray
 from scipy import fft as sfft
@@ -277,43 +276,47 @@ def refine_tilt_series(
         )
         return maps, projected
 
-    def _all_maps(executor: ThreadPoolExecutor, ts: TiltSeries):
+    def _all_maps(ts: TiltSeries):
         # rotations from the detector to the tomogram, as used in reconstruction
         rot_detector = ts.detector2tomo
-        futures = [
-            executor.submit(
-                _batch,
-                ts,
-                rot_detector,
-                ps,
-                projector,
-                slice(start, start + batch_size),
-            )
+        # The arguments are bound by `partial`, so that dask does not traverse the
+        # tilt series (a dataclass) and the particle sets.
+        tasks = [
+            dask.delayed(
+                partial(
+                    _batch,
+                    ts,
+                    rot_detector,
+                    ps,
+                    projector,
+                    slice(start, start + batch_size),
+                ),
+                pure=False,
+            )()
             for ps, projector in zip(particle_sets, projectors)
             for start in range(0, len(ps.points), batch_size)
         ]
-        results = [future.result() for future in futures]
+        results = dask.compute(*tasks)
         maps = np.concatenate([r[0] for r in results])  # (N, T, W, W)
         positions = np.concatenate([r[1] for r in results])  # (N, T, 2), in nm
         return maps, positions
 
-    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        maps, positions = _all_maps(executor, tilt_series)  # angles[0] is 0
-        # For each tilt, keep the maps of the tilt axis angle with the highest peak
-        # of the NCC summed over particles.
-        best_score = maps.sum(axis=0).max(axis=(-2, -1))  # (T,)
-        best_angle = np.zeros(tilt_series.ntilts)
-        for angle in angles[1:]:
-            rotated = tilt_series.replace(
-                tilt_axis_angle=tilt_series.tilt_axis_angle + angle
-            )
-            maps_a, positions_a = _all_maps(executor, rotated)
-            score = maps_a.sum(axis=0).max(axis=(-2, -1))
-            better = score > best_score
-            maps[:, better] = maps_a[:, better]
-            positions[:, better] = positions_a[:, better]
-            best_score[better] = score[better]
-            best_angle[better] = angle
+    maps, positions = _all_maps(tilt_series)  # angles[0] is 0
+    # For each tilt, keep the maps of the tilt axis angle with the highest peak of
+    # the NCC summed over particles.
+    best_score = maps.sum(axis=0).max(axis=(-2, -1))  # (T,)
+    best_angle = np.zeros(tilt_series.ntilts)
+    for angle in angles[1:]:
+        rotated = tilt_series.replace(
+            tilt_axis_angle=tilt_series.tilt_axis_angle + angle
+        )
+        maps_a, positions_a = _all_maps(rotated)
+        score = maps_a.sum(axis=0).max(axis=(-2, -1))
+        better = score > best_score
+        maps[:, better] = maps_a[:, better]
+        positions[:, better] = positions_a[:, better]
+        best_score[better] = score[better]
+        best_angle[better] = angle
     if np.any(best_angle != 0):
         tilt_series = tilt_series.replace(
             tilt_axis_angle=tilt_series.tilt_axis_angle + best_angle
@@ -416,14 +419,14 @@ def score_on_tilt(
         for template, mask in templates
     ]
     npoints = points.shape[0]
-    out = np.zeros((len(scorers), npoints, tilt_series.ntilts), dtype=np.float32)
     if npoints == 0 or len(scorers) == 0:
-        return out
+        return np.zeros((len(scorers), npoints, tilt_series.ntilts), dtype=np.float32)
     image_center = np.array(images.shape[1:]) // 2
     # rotations from the detector to the tomogram, as used in reconstruction
     rot_detector = tilt_series.detector2tomo
 
-    def _batch(sl: slice) -> None:
+    def _batch(sl: slice) -> NDArray[np.float32]:
+        """Scores (n_templates, b, T) of a batch of particles."""
         # (b, T, 2) projected positions in nm, including the local shifts
         projected = tilt_series.project_points(points[sl])
         positions = projected / input_spacing + image_center
@@ -431,6 +434,7 @@ def score_on_tilt(
         # the templates of the same geometry share the patches and the CTF
         observed: dict[tuple[int, int], NDArray[np.complexfloating]] = {}
         transfers: dict[tuple[int, int], NDArray[np.float32] | None] = {}
+        scores = np.empty((len(scorers),) + projected.shape[:2], dtype=np.float32)
         for i, scorer in enumerate(scorers):
             key = (scorer.box, scorer.native)
             if key not in observed:
@@ -439,16 +443,14 @@ def score_on_tilt(
                     transfers[key] = None
                 else:
                     transfers[key] = ctf(points[sl], projected, *scorer.geometry)
-            out[i, sl] = scorer.score(observed[key], matrices, func, transfers[key])
+            scores[i] = scorer.score(observed[key], matrices, func, transfers[key])
+        return scores
 
-    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        futures = [
-            executor.submit(_batch, slice(start, start + batch_size))
-            for start in range(0, npoints, batch_size)
-        ]
-        for future in futures:
-            future.result()
-    return out
+    tasks = [
+        dask.delayed(_batch, pure=False)(slice(start, start + batch_size))
+        for start in range(0, npoints, batch_size)
+    ]
+    return np.concatenate(dask.compute(*tasks), axis=1)
 
 
 class _TiltScorer:
