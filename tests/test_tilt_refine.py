@@ -2,15 +2,20 @@ import numpy as np
 from numpy.testing import assert_allclose
 import pytest
 from scipy import fft as sfft
+from scipy import ndimage as ndi
 
+from acryo.backend._zncc_2d import ncc_2d, zncc_2d, zncc_landscape_2d
+from acryo.ctf import CTFModel, TiltSeriesCTF
 from acryo.loader._tilt_refine import (
+    ProjectionCTF,
     _bicubic,
     _bilinear_nodes,
     _fourier_resize,
+    _lowpass_weight,
     _smoothness_penalty,
     _subpixel_peak,
 )
-from acryo.projection import LocalShifts2D
+from acryo.projection import LocalShifts2D, TiltSeries
 
 
 def test_bicubic_gradient():
@@ -98,3 +103,119 @@ def test_subpixel_peak():
         [-((yy - dy) ** 2) - (xx - dx) ** 2 for dy, dx in [(0.3, -1.2), (-2.0, 2.4)]]
     )
     assert_allclose(_subpixel_peak(maps), [[0.3, -1.2], [-2.0, 2.4]], atol=1e-10)
+
+
+def test_ncc_2d():
+    rng = np.random.default_rng(4)
+    img0 = rng.normal(size=(3, 5, 11, 12)) + 1.0
+    img1 = 0.5 * img0 + rng.normal(scale=0.5, size=img0.shape) + 2.0
+    zncc = zncc_2d(img0, img1)
+    assert zncc.shape == (3, 5)
+    for idx in np.ndindex(3, 5):
+        expected = np.corrcoef(img0[idx].ravel(), img1[idx].ravel())[0, 1]
+        assert zncc[idx] == pytest.approx(expected)
+        expected = (img0[idx] * img1[idx]).sum() / np.sqrt(
+            (img0[idx] ** 2).sum() * (img1[idx] ** 2).sum()
+        )
+        assert ncc_2d(img0, img1)[idx] == pytest.approx(expected)
+    # invariant to the scale, and to the offset only for ZNCC
+    assert_allclose(ncc_2d(img0, 3 * img1), ncc_2d(img0, img1))
+    assert_allclose(zncc_2d(img0, 3 * img1 - 5), zncc)
+    assert_allclose(zncc_2d(img0, img0), 1.0)
+    assert_allclose(zncc_2d(img0, -img0), -1.0)
+    # zero images
+    assert_allclose(zncc_2d(img0, np.ones_like(img1)), 0.0)
+
+
+def test_zncc_landscape_2d():
+    rng = np.random.default_rng(5)
+    size, radius = 24, 4
+    img0 = ndi.gaussian_filter(rng.normal(size=(2, size, size)), (0, 1.5, 1.5)) + 1.0
+    img1 = rng.normal(size=(2, size, size))
+    ft0 = sfft.rfft2(img0)
+    ft1 = sfft.rfft2(img1)
+    maps = zncc_landscape_2d(ft0, ft1, radius)
+    assert maps.shape == (2, 2 * radius + 1, 2 * radius + 1)
+    # the center is the ZNCC of the images, and the inputs are not modified
+    assert_allclose(maps[:, radius, radius], zncc_2d(img0, img1), atol=1e-6)
+    assert_allclose(ft0, sfft.rfft2(img0))
+    # the peak is at the shift of the image
+    shifted = np.roll(img0, (2, -3), axis=(-2, -1))
+    maps = zncc_landscape_2d(sfft.rfft2(shifted), ft0, radius)
+    assert_allclose(maps[:, radius + 2, radius - 3], 1.0, atol=1e-6)
+    assert np.all(maps.reshape(2, -1).argmax(axis=1) == (radius + 2) * 9 + radius - 3)
+
+
+def test_lowpass_weight_consistent_with_backend():
+    from acryo.backend import Backend
+
+    rng = np.random.default_rng(6)
+    image = rng.normal(size=(16, 16)).astype(np.float32)
+    expected = Backend("numpy").lowpass_filter(image, cutoff=0.2)
+    filtered = sfft.irfft2(sfft.rfft2(image) * _lowpass_weight(16, 0.2), s=(16, 16))
+    assert_allclose(filtered, expected, atol=1e-5)
+
+
+def _ctf_tilt_series() -> TiltSeries:
+    ntilts = 3
+    ctf = TiltSeriesCTF(np.array([-2.0, -2.5, -3.0]), voltage=200.0)
+    return TiltSeries(
+        tilt_angles=[-40.0, 0.0, 50.0], tilt_axis_angle=85.0, ctf=ctf, scale=0.4
+    )
+
+
+def test_projection_ctf():
+    ts = _ctf_tilt_series()
+    box, spacing = 32, 0.45
+    points = np.array([[10.0, -20.0, 30.0], [-5.0, 15.0, -25.0]])
+    projected = ts.project_points(points)
+    out = ProjectionCTF(ts, ts.ctf)(points, projected, box, spacing)
+    assert out.shape == (2, 3, box, box // 2 + 1)
+    assert out.dtype == np.float32
+    freq = np.hypot(
+        sfft.fftfreq(box, spacing)[:, np.newaxis],
+        sfft.rfftfreq(box, spacing)[np.newaxis, :],
+    )
+    depths = ts.point_depths(points)
+    for i in range(2):
+        for t in range(3):
+            # the standard handedness (-1): underfocus is smaller by the depth
+            defocus = ts.ctf.defocus_u[t] + depths[i, t] / 1000
+            model = CTFModel.from_kv(200.0, 2.7, defocus=defocus)
+            assert_allclose(out[i, t], model.simulate(freq), atol=1e-4)
+    # the opposite handedness
+    inverted = ProjectionCTF(ts, ts.ctf, hand=1)
+    assert_allclose(
+        inverted.defocus(points), ts.ctf.defocus_u - depths / 1000, atol=1e-12
+    )
+
+
+def test_projection_ctf_filters():
+    ts = _ctf_tilt_series()
+    box, spacing = 24, 0.4
+    points = np.array([[10.0, -20.0, 30.0], [-5.0, 15.0, -25.0]])
+    projected = ts.project_points(points)
+    correction = ts.ctf_correction()
+
+    def scale_filter(freq_y, freq_x, index):
+        return 2.0 + index
+
+    ctf = ProjectionCTF(ts, ts.ctf, filters=[scale_filter, correction])
+    out = ctf(points, projected, box, spacing)
+    base = ProjectionCTF(ts, ts.ctf)(points, projected, box, spacing)
+    freq_y = sfft.fftfreq(box, spacing).astype(np.float32)[:, np.newaxis]
+    freq_x = sfft.rfftfreq(box, spacing).astype(np.float32)[np.newaxis, :]
+    for i in range(2):
+        for t in range(3):
+            sign = correction(freq_y, freq_x, t, position=tuple(projected[i, t]))
+            assert_allclose(out[i, t], base[i, t] * (2.0 + t) * sign, atol=1e-6)
+    # phase flipping at the plane z = 0 makes the first lobe positive
+    assert np.all(out[:, :, 1, 0] > 0)
+
+
+def test_projection_ctf_invalid():
+    ts = _ctf_tilt_series()
+    with pytest.raises(ValueError):
+        ProjectionCTF(ts, ts.ctf, hand=0)
+    with pytest.raises(ValueError):
+        ProjectionCTF(ts.select_tilts([0, 1]), ts.ctf)

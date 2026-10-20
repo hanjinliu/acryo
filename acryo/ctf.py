@@ -497,11 +497,21 @@ class _CTFPhase:
         self._f2 = f2
         self._base = base
 
+    def value(self, defocus: float | NDArray[np.floating]) -> NDArray[np.float32]:
+        """CTF of the mean defocus in μm (negative for underfocus).
+
+        If ``defocus`` is an array, the CTFs of each defocus are stacked along the
+        leading axes.
+        """
+        coef = np.asarray(defocus, dtype=np.float32)
+        coef = coef * np.float32(-math.pi * self._lmd * 1e3)
+        chi = coef.reshape(coef.shape + (1,) * self._f2.ndim) * self._f2
+        chi += self._base
+        return np.sin(chi, out=chi)
+
     def sign(self, defocus: float) -> NDArray[np.float32]:
         """Sign of the CTF of the mean defocus in μm (negative for underfocus)."""
-        chi = self._f2 * np.float32(-math.pi * self._lmd * defocus * 1e3)
-        chi += self._base
-        np.sin(chi, out=chi)
+        chi = self.value(defocus)
         return np.sign(chi, out=chi)
 
 

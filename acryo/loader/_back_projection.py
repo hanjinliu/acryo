@@ -14,6 +14,7 @@ from typing import (
     Iterable,
     Iterator,
     Generator,
+    Literal,
     Sequence,
     SupportsIndex,
 )
@@ -28,7 +29,13 @@ from dask.highlevelgraph import HighLevelGraph
 from acryo._types import degree, nm, pixel
 from acryo._dask import DaskArrayList
 from acryo.backend import Backend
-from acryo.loader._base import LoaderBase, Unset, _ShapeType, TemplateInputType
+from acryo.loader._base import (
+    LoaderBase,
+    MaskInputType,
+    TemplateInputType,
+    Unset,
+    _ShapeType,
+)
 from acryo.molecules import Molecules
 from acryo.ctf import CTFCorrection, PatchCTFCorrection
 from acryo.projection import (
@@ -43,6 +50,7 @@ from acryo.tilt import TiltSeriesModel, single_axis
 
 if TYPE_CHECKING:
     from typing_extensions import Self
+    from acryo.loader._tilt_refine import ProjectionCTF
 
 # Memory budget (bytes) of the tilt images being preprocessed in parallel.
 _LOAD_MEMORY_BUDGET = 2e9
@@ -696,6 +704,7 @@ class BackProjectionLoader(LoaderBase):
         smoothness: float = 0.01,
         niter: int = 100,
         batch_size: int = 16,
+        ctf: bool = False,
     ) -> Self:
         """Refine the alignment of the tilt series using particles and templates.
 
@@ -734,6 +743,18 @@ class BackProjectionLoader(LoaderBase):
             Maximum number of iterations to optimize the local shifts (L-BFGS-B).
         batch_size : int, default is 16
             Number of particles processed at once.
+        ctf : bool, default is False
+            If true, the CTF is applied to the projections of the templates. The
+            defocus of each molecule in each tilt is the defocus of
+            ``tilt_series.ctf`` (at the tomogram center) changed by the depth of the
+            molecule in the microscope relative to the tomogram center, which depends
+            on the position of the molecule and the tilt angle (see
+            :meth:`TiltSeries.point_depths`). The projections are then filtered by the
+            filters of the preprocessor (such as the CTF correction by phase
+            flipping) at the projected positions, in the same way as the tilt images.
+            The handedness of the defocus gradient is that of the
+            ``PatchCTFCorrection`` of the preprocessor, or -1 (the standard, as
+            :meth:`TiltSeries.ctf_correction`) if there is none.
 
         Returns
         -------
@@ -767,6 +788,7 @@ class BackProjectionLoader(LoaderBase):
             smoothness=smoothness,
             niter=niter,
             batch_size=batch_size,
+            ctf=self._projection_ctf(tilt_series) if ctf else None,
         )
         # the geometry is in nm, so it does not depend on the binning of the images
         tilt_series = self.tilt_series.replace(
@@ -775,6 +797,101 @@ class BackProjectionLoader(LoaderBase):
             local_shifts_2d=refined.local_shifts_2d,
         )
         return self.with_tilt_series(tilt_series)
+
+    def score_on_tilt(
+        self,
+        templates: list[TemplateInputType],
+        *,
+        mask: MaskInputType = None,
+        cutoff: float | None = None,
+        method: Literal["zncc", "ncc"] = "zncc",
+        batch_size: int = 16,
+        ctf: bool = False,
+    ) -> NDArray[np.float32]:
+        """Calculate the scores of the molecules in each tilt image.
+
+        Unlike :meth:`score`, which compares the reconstructed subtomograms with the
+        templates, the templates are projected (by extracting the central slices of
+        their Fourier transforms) to each tilt image at the positions and orientations
+        of the molecules, and compared with the patches of the tilt images at the
+        projected positions. The patches are of the size of the templates (padded to
+        cubes) at the pixel size of ``scale``, and no shift is searched.
+
+        Parameters
+        ----------
+        templates : list of 3D arrays or ImageProvider
+            Template images in the pixel size of ``scale`` and in the same contrast as
+            the subtomograms of this loader. If ImageProvider is given, the image will
+            be provided accordingly using the scale of the loader object.
+        mask : 3D array, ImageProvider or ImageConverter, optional
+            Mask image in the same shape as the templates. The mask is projected in the
+            same way as the templates, normalized to the maximum of 1, and multiplied
+            to both the projections and the patches of the tilt images.
+        cutoff : float, optional
+            Cutoff frequency of the low-pass filter applied to both the projections and
+            the patches, in the same unit as the alignment models (cycles per pixel of
+            ``scale``, 0.5 is the Nyquist frequency). No filter by default.
+        method : "zncc" or "ncc", default is "zncc"
+            Zero-mean normalized cross correlation or normalized cross correlation.
+        batch_size : int, default is 16
+            Number of molecules processed at once.
+        ctf : bool, default is False
+            If true, the CTF is applied to the projections of the templates. The
+            defocus of each molecule in each tilt is the defocus of
+            ``tilt_series.ctf`` (at the tomogram center) changed by the depth of the
+            molecule in the microscope relative to the tomogram center, which depends
+            on the position of the molecule and the tilt angle (see
+            :meth:`TiltSeries.point_depths`). The projections are then filtered by the
+            filters of the preprocessor (such as the CTF correction by phase
+            flipping) at the projected positions, in the same way as the tilt images.
+            The handedness of the defocus gradient is that of the
+            ``PatchCTFCorrection`` of the preprocessor, or -1 (the standard, as
+            :meth:`TiltSeries.ctf_correction`) if there is none.
+
+        Returns
+        -------
+        np.ndarray
+            3D array of scores, where ``score[i, j, t]`` is the score of the i-th
+            template for the j-th molecule in the t-th tilt image (such as
+            ``tilt_series.tilt_angles[t]``).
+        """
+        from acryo.loader._tilt_refine import score_on_tilt
+
+        normalized = []
+        for template in templates:
+            template_, mask_ = self.normalize_input(template, mask)
+            normalized.append((template_, mask_))
+        pos, rotations = self._to_tilt_series_frame(self.molecules)
+        tilt_series, images = self._tilt_images()
+        return score_on_tilt(
+            tilt_series,
+            images,
+            pos - self.tomogram_center,
+            rotations,
+            normalized,
+            scale=self.scale,
+            cutoff=cutoff,
+            method=method,
+            batch_size=batch_size,
+            ctf=self._projection_ctf(tilt_series) if ctf else None,
+        )
+
+    def _projection_ctf(self, tilt_series: TiltSeries) -> ProjectionCTF:
+        """The CTF of the projections comparable with the preprocessed tilt images."""
+        from acryo.loader._tilt_refine import ProjectionCTF
+
+        preprocessor = self.preprocessor
+        filters = () if preprocessor is None else preprocessor.filters
+        patch = next((f for f in filters if isinstance(f, PatchCTFCorrection)), None)
+        tilt_ctf = tilt_series.ctf
+        if tilt_ctf is None and patch is not None:
+            tilt_ctf = patch.ctf
+        if tilt_ctf is None:
+            raise ValueError(
+                "The CTF parameters are not available. Set 'ctf' of the tilt series."
+            )
+        hand = -1 if patch is None else patch.hand
+        return ProjectionCTF(tilt_series, tilt_ctf, hand=hand, filters=filters)
 
     def _default_align_kwargs(self) -> dict[str, Any]:
         """Return default keyword arguments for alignment."""

@@ -307,6 +307,38 @@ class TiltSeries:
             projected = projected + self.local_shifts_2d.shifts(self, points, projected)
         return projected.reshape(batch_shape + projected.shape[1:])
 
+    def point_depths(self, points: ArrayLike) -> NDArray[np.float64]:
+        """Depths of points in the microscope relative to the tomogram center.
+
+        The depth is the coordinate of a point along the optical axis (the z axis of
+        the microscope space), which depends on the position of the point and the tilt
+        angles. The defocus of a point is that of the tomogram center (``ctf``)
+        changed by its depth (see :class:`acryo.ctf.PatchCTFCorrection`). The local
+        shifts of the sample (``local_shifts``) are included.
+
+        Parameters
+        ----------
+        points : (..., 3) array
+            (z, y, x) coordinates in nm relative to the center of the tomogram.
+
+        Returns
+        -------
+        (..., T) array
+            Depths of the points in each tilt in nm.
+        """
+        points = np.asarray(points, dtype=np.float64)
+        if points.shape[-1:] != (3,):
+            raise ValueError(f"Shape of points must be (..., 3), got {points.shape}.")
+        batch_shape = points.shape[:-1]
+        # the tomogram center first
+        points = np.concatenate([np.zeros((1, 3)), points.reshape(-1, 3)])
+        points = (_homogenize(points) @ self.tomo2sample.T)[:, :3]
+        if self.local_shifts is not None:
+            points = points + self.local_shifts(points)
+        depths = _homogenize(points) @ self.projection_matrices[:, 0, :].T  # (1+N, T)
+        depths = depths[1:] - depths[0]
+        return depths.reshape(batch_shape + (self.ntilts,))
+
     def ctf_correction(self, hand: int = -1) -> PatchCTFCorrection:
         """The CTF correction of the tilt images by phase flipping of each patch.
 

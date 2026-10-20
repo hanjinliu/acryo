@@ -600,3 +600,40 @@ as :class:`acryo.projection.LocalAlignment`), which are kept as the ``base`` of 
         grid_shape=(3, 3),
         smoothness=0.01,
     )
+
+Scores in Each Tilt Image
+-------------------------
+
+:meth:`BackProjectionLoader.score_on_tilt` compares the projections of the templates with
+the tilt images, instead of the reconstructed subtomograms as :meth:`score`. Each template is
+projected to each tilt image at the position and orientation of each molecule, and compared
+with the patch of the tilt image at the projected position by ZNCC (or NCC with
+``method="ncc"``). No shift is searched. The result is an array of shape
+``(n_templates, n_molecules, n_tilts)``, which is useful to find tilt images or molecules that
+do not fit the alignment of the tilt series. The mask is projected in the same way as the
+templates and multiplied to both the projections and the patches, and ``cutoff`` is the
+cutoff frequency of the low-pass filter in the same unit as the alignment models.
+
+.. code-block:: python
+
+    scores = loader.score_on_tilt([template], mask=mask, cutoff=0.3)  # (1, N, T)
+    scores_per_tilt = scores[0].mean(axis=0)  # (T,)
+
+CTF of the Projections
+----------------------
+
+If the tilt series has the CTF parameters (``tilt_series.ctf``), ``ctf=True`` of
+:meth:`BackProjectionLoader.score_on_tilt` and :meth:`BackProjectionLoader.refine_tilt_series`
+applies the CTF to the projections of the templates. The defocus of each molecule in each tilt
+is the defocus of the tilt series (at the tomogram center) changed by the depth of the molecule
+in the microscope, which depends on its position (including the z coordinate) and the tilt
+angle (:meth:`acryo.projection.TiltSeries.point_depths`). The projections are then filtered by
+the filters of the preprocessor at the projected positions, such as the CTF correction by
+phase flipping, so that they are comparable with the preprocessed tilt images. The handedness
+of the defocus gradient is that of the :class:`acryo.ctf.PatchCTFCorrection` of the
+preprocessor, or the standard one (-1) by default.
+
+.. code-block:: python
+
+    scores = loader.score_on_tilt([template], ctf=True)
+    refined = loader.refine_tilt_series([(molecules, template)], ctf=True)
