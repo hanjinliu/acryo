@@ -5,7 +5,9 @@ from scipy import fft as sfft
 from scipy import ndimage as ndi
 
 from acryo.backend._zncc_2d import ncc_2d, zncc_2d, zncc_landscape_2d
+from acryo.ctf import CTFModel, TiltSeriesCTF
 from acryo.loader._tilt_refine import (
+    ProjectionCTF,
     _bicubic,
     _bilinear_nodes,
     _fourier_resize,
@@ -13,7 +15,7 @@ from acryo.loader._tilt_refine import (
     _smoothness_penalty,
     _subpixel_peak,
 )
-from acryo.projection import LocalShifts2D
+from acryo.projection import LocalShifts2D, TiltSeries
 
 
 def test_bicubic_gradient():
@@ -152,3 +154,68 @@ def test_lowpass_weight_consistent_with_backend():
     expected = Backend("numpy").lowpass_filter(image, cutoff=0.2)
     filtered = sfft.irfft2(sfft.rfft2(image) * _lowpass_weight(16, 0.2), s=(16, 16))
     assert_allclose(filtered, expected, atol=1e-5)
+
+
+def _ctf_tilt_series() -> TiltSeries:
+    ntilts = 3
+    ctf = TiltSeriesCTF(np.array([-2.0, -2.5, -3.0]), voltage=200.0)
+    return TiltSeries(
+        tilt_angles=[-40.0, 0.0, 50.0], tilt_axis_angle=85.0, ctf=ctf, scale=0.4
+    )
+
+
+def test_projection_ctf():
+    ts = _ctf_tilt_series()
+    box, spacing = 32, 0.45
+    points = np.array([[10.0, -20.0, 30.0], [-5.0, 15.0, -25.0]])
+    projected = ts.project_points(points)
+    out = ProjectionCTF(ts, ts.ctf)(points, projected, box, spacing)
+    assert out.shape == (2, 3, box, box // 2 + 1)
+    assert out.dtype == np.float32
+    freq = np.hypot(
+        sfft.fftfreq(box, spacing)[:, np.newaxis],
+        sfft.rfftfreq(box, spacing)[np.newaxis, :],
+    )
+    depths = ts.point_depths(points)
+    for i in range(2):
+        for t in range(3):
+            # the standard handedness (-1): underfocus is smaller by the depth
+            defocus = ts.ctf.defocus_u[t] + depths[i, t] / 1000
+            model = CTFModel.from_kv(200.0, 2.7, defocus=defocus)
+            assert_allclose(out[i, t], model.simulate(freq), atol=1e-4)
+    # the opposite handedness
+    inverted = ProjectionCTF(ts, ts.ctf, hand=1)
+    assert_allclose(
+        inverted.defocus(points), ts.ctf.defocus_u - depths / 1000, atol=1e-12
+    )
+
+
+def test_projection_ctf_filters():
+    ts = _ctf_tilt_series()
+    box, spacing = 24, 0.4
+    points = np.array([[10.0, -20.0, 30.0], [-5.0, 15.0, -25.0]])
+    projected = ts.project_points(points)
+    correction = ts.ctf_correction()
+
+    def scale_filter(freq_y, freq_x, index):
+        return 2.0 + index
+
+    ctf = ProjectionCTF(ts, ts.ctf, filters=[scale_filter, correction])
+    out = ctf(points, projected, box, spacing)
+    base = ProjectionCTF(ts, ts.ctf)(points, projected, box, spacing)
+    freq_y = sfft.fftfreq(box, spacing).astype(np.float32)[:, np.newaxis]
+    freq_x = sfft.rfftfreq(box, spacing).astype(np.float32)[np.newaxis, :]
+    for i in range(2):
+        for t in range(3):
+            sign = correction(freq_y, freq_x, t, position=tuple(projected[i, t]))
+            assert_allclose(out[i, t], base[i, t] * (2.0 + t) * sign, atol=1e-6)
+    # phase flipping at the plane z = 0 makes the first lobe positive
+    assert np.all(out[:, :, 1, 0] > 0)
+
+
+def test_projection_ctf_invalid():
+    ts = _ctf_tilt_series()
+    with pytest.raises(ValueError):
+        ProjectionCTF(ts, ts.ctf, hand=0)
+    with pytest.raises(ValueError):
+        ProjectionCTF(ts.select_tilts([0, 1]), ts.ctf)

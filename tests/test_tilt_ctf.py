@@ -6,7 +6,13 @@ import pytest
 from scipy import ndimage as ndi
 from scipy.spatial.transform import Rotation
 
-from acryo.ctf import CTFModel, PatchCTFCorrection, TiltSeriesCTF, _ImodDefocus
+from acryo.ctf import (
+    CTFModel,
+    PatchCTFCorrection,
+    TiltSeriesCTF,
+    _CTFPhase,
+    _ImodDefocus,
+)
 from acryo.projection import TiltImagePreprocessor, TiltSeries
 
 
@@ -265,3 +271,105 @@ def test_imod_defocus_invalid(tmp_path, text):
     path.write_text(text)
     with pytest.raises(ValueError):
         _ImodDefocus.read(path)
+
+
+def _tilted_series(ntilts: int, **kwargs) -> TiltSeries:
+    rng = np.random.default_rng(3)
+    levelled2tomo = np.eye(4)
+    levelled2tomo[:3, :3] = Rotation.from_rotvec([0.05, -0.03, 0.4]).as_matrix()
+    levelled2tomo[:3, 3] = [3.0, -5.0, 8.0]
+    return TiltSeries(
+        tilt_angles=np.linspace(-50, 50, ntilts),
+        tilt_axis_angle=rng.normal(85, 2, ntilts),
+        sample_translations=rng.normal(scale=10, size=(ntilts, 2)),
+        x_tilts=rng.normal(scale=3, size=ntilts),
+        levelled2tomo=levelled2tomo,
+        ctf=_ctf(ntilts, defocus_v=-2.2),
+        **kwargs,
+    )
+
+
+def test_point_depths():
+    rng = np.random.default_rng(4)
+    ntilts = 5
+    ts = _tilted_series(ntilts)
+    points = rng.uniform(-200, 200, (2, 10, 3))
+    depths = ts.point_depths(points)
+    assert depths.shape == (2, 10, ntilts)
+    mtx = ts.projection_matrices @ ts.tomo2sample
+    expected = np.einsum("tj,abj->abt", mtx[:, 0, :3], points)
+    assert_allclose(depths, expected, atol=1e-9)
+    assert_allclose(ts.point_depths(np.zeros(3)), 0.0, atol=1e-9)
+    # consistent with the defocus of the CTF correction on the plane z = 0
+    plane = points[0].copy()
+    plane[:, 0] = 0.0
+    correction = ts.ctf_correction(hand=1)
+    projected = ts.project_points(plane)
+    depths = ts.point_depths(plane)
+    for t in range(ntilts):
+        for p, d in zip(projected[:, t], depths[:, t]):
+            # the underfocus (positive) increases by hand * depth
+            du, _ = correction.defocus(t, tuple(p))
+            assert du == pytest.approx(ts.ctf.defocus_u[t] - d / 1000)
+    # the shifts on the detector do not change the depths
+    shifted = ts.replace(
+        sample_translations=ts.sample_translations + 5.0,
+        tilt_axis_angle=ts.tilt_axis_angle + 3.0,
+    )
+    assert_allclose(shifted.point_depths(points), ts.point_depths(points), atol=1e-9)
+    with pytest.raises(ValueError):
+        ts.point_depths(np.zeros((3, 2)))
+
+
+def test_point_depths_single_axis():
+    angles = np.array([-30.0, 0.0, 45.0])
+    ts = TiltSeries(tilt_angles=angles, tilt_axis_angle=0.0)
+    depths = ts.point_depths([[5.0, 0.0, 0.0], [0.0, 7.0, 0.0], [0.0, 0.0, 3.0]])
+    rad = np.radians(angles)
+    assert_allclose(depths[0], 5.0 * np.cos(rad), atol=1e-12)
+    assert_allclose(depths[1], 0.0, atol=1e-12)  # on the tilt axis
+    assert_allclose(np.abs(depths[2]), 3.0 * np.abs(np.sin(rad)), atol=1e-12)
+
+
+def test_point_depths_local_shifts():
+    def local_shifts(points):
+        out = np.zeros_like(points)
+        out[:, 0] = 0.1 * points[:, 2]
+        return out
+
+    ts = _tilted_series(4, local_shifts=local_shifts)
+    points = np.random.default_rng(5).uniform(-100, 100, (6, 3))
+    sample = np.concatenate([np.zeros((1, 3)), points])
+    sample = sample @ ts.tomo2sample[:3, :3].T + ts.tomo2sample[:3, 3]
+    sample = sample + local_shifts(sample)
+    depth = sample @ ts.projection_matrices[:, 0, :3].T
+    assert_allclose(ts.point_depths(points), depth[1:] - depth[0], atol=1e-9)
+
+
+@pytest.mark.parametrize("direction", [0.0, 25.0, 70.0, 120.0])
+def test_ctf_phase_value(direction):
+    defocus_u, defocus_v, angle = -2.0, -2.6, 30.0
+    rad = np.radians(direction)
+    freq = np.linspace(0, 2.5, 500).astype(np.float32)
+    phase = _CTFPhase(
+        freq * np.float32(np.sin(rad)),
+        freq * np.float32(np.cos(rad)),
+        astigmatism=(defocus_u - defocus_v) / 2,
+        astigmatism_angle=np.radians(angle),
+        wave_length=CTFModel.from_kv(300, 2.7).wave_length / 10,
+        spherical_aberration=2.7,
+        amplitude_contrast=0.07,
+    )
+    mean = (defocus_u + defocus_v) / 2
+    value = phase.value(mean)
+    assert value.dtype == np.float32
+    cos = np.cos(2 * np.radians(direction - angle))
+    defocus = mean + (defocus_u - defocus_v) / 2 * cos
+    expected = CTFModel.from_kv(300, 2.7, defocus=defocus).simulate(freq)
+    assert_allclose(value, expected, atol=1e-3)
+    assert_allclose(phase.sign(mean), np.sign(value))
+    # stacked for an array of defocus
+    stacked = phase.value(np.array([mean, mean - 0.5]))
+    assert stacked.shape == (2, 500)
+    assert_allclose(stacked[0], value)
+    assert_allclose(stacked[1], phase.value(mean - 0.5))

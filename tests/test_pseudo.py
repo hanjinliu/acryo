@@ -6,6 +6,7 @@ from scipy.spatial.transform import Rotation
 
 from acryo import Molecules, SubtomogramLoader, BackProjectionLoader, BatchLoader
 from acryo.backend import Backend
+from acryo.ctf import CTFModel, TiltSeriesCTF
 from acryo.pipe import soft_otsu
 from acryo.loader import ExtractedSubvolumeLoader
 from acryo.projection import (
@@ -468,9 +469,14 @@ def _particle_points(centers: np.ndarray, rot: Rotation, particle=PARTICLE):
     return (centers[:, None] + offsets).reshape(-1, 3)
 
 
-def _particle_template(scale: float, size: int, particle=PARTICLE) -> np.ndarray:
-    """Template of the particle with bright blobs, consistent with the tilt series."""
-    sigma = 1.5 * IMAGE_SCALE / scale
+def _particle_template(
+    scale: float, size: int, particle=PARTICLE, sigma: float = 1.5
+) -> np.ndarray:
+    """Template of the particle with bright blobs, consistent with the tilt series.
+
+    ``sigma`` is the size of the blobs in pixels of the tilt images.
+    """
+    sigma = sigma * IMAGE_SCALE / scale
     center = (size - 1) / 2
     inds = np.indices((size,) * 3, dtype=np.float32)
     template = np.zeros((size,) * 3, dtype=np.float32)
@@ -778,6 +784,135 @@ def test_score_on_tilt_input(blob_tilt_series):
         loader.score_on_tilt([template], cutoff=0)
     with pytest.raises(ValueError):
         loader.score_on_tilt([template], batch_size=0)
+
+
+# The wave length (0.12 nm at 0.1 kV) is exaggerated, so that the change of the CTF
+# by the depth of the particles is visible in the small tilt images.
+CTF_VOLTAGE = 0.1
+CTF_DEFOCUS = -0.1  # μm
+CTF_SIGMA = 1.0  # size of the blobs in pixels
+
+
+def _make_ctf_tilt_series(
+    path, centers: np.ndarray, rot: Rotation, hand: int = -1, depth: bool = True
+) -> TiltSeries:
+    """Simulate a tilt series of particles blurred by the CTF at their own defocus.
+
+    The defocus of each particle is changed by its depth relative to the tomogram
+    center, unless ``depth`` is false.
+    """
+    rng = np.random.default_rng(0)
+    ntilts = TILT_ANGLES.size
+    ctf = TiltSeriesCTF(
+        np.full(ntilts, CTF_DEFOCUS), voltage=CTF_VOLTAGE, spherical_aberration=0.0
+    )
+    ts = TiltSeries(
+        tilt_angles=TILT_ANGLES,
+        tilt_axis_angle=85.0,
+        sample_translations=rng.normal(scale=1.0, size=(ntilts, 2)),
+        scale=IMAGE_SCALE,
+        image_path=path,
+        ctf=ctf,
+    )
+    depths = ts.point_depths(centers) if depth else np.zeros((len(centers), ntilts))
+    yy, xx = np.indices(IMAGE_SHAPE, dtype=np.float32)
+    freq = np.hypot(
+        np.fft.fftfreq(IMAGE_SHAPE[0], IMAGE_SCALE)[:, np.newaxis],
+        np.fft.fftfreq(IMAGE_SHAPE[1], IMAGE_SCALE)[np.newaxis, :],
+    )
+    images = np.zeros((ntilts,) + IMAGE_SHAPE, dtype=np.float32)
+    for n in range(len(centers)):
+        points = _particle_points(centers[n : n + 1], rot[n : n + 1])
+        projected = ts.project_points(points) / IMAGE_SCALE + np.array(IMAGE_SHAPE) // 2
+        for t in range(ntilts):
+            image = np.zeros(IMAGE_SHAPE)
+            for py, px in projected[:, t]:
+                dist2 = (yy - py) ** 2 + (xx - px) ** 2
+                image -= np.exp(-dist2 / (2 * CTF_SIGMA**2))
+            defocus = CTF_DEFOCUS - hand * depths[n, t] / 1000
+            model = CTFModel.from_kv(CTF_VOLTAGE, 0.0, defocus=defocus)
+            images[t] += np.fft.ifft2(np.fft.fft2(image) * model.simulate(freq)).real
+    with mrcfile.new(path, overwrite=True) as f:
+        f.set_data(images)
+    return ts
+
+
+# isolated particles at different depths
+CTF_CENTERS = np.array([[6.0, -12.0, 22.0], [-6.0, 14.0, -22.0]])
+
+
+@pytest.mark.parametrize("tomo_hand", [1, -1])
+def test_score_on_tilt_ctf(tmp_path, tomo_hand):
+    rot = Rotation.random(2, random_state=3)
+    ts = _make_ctf_tilt_series(tmp_path / "ts.mrc", CTF_CENTERS, rot)
+    if tomo_hand == 1:
+        mole = Molecules(CTF_CENTERS + CENTER, rot)
+        template = _particle_template(0.5, 16, sigma=CTF_SIGMA)
+    else:
+        mole = Molecules(_mirror_z(CTF_CENTERS) + CENTER, _mirror_rotation(rot))
+        template = _particle_template(0.5, 16, _mirror_z(PARTICLE), sigma=CTF_SIGMA)
+    loader = _loader(ts, mole, preprocess=False, tomo_hand=tomo_hand)
+    score = loader.score_on_tilt([template], ctf=True)
+    assert score.min() > 0.99
+    assert loader.score_on_tilt([template]).mean() < 0.7
+
+    # the defocus of the projections is changed by the depths of the particles
+    high_tilt = np.abs(TILT_ANGLES) >= 40
+    for kwargs in [{"depth": False}, {"hand": 1}]:
+        other = _make_ctf_tilt_series(
+            tmp_path / "other.mrc", CTF_CENTERS, rot, **kwargs
+        )
+        loader_other = _loader(other, mole, preprocess=False, tomo_hand=tomo_hand)
+        score_other = loader_other.score_on_tilt([template], ctf=True)
+        assert score_other[..., high_tilt].mean() < 0.95
+
+
+def test_score_on_tilt_ctf_with_preprocessing(tmp_path):
+    rot = Rotation.random(2, random_state=3)
+    mole = Molecules(CTF_CENTERS + CENTER, rot)
+    template = _particle_template(0.5, 16, sigma=CTF_SIGMA)
+    ts = _make_ctf_tilt_series(tmp_path / "ts.mrc", CTF_CENTERS, rot)
+    # the tilt images are phase-flipped by the CTF of the tilt series by default
+    loader = _loader(ts, mole)
+    score = loader.score_on_tilt([template], ctf=True)
+    assert score.mean() > 0.97
+    assert score.mean() > loader.score_on_tilt([template]).mean() + 0.01
+    # the filters of the excluded tilts are not used
+    excluded = loader.exclude_tilts([0, 3]).score_on_tilt([template], ctf=True)
+    assert_allclose(excluded, np.delete(score, [0, 3], axis=-1), atol=1e-6)
+
+    # the handedness of the defocus gradient is that of the CTF correction
+    ts_inv = _make_ctf_tilt_series(tmp_path / "inv.mrc", CTF_CENTERS, rot, hand=1)
+    preprocess = TiltImagePreprocessor().with_filters(ts_inv.ctf_correction(hand=1))
+    loader_inv = _loader(ts_inv, mole, preprocess=preprocess)
+    score_inv = loader_inv.score_on_tilt([template], ctf=True)
+    assert score_inv.mean() > 0.97
+    assert (
+        score_inv.mean()
+        > _loader(ts_inv, mole).score_on_tilt([template], ctf=True).mean() + 0.01
+    )
+
+
+def test_refine_tilt_series_ctf(tmp_path):
+    centers, rot = _random_particles(30, seed=12)
+    ts = _make_ctf_tilt_series(tmp_path / "ts.mrc", centers, rot)
+    mole = Molecules(centers + CENTER, rot)
+    template = _particle_template(0.5, 16, sigma=CTF_SIGMA)
+    loader = _loader(_perturbed(ts, 1.2), mole, preprocess=False)
+    refined = loader.refine_tilt_series([(mole, template)], ctf=True)
+    error = refined.tilt_series.sample_translations - ts.sample_translations
+    assert np.abs(error).max() < 0.1  # nm
+    before = loader.score_on_tilt([template], ctf=True).mean()
+    assert refined.score_on_tilt([template], ctf=True).mean() > before + 0.2
+
+
+def test_ctf_not_available(blob_tilt_series):
+    loader = _loader(blob_tilt_series, Molecules(BLOBS + CENTER))
+    template = _particle_template(0.5, 16)
+    with pytest.raises(ValueError):
+        loader.score_on_tilt([template], ctf=True)
+    with pytest.raises(ValueError):
+        loader.refine_tilt_series([(loader.molecules, template)], ctf=True)
 
 
 def test_with_tilt_series(blob_tilt_series):

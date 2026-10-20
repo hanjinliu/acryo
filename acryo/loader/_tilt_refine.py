@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 import math
 import os
+import threading
 from typing import Callable, Literal, NamedTuple, Sequence
 
 import numpy as np
@@ -15,7 +17,14 @@ from scipy import optimize
 
 from acryo._types import degree, nm
 from acryo.backend._zncc_2d import ncc_2d, zncc_2d, zncc_landscape_2d
-from acryo.projection import LocalShifts2D, TiltSeries, centered_patches_rfft
+from acryo.ctf import TiltSeriesCTF, _CTFPhase
+from acryo.projection import (
+    LocalShifts2D,
+    TiltImageFilter,
+    TiltSeries,
+    centered_patches_rfft,
+)
+from acryo.projection._preprocess import _is_position_dependent
 from acryo.projection._projector import VolumeProjector, _face_average
 
 
@@ -25,6 +34,138 @@ class ParticleSet(NamedTuple):
     points: NDArray[np.float64]  # (N, 3) positions relative to the tomogram center (nm)
     rotations: NDArray[np.float64]  # (N, 3, 3) matrices from template to tomogram
     template: NDArray[np.float32]  # (D, H, W) template image
+
+
+class ProjectionCTF:
+    """The CTF of the projections of particles, at the defocus of each particle.
+
+    The defocus of a particle in each tilt is the defocus of ``ctf`` (at the tomogram
+    center) changed by the depth of the particle in the microscope relative to the
+    tomogram center (``TiltSeries.point_depths``), as
+    :class:`acryo.ctf.PatchCTFCorrection`. The projections are then filtered by
+    ``filters``, the filters of the preprocessing of the tilt images (such as the CTF
+    correction), so that they are comparable with the preprocessed tilt images. The
+    position-dependent filters are evaluated at the projected positions of the
+    particles.
+
+    Parameters
+    ----------
+    tilt_series : TiltSeries
+        The tilt series, whose geometry gives the depths of the particles.
+    ctf : TiltSeriesCTF
+        CTF parameters of each tilt.
+    hand : {1, -1}, default is -1
+        Handedness of the defocus gradient (see :class:`acryo.ctf.PatchCTFCorrection`).
+    filters : sequence of TiltImageFilter, optional
+        Filters of the preprocessing of the tilt images.
+    """
+
+    def __init__(
+        self,
+        tilt_series: TiltSeries,
+        ctf: TiltSeriesCTF,
+        hand: int = -1,
+        filters: Sequence[TiltImageFilter] = (),
+    ):
+        if ctf.ntilts != tilt_series.ntilts:
+            raise ValueError(
+                f"The CTF has the parameters of {ctf.ntilts} tilts, but the tilt "
+                f"series has {tilt_series.ntilts} tilts."
+            )
+        if hand not in (1, -1):
+            raise ValueError(f"'hand' must be 1 or -1, got {hand!r}.")
+        self._tilt_series = tilt_series
+        self._ctf = ctf
+        self._hand = int(hand)
+        self._filters = tuple(filters)
+        self._lock = threading.Lock()
+        self._cache: dict[tuple[int, float], _CTFFilters] = {}  # (box, spacing) ->
+
+    def defocus(self, points: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Mean defocus (N, T) in μm of the points (N, 3) relative to the center."""
+        ctf = self._ctf
+        depths = self._tilt_series.point_depths(points)  # (N, T), in nm
+        # depth and underfocus are in nm, defocus in μm (negative for underfocus)
+        return (ctf.defocus_u + ctf.defocus_v) / 2 - self._hand * depths / 1000
+
+    def __call__(
+        self,
+        points: NDArray[np.float64],
+        projected: NDArray[np.float64],
+        box: int,
+        spacing: nm,
+    ) -> NDArray[np.float32]:
+        """Filters (b, T, box, box // 2 + 1) of the rfft of the projections.
+
+        Parameters
+        ----------
+        points : (b, 3) array
+            Positions of the particles relative to the tomogram center in nm.
+        projected : (b, T, 2) array
+            Projected positions of the particles in nm from the center of the tilt
+            images, where the position-dependent filters are evaluated.
+        box : int
+            Size of the projections.
+        spacing : float
+            Pixel size of the projections in nm.
+        """
+        phases, fixed, local = self._for_geometry(box, spacing)
+        defocus = self.defocus(points)
+        out = np.stack(
+            [phase.value(defocus[:, t]) for t, phase in enumerate(phases)], axis=1
+        )
+        out *= fixed
+        for t, funcs in enumerate(local):
+            for i in range(out.shape[0]):
+                position = (float(projected[i, t, 0]), float(projected[i, t, 1]))
+                for func in funcs:
+                    out[i, t] *= np.asarray(func(position=position), dtype=np.float32)
+        return out
+
+    def _for_geometry(self, box: int, spacing: nm) -> _CTFFilters:
+        key = (box, round(spacing, 10))
+        with self._lock:
+            if (out := self._cache.get(key)) is not None:
+                return out
+            ctf = self._ctf
+            freq_y = sfft.fftfreq(box, spacing).astype(np.float32)[:, np.newaxis]
+            freq_x = sfft.rfftfreq(box, spacing).astype(np.float32)[np.newaxis, :]
+            phases = [
+                _CTFPhase(
+                    freq_y,
+                    freq_x,
+                    astigmatism=(ctf.defocus_u[t] - ctf.defocus_v[t]) / 2,
+                    astigmatism_angle=math.radians(ctf.astigmatism_angle[t]),
+                    wave_length=ctf.wave_length,
+                    spherical_aberration=ctf.spherical_aberration,
+                    amplitude_contrast=ctf.amplitude_contrast,
+                )
+                for t in range(ctf.ntilts)
+            ]
+            fixed = np.ones((ctf.ntilts, box, box // 2 + 1), dtype=np.float32)
+            local: list[list[Callable[..., NDArray[np.floating] | float]]] = []
+            for t in range(ctf.ntilts):
+                funcs = []
+                for filt in self._filters:
+                    if not _is_position_dependent(filt):
+                        fixed[t] *= np.asarray(filt(freq_y, freq_x, t), np.float32)
+                    elif (for_tilt := getattr(filt, "_for_tilt", None)) is not None:
+                        funcs.append(for_tilt(freq_y, freq_x, t))
+                    else:
+                        funcs.append(partial(filt, freq_y, freq_x, t))
+                local.append(funcs)
+            out = self._cache[key] = _CTFFilters(phases, fixed, local)
+        return out
+
+
+class _CTFFilters(NamedTuple):
+    """The CTF and the filters of each tilt for a geometry of the projections."""
+
+    phases: list[_CTFPhase]
+    # (T, box, box // 2 + 1) filters that do not depend on the position
+    fixed: NDArray[np.float32]
+    # position-dependent filters of each tilt as functions of the position
+    local: list[list[Callable[..., NDArray[np.floating] | float]]]
 
 
 def refine_tilt_series(
@@ -38,6 +179,7 @@ def refine_tilt_series(
     smoothness: float = 0.01,
     niter: int = 100,
     batch_size: int = 16,
+    ctf: ProjectionCTF | None = None,
 ) -> TiltSeries:
     """Refine the shifts of the tilt images using particles and their templates.
 
@@ -78,6 +220,8 @@ def refine_tilt_series(
         Maximum number of iterations to optimize the local shifts.
     batch_size : int, default is 16
         Number of particles processed at once.
+    ctf : ProjectionCTF, optional
+        If given, the CTF of each particle is applied to the projections.
 
     Returns
     -------
@@ -116,6 +260,10 @@ def refine_tilt_series(
     ):
         # (b, T, 2) projected positions in nm, including the local shifts
         projected = ts.project_points(ps.points[sl])
+        if ctf is None:
+            transfer = None
+        else:
+            transfer = ctf(ps.points[sl], projected, box, spacing)
         maps = _correlation_maps(
             images,
             projected / input_spacing + image_center,
@@ -125,6 +273,7 @@ def refine_tilt_series(
             box,
             native,
             radius,
+            transfer,
         )
         return maps, projected
 
@@ -206,6 +355,7 @@ def score_on_tilt(
     cutoff: float | None = None,
     method: Literal["zncc", "ncc"] = "zncc",
     batch_size: int = 16,
+    ctf: ProjectionCTF | None = None,
 ) -> NDArray[np.float32]:
     """Scores of the particles in each tilt image against the templates.
 
@@ -239,6 +389,8 @@ def score_on_tilt(
         Zero-mean normalized cross correlation or normalized cross correlation.
     batch_size : int, default is 16
         Number of particles processed at once.
+    ctf : ProjectionCTF, optional
+        If given, the CTF of each particle is applied to the projections.
 
     Returns
     -------
@@ -260,7 +412,7 @@ def score_on_tilt(
         raise ValueError("The pixel size of the tilt series is not set.")
     input_spacing = tilt_series.scale
     scorers = [
-        _TiltScorer(template, mask, scale / input_spacing, cutoff)
+        _TiltScorer(template, mask, scale, input_spacing, cutoff)
         for template, mask in templates
     ]
     npoints = points.shape[0]
@@ -272,17 +424,22 @@ def score_on_tilt(
     rot_detector = tilt_series.detector2tomo
 
     def _batch(sl: slice) -> None:
-        # (b, T, 2) projected positions in pixel, including the local shifts
-        positions = tilt_series.project_points(points[sl]) / input_spacing
-        positions += image_center
+        # (b, T, 2) projected positions in nm, including the local shifts
+        projected = tilt_series.project_points(points[sl])
+        positions = projected / input_spacing + image_center
         matrices = _template_to_detector(rotations[sl], rot_detector)
-        # the templates of the same geometry share the patches
+        # the templates of the same geometry share the patches and the CTF
         observed: dict[tuple[int, int], NDArray[np.complexfloating]] = {}
+        transfers: dict[tuple[int, int], NDArray[np.float32] | None] = {}
         for i, scorer in enumerate(scorers):
             key = (scorer.box, scorer.native)
             if key not in observed:
                 observed[key] = _observed_patches(images, positions, *key)
-            out[i, sl] = scorer.score(observed[key], matrices, func)
+                if ctf is None:
+                    transfers[key] = None
+                else:
+                    transfers[key] = ctf(points[sl], projected, *scorer.geometry)
+            out[i, sl] = scorer.score(observed[key], matrices, func, transfers[key])
 
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
         futures = [
@@ -301,13 +458,15 @@ class _TiltScorer:
         self,
         template: NDArray[np.float32],
         mask: NDArray[np.float32] | None,
-        ratio: float,
+        scale: nm,
+        input_spacing: nm,
         cutoff: float | None,
     ):
         cube = _centered_cube(template)
         self.size = size = cube.shape[0]
         # twice as large as the template against the wrap-around of the filters
-        self.box, self.native = _patch_geometry(2 * size, ratio)
+        self.box, self.native = _patch_geometry(2 * size, scale / input_spacing)
+        self.spacing = input_spacing * self.native / self.box  # of the patches
         # the template without the background, which is zero after padding
         self.projector = VolumeProjector(cube - _face_average(cube))
         if mask is None:
@@ -323,22 +482,32 @@ class _TiltScorer:
             self.weight = None
         else:
             # the cutoff in cycles per pixel of the patches
-            spacing_ratio = self.native / (self.box * ratio)
-            self.weight = _lowpass_weight(self.box, cutoff * spacing_ratio)
+            self.weight = _lowpass_weight(self.box, cutoff * self.spacing / scale)
+
+    @property
+    def geometry(self) -> tuple[int, nm]:
+        """Size and pixel size of the patches."""
+        return self.box, self.spacing
 
     def score(
         self,
         observed: NDArray[np.complexfloating],
         matrices: NDArray[np.float64],
         func: Callable[[NDArray[np.float32], NDArray[np.float32]], NDArray[np.float64]],
+        transfer: NDArray[np.float32] | None = None,
     ) -> NDArray[np.float64]:
-        """Scores (b, T) of the patches (rfft, origin at index 0)."""
+        """Scores (b, T) of the patches (rfft, origin at index 0).
+
+        ``transfer`` is the filter of the projections, such as the CTF.
+        """
         box, size = self.box, self.size
         reference = sfft.rfft2(
             sfft.ifftshift(
                 _padded_projections(self.projector, matrices, box), axes=(-2, -1)
             )
         )
+        if transfer is not None:
+            reference *= transfer
         if self.weight is not None:
             observed = observed * self.weight
             reference = reference * self.weight
@@ -436,18 +605,22 @@ def _correlation_maps(
     box: int,
     native: int,
     radius: int,
+    transfer: NDArray[np.float32] | None = None,
 ) -> NDArray[np.float32]:
     """ZNCC maps (b, T, 2 * radius + 1, 2 * radius + 1) between particles and images.
 
     The center of the maps is the projected position (``positions`` in pixel of the
     images) of the particle in the current alignment, and the peak position is the
-    shift of the particle in the image.
+    shift of the particle in the image. ``transfer`` is the filter of the projections,
+    such as the CTF.
     """
     observed = _observed_patches(images, positions, box, native)
     matrices = _template_to_detector(rotations, rot_detector)
     reference = sfft.rfft2(
         sfft.ifftshift(_padded_projections(projector, matrices, box), axes=(-2, -1))
     )
+    if transfer is not None:
+        reference *= transfer
     return zncc_landscape_2d(observed, reference, radius)
 
 
