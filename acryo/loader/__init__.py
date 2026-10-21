@@ -3,7 +3,7 @@ from ._base import LoaderBase
 from ._batch import BatchLoader
 from ._mock import MockLoader
 from ._extracted import ExtractedSubvolumeLoader
-from ._back_projection import BackProjectionLoader
+from ._back_projection import BackProjectionLoader, TiltSeriesAlignment
 
 __all__ = [
     "LoaderBase",
@@ -12,4 +12,5 @@ __all__ = [
     "MockLoader",
     "ExtractedSubvolumeLoader",
     "BackProjectionLoader",
+    "TiltSeriesAlignment",
 ]

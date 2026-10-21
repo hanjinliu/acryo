@@ -93,6 +93,7 @@ class ProjectionCTF:
         projected: NDArray[np.float64],
         box: int,
         spacing: nm,
+        tilts: Sequence[int] | None = None,
     ) -> NDArray[np.float32]:
         """Filters (b, T, box, box // 2 + 1) of the rfft of the projections.
 
@@ -107,18 +108,21 @@ class ProjectionCTF:
             Size of the projections.
         spacing : float
             Pixel size of the projections in nm.
+        tilts : sequence of int, optional
+            Indices of the tilts of ``projected`` and the output. All the tilts by
+            default.
         """
         phases, fixed, local = self._for_geometry(box, spacing)
+        if tilts is None:
+            tilts = range(len(phases))
         defocus = self.defocus(points)
-        out = np.stack(
-            [phase.value(defocus[:, t]) for t, phase in enumerate(phases)], axis=1
-        )
-        out *= fixed
-        for t, funcs in enumerate(local):
+        out = np.stack([phases[t].value(defocus[:, t]) for t in tilts], axis=1)
+        out *= fixed[list(tilts)]
+        for k, t in enumerate(tilts):
             for i in range(out.shape[0]):
-                position = (float(projected[i, t, 0]), float(projected[i, t, 1]))
-                for func in funcs:
-                    out[i, t] *= np.asarray(func(position=position), dtype=np.float32)
+                position = (float(projected[i, k, 0]), float(projected[i, k, 1]))
+                for func in local[t]:
+                    out[i, k] *= np.asarray(func(position=position), dtype=np.float32)
         return out
 
     def _for_geometry(self, box: int, spacing: nm) -> _CTFFilters:
@@ -237,69 +241,14 @@ def refine_tilt_series(
         raise ValueError("The pixel size of the tilt series is not set.")
     angles = _rotation_candidates(rotation)
     input_spacing = tilt_series.scale
-    max_shift_px = math.ceil(max_shift / scale)
-    cubes = [_centered_cube(ps.template) for ps in particle_sets]
-    template_size = max(cube.shape[0] for cube in cubes)
-    box, native = _patch_geometry(
-        template_size + 2 * (max_shift_px + 1), scale / input_spacing
-    )
-    spacing = input_spacing * native / box  # true pixel spacing of the patches
-    radius = math.ceil(max_shift / spacing)
-
-    image_center = np.array(images.shape[1:]) // 2
-    # the templates without the background, which is zero after padding
-    projectors = [VolumeProjector(cube - _face_average(cube)) for cube in cubes]
-
-    def _batch(
-        ts: TiltSeries,
-        rot_detector: NDArray[np.float64],
-        ps: ParticleSet,
-        projector: VolumeProjector,
-        sl: slice,
-    ):
-        # (b, T, 2) projected positions in nm, including the local shifts
-        projected = ts.project_points(ps.points[sl])
-        if ctf is None:
-            transfer = None
-        else:
-            transfer = ctf(ps.points[sl], projected, box, spacing)
-        maps = _correlation_maps(
-            images,
-            projected / input_spacing + image_center,
-            ps.rotations[sl],
-            projector,
-            rot_detector,
-            box,
-            native,
-            radius,
-            transfer,
-        )
-        return maps, projected
+    geometry = _MapGeometry.create(particle_sets, scale, input_spacing, max_shift)
+    spacing = geometry.spacing
+    projectors = [geometry.projector(ps.template) for ps in particle_sets]
 
     def _all_maps(ts: TiltSeries):
-        # rotations from the detector to the tomogram, as used in reconstruction
-        rot_detector = ts.detector2tomo
-        # The arguments are bound by `partial`, so that dask does not traverse the
-        # tilt series (a dataclass) and the particle sets.
-        tasks = [
-            dask.delayed(
-                partial(
-                    _batch,
-                    ts,
-                    rot_detector,
-                    ps,
-                    projector,
-                    slice(start, start + batch_size),
-                ),
-                pure=False,
-            )()
-            for ps, projector in zip(particle_sets, projectors)
-            for start in range(0, len(ps.points), batch_size)
-        ]
-        results = dask.compute(*tasks)
-        maps = np.concatenate([r[0] for r in results])  # (N, T, W, W)
-        positions = np.concatenate([r[1] for r in results])  # (N, T, 2), in nm
-        return maps, positions
+        return _particle_maps(
+            ts, images, particle_sets, projectors, geometry, batch_size, ctf
+        )
 
     maps, positions = _all_maps(tilt_series)  # angles[0] is 0
     # For each tilt, keep the maps of the tilt axis angle with the highest peak of
@@ -525,6 +474,127 @@ class _TiltScorer:
         return func(patches, projections)
 
 
+class _MapGeometry(NamedTuple):
+    """Geometry of the patches and the correlation maps of the particles."""
+
+    box: int  # size of the patches
+    native: int  # size of the patches cropped from the tilt images
+    spacing: nm  # pixel size of the patches and the maps
+    radius: int  # radius of the maps in pixel
+
+    @classmethod
+    def create(
+        cls,
+        particle_sets: Sequence[ParticleSet],
+        scale: nm,
+        input_spacing: nm,
+        max_shift: nm,
+    ) -> _MapGeometry:
+        """The geometry for the shifts up to ``max_shift`` nm of the particles.
+
+        The patches are large enough for the templates shifted by ``max_shift``, so
+        that the correlation maps are not affected by the wrap-around.
+        """
+        max_shift_px = math.ceil(max_shift / scale)
+        template_size = max(max(ps.template.shape) for ps in particle_sets)
+        box, native = _patch_geometry(
+            template_size + 2 * (max_shift_px + 1), scale / input_spacing
+        )
+        spacing = input_spacing * native / box  # true pixel spacing of the patches
+        return cls(box, native, spacing, math.ceil(max_shift / spacing))
+
+    def projector(self, template: NDArray[np.float32]) -> VolumeProjector:
+        """Projector of the template without the background."""
+        cube = _centered_cube(template)
+        # the background is zero after padding
+        return VolumeProjector(cube - _face_average(cube))
+
+    def lowpass(self, cutoff: float | None, scale: nm) -> NDArray[np.float64] | None:
+        """Low-pass weights of the patches for the cutoff in cycles per ``scale``."""
+        if cutoff is None:
+            return None
+        return _lowpass_weight(self.box, cutoff * self.spacing / scale)
+
+
+def _particle_maps(
+    tilt_series: TiltSeries,
+    images: NDArray[np.float32],
+    particle_sets: Sequence[ParticleSet],
+    projectors: Sequence[VolumeProjector],
+    geometry: _MapGeometry,
+    batch_size: int,
+    ctf: ProjectionCTF | None = None,
+    weight: NDArray[np.float64] | None = None,
+    tilts: Sequence[int] | None = None,
+    displacements: NDArray[np.float64] | None = None,
+) -> tuple[NDArray[np.float32], NDArray[np.float64]]:
+    """ZNCC maps (N, T, W, W) of all the particles and their projected positions.
+
+    The maps are centered at the projected positions (N, T, 2) in nm, and computed
+    in dask tasks of ``batch_size`` particles. ``weight`` is the filter of both the
+    patches and the projections, such as a low-pass filter. If ``tilts`` is given,
+    the maps of only these tilts are computed. If ``displacements`` (N, T, 2) in nm
+    is given, the maps are centered at the projected positions displaced by them.
+    """
+    assert tilt_series.scale is not None
+    input_spacing = tilt_series.scale
+    image_center = np.array(images.shape[1:]) // 2
+    box, native, spacing, radius = geometry
+    # rotations from the detector to the tomogram, as used in reconstruction
+    rot_detector = tilt_series.detector2tomo
+    if tilts is not None:
+        tilts = list(tilts)
+        images = images[tilts]
+        rot_detector = rot_detector[tilts]
+
+    def _batch(ps: ParticleSet, projector: VolumeProjector, sl: slice, start: int):
+        # (b, T, 2) projected positions in nm, including the local shifts
+        projected = tilt_series.project_points(ps.points[sl])
+        if tilts is not None:
+            projected = projected[:, tilts]
+        if displacements is not None:
+            projected = projected + displacements[start : start + projected.shape[0]]
+        if ctf is None:
+            transfer = None
+        else:
+            transfer = ctf(ps.points[sl], projected, box, spacing, tilts)
+        maps = _correlation_maps(
+            images,
+            projected / input_spacing + image_center,
+            ps.rotations[sl],
+            projector,
+            rot_detector,
+            box,
+            native,
+            radius,
+            transfer,
+            weight,
+        )
+        return maps, projected
+
+    # The arguments are bound by `partial`, so that dask does not traverse the
+    # particle sets.
+    offsets = np.cumsum([0] + [len(ps.points) for ps in particle_sets])
+    tasks = [
+        dask.delayed(
+            partial(
+                _batch,
+                ps,
+                projector,
+                slice(start, start + batch_size),
+                offset + start,
+            ),
+            pure=False,
+        )()
+        for ps, projector, offset in zip(particle_sets, projectors, offsets)
+        for start in range(0, len(ps.points), batch_size)
+    ]
+    results = dask.compute(*tasks)
+    maps = np.concatenate([r[0] for r in results])  # (N, T, W, W)
+    positions = np.concatenate([r[1] for r in results])  # (N, T, 2), in nm
+    return maps, positions
+
+
 def _central_crop(
     ft: NDArray[np.complexfloating], box: int, size: int
 ) -> NDArray[np.float64]:
@@ -608,13 +678,15 @@ def _correlation_maps(
     native: int,
     radius: int,
     transfer: NDArray[np.float32] | None = None,
+    weight: NDArray[np.float64] | None = None,
 ) -> NDArray[np.float32]:
     """ZNCC maps (b, T, 2 * radius + 1, 2 * radius + 1) between particles and images.
 
     The center of the maps is the projected position (``positions`` in pixel of the
     images) of the particle in the current alignment, and the peak position is the
     shift of the particle in the image. ``transfer`` is the filter of the projections,
-    such as the CTF.
+    such as the CTF, and ``weight`` is the filter of both the patches and the
+    projections, such as a low-pass filter.
     """
     observed = _observed_patches(images, positions, box, native)
     matrices = _template_to_detector(rotations, rot_detector)
@@ -623,6 +695,9 @@ def _correlation_maps(
     )
     if transfer is not None:
         reference *= transfer
+    if weight is not None:
+        observed = observed * weight
+        reference = reference * weight
     return zncc_landscape_2d(observed, reference, radius)
 
 
@@ -861,13 +936,19 @@ def _cubic_weights(
 
 
 def _bicubic(
-    maps: NDArray[np.float64], y: NDArray[np.float64], x: NDArray[np.float64]
+    maps: NDArray[np.floating],
+    y: NDArray[np.float64],
+    x: NDArray[np.float64],
+    index: NDArray[np.intp] | None = None,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
     """Bicubic interpolation of each map (N, W, W) at (y, x), and the gradients.
 
+    If ``index`` is given, the ``index[i]``-th map is interpolated at ``(y[i], x[i])``.
     The taps outside the maps are clamped to the borders.
     """
-    n, height, width = maps.shape
+    _, height, width = maps.shape
+    if index is None:
+        index = np.arange(y.shape[0])
     taps = np.arange(-1, 3)
     iy = np.floor(y).astype(np.intp)
     ix = np.floor(x).astype(np.intp)
@@ -875,7 +956,7 @@ def _bicubic(
     wx, dwx = _cubic_weights(x - ix)
     rows = np.clip(iy[:, np.newaxis] + taps, 0, height - 1)
     cols = np.clip(ix[:, np.newaxis] + taps, 0, width - 1)
-    patch = maps[np.arange(n)[:, None, None], rows[:, :, None], cols[:, None, :]]
+    patch = maps[index[:, None, None], rows[:, :, None], cols[:, None, :]]
     value = np.einsum("ni,nij,nj->n", wy, patch, wx)
     grad_y = np.einsum("ni,nij,nj->n", dwy, patch, wx)
     grad_x = np.einsum("ni,nij,nj->n", wy, patch, dwx)

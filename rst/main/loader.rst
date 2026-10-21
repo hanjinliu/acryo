@@ -601,6 +601,68 @@ as :class:`acryo.projection.LocalAlignment`), which are kept as the ``base`` of 
         smoothness=0.01,
     )
 
+Aligning a Tilt Series of Large Errors
+--------------------------------------
+
+:meth:`BackProjectionLoader.refine_tilt_series` refines the shift of each tilt image
+independently within a few nm. If the alignment of the tilt series is far from correct,
+:meth:`BackProjectionLoader.align_tilt_series` aligns it coarsely beforehand. The alignment
+of the tilt series and the positions of the particles are optimized together, as the
+alignment of a tilt series using fiducial markers:
+
+- the shifts of the tilt images (``sample_translations``),
+- the rotation of all the tilt images (``tilt_axis_angle``, unless ``tilt_axis="fixed"``),
+- the tilt angles (``tilt_angles``) within ``±max_tilt_angle_change`` degrees, if given,
+- the 3D offsets of the particles.
+
+The mean change of the tilt angles is fixed to zero, because it is equivalent to a rotation of
+the tomogram around the tilt axis. The correlation (and the projections of the templates) is
+computed at the beginning of each iteration, and the changes of the parameters only move the
+particles during the optimization, so the tilt angles are optimized without projecting the
+templates again for each angle.
+
+The offsets are needed because the particles picked in a tomogram reconstructed with a wrong
+alignment are misplaced, especially along the z axis, and such a particle is shifted by a
+different amount in each tilt image. The mean offset is fixed to zero, so the particles stay on
+average. The particles with the same value of the feature ``group_by`` share the offset, such
+as the particles on the same filament. ``position_sigma`` is the standard deviation (nm) of the
+prior of the offsets, which keeps the offsets that the tilt images cannot determine, such as
+along the filaments. Give ``position_sigma=None`` to keep the particles fixed.
+
+The tilts are added one by one from the zero tilt. The correlation of each added tilt is
+computed around the positions predicted from the tilts already added, so the errors
+accumulating over the tilts can be larger than ``max_shift``. If the correlation summed over
+the particles is flat along a direction in a tilt image, such as along filaments all parallel
+in the image, the shift of the tilt image is kept along the direction, and the offsets of the
+particles along the filaments are not determined. The result is a named tuple of
+the loader of the aligned tilt series, the particles moved by the offsets (to their positions in
+the tomogram of the aligned tilt series) and the correlation of the particles in each tilt
+image.
+
+.. code-block:: python
+
+    result = loader.align_tilt_series(
+        [(segments, segment_template)],
+        max_shift=20.0,  # nm
+        cutoff=0.2,
+        group_by="spline-id",
+        max_tilt_angle_change=1.0,  # degrees
+    )
+    result.loader  # BackProjectionLoader of the aligned tilt series
+    result.molecules  # [segments moved by the offsets]
+    result.scores  # [(N, T) array of ZNCC]
+
+    # refine the alignment using the subunits
+    refined = result.loader.refine_tilt_series(
+        [(subunits, subunit_template)], max_shift=2.0
+    )
+
+Templates of periodic structures, such as the subunits of a lattice, have multiple peaks of
+the correlation within a large ``max_shift``. Use templates without such periodicity for the
+coarse alignment, such as the segments of filaments, or remove the periodicity by the low-pass
+filter of ``cutoff`` (in cycles per pixel of ``scale``). The coarse alignment is faster and more
+robust at a larger pixel size (such as ``loader.binning(4)``).
+
 Scores in Each Tilt Image
 -------------------------
 
@@ -623,8 +685,9 @@ CTF of the Projections
 ----------------------
 
 If the tilt series has the CTF parameters (``tilt_series.ctf``), ``ctf=True`` of
-:meth:`BackProjectionLoader.score_on_tilt` and :meth:`BackProjectionLoader.refine_tilt_series`
-applies the CTF to the projections of the templates. The defocus of each molecule in each tilt
+:meth:`BackProjectionLoader.score_on_tilt`, :meth:`BackProjectionLoader.refine_tilt_series`
+and :meth:`BackProjectionLoader.align_tilt_series` applies the CTF to the projections of the
+templates. The defocus of each molecule in each tilt
 is the defocus of the tilt series (at the tomogram center) changed by the depth of the molecule
 in the microscope, which depends on its position (including the z coordinate) and the tilt
 angle (:meth:`acryo.projection.TiltSeries.point_depths`). The projections are then filtered by
