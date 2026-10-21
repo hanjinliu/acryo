@@ -509,7 +509,7 @@ class _MapGeometry(NamedTuple):
         # the background is zero after padding
         return VolumeProjector(cube - _face_average(cube))
 
-    def lowpass(self, cutoff: float | None, scale: nm) -> NDArray[np.float64] | None:
+    def lowpass(self, cutoff: float | None, scale: nm) -> NDArray[np.float32] | None:
         """Low-pass weights of the patches for the cutoff in cycles per ``scale``."""
         if cutoff is None:
             return None
@@ -524,7 +524,7 @@ def _particle_maps(
     geometry: _MapGeometry,
     batch_size: int,
     ctf: ProjectionCTF | None = None,
-    weight: NDArray[np.float64] | None = None,
+    weight: NDArray[np.float32] | None = None,
     tilts: Sequence[int] | None = None,
     displacements: NDArray[np.float64] | None = None,
 ) -> tuple[NDArray[np.float32], NDArray[np.float64]]:
@@ -607,14 +607,15 @@ def _central_crop(
     return images[..., start : start + size, start : start + size]
 
 
-def _lowpass_weight(size: int, cutoff: float, order: int = 2) -> NDArray[np.float64]:
+def _lowpass_weight(size: int, cutoff: float, order: int = 2) -> NDArray[np.float32]:
     """Butterworth weights (size, size // 2 + 1) of the rfft of square images.
 
     ``cutoff`` is in cycles per pixel, as ``acryo.backend.Backend.lowpass_filter``.
+    The weights are float32, so that the filtered rfft stays complex64.
     """
     qy, qx = np.meshgrid(sfft.fftfreq(size), sfft.rfftfreq(size), indexing="ij")
     q2 = (qy**2 + qx**2) / cutoff**2
-    return 1 / (1 + q2**order)
+    return (1 / (1 + q2**order)).astype(np.float32)
 
 
 def _rotation_candidates(rotation: tuple[degree, degree]) -> NDArray[np.float64]:
@@ -678,7 +679,7 @@ def _correlation_maps(
     native: int,
     radius: int,
     transfer: NDArray[np.float32] | None = None,
-    weight: NDArray[np.float64] | None = None,
+    weight: NDArray[np.float32] | None = None,
 ) -> NDArray[np.float32]:
     """ZNCC maps (b, T, 2 * radius + 1, 2 * radius + 1) between particles and images.
 

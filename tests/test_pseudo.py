@@ -807,6 +807,33 @@ def test_score_on_tilt_input(blob_tilt_series):
         loader.score_on_tilt([template], batch_size=0)
 
 
+def test_tilt_spectra_are_single_precision(blob_tilt_series, monkeypatch):
+    from acryo.loader import _tilt_refine
+
+    dtypes = set()
+    central_crop = _tilt_refine._central_crop
+    landscape = _tilt_refine.zncc_landscape_2d
+
+    def _crop(ft, *args):
+        dtypes.add(ft.dtype)
+        return central_crop(ft, *args)
+
+    def _landscape(ft0, ft1, radius):
+        dtypes.update([ft0.dtype, ft1.dtype])
+        return landscape(ft0, ft1, radius)
+
+    monkeypatch.setattr(_tilt_refine, "_central_crop", _crop)
+    monkeypatch.setattr(_tilt_refine, "zncc_landscape_2d", _landscape)
+    mole = Molecules(BLOBS + CENTER, Rotation.random(len(BLOBS), random_state=0))
+    loader = _loader(blob_tilt_series, mole)
+    template = _particle_template(0.5, 16)
+    # the low-pass filter and the mask keep the precision of the spectra
+    loader.score_on_tilt([template], cutoff=0.3, mask=_sphere_mask(16))
+    loader.refine_tilt_series([(mole, template)])
+    loader.align_tilt_series([(mole, template)], max_shift=4.0, cutoff=0.3, niter=1)
+    assert dtypes == {np.dtype(np.complex64)}
+
+
 # The wave length (0.12 nm at 0.1 kV) is exaggerated, so that the change of the CTF
 # by the depth of the particles is visible in the small tilt images.
 CTF_VOLTAGE = 0.1
