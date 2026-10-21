@@ -911,7 +911,9 @@ def _smoothness_penalty(
     return penalty, grad
 
 
-_CUBIC_A = -0.75  # same as the bicubic interpolation of PyTorch
+# Catmull-Rom spline, which is accurate up to the second order. The peaks of the maps
+# between the pixels are biased by ~0.1 pixel with -0.75 (as PyTorch).
+_CUBIC_A = -0.5
 
 
 def _cubic_weights(

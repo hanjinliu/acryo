@@ -1305,8 +1305,8 @@ def test_align_tilt_series_tilt_angle_limit():
     )
     problem.set_maps(maps.astype(np.float32))
     corrections = problem.optimize(problem.zeros(), tilts)
-    # within the bias of the bicubic interpolation (~0.1 pixel)
-    assert_allclose(corrections.tilt_angles, true_changes, rtol=0.05)
+    # within the error of the bicubic interpolation (~0.02 pixel)
+    assert_allclose(corrections.tilt_angles, true_changes, rtol=0.02)
     assert problem.tilts_at_limit.size == 0
 
 
