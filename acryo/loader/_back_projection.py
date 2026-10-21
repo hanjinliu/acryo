@@ -15,6 +15,7 @@ from typing import (
     Iterator,
     Generator,
     Literal,
+    NamedTuple,
     Sequence,
     SupportsIndex,
 )
@@ -283,8 +284,8 @@ class BackProjectionLoader(LoaderBase):
         preprocessed tilt images (of each binning factor) and the reconstructors are
         cached, and reused by this loader and the loaders created from it, such as the
         results of :meth:`replace`, :meth:`binning`, :meth:`align`,
-        :meth:`with_tilt_series`, :meth:`refine_tilt_series` and
-        :meth:`exclude_tilts`. The cache is released when the outermost context exits.
+        :meth:`with_tilt_series`, :meth:`refine_tilt_series`,
+        :meth:`align_tilt_series` and :meth:`exclude_tilts`. The cache is released when the outermost context exits.
         Lazy arrays created in the context can still be computed after that.
 
         Examples
@@ -365,14 +366,18 @@ class BackProjectionLoader(LoaderBase):
 
         If the tilt series has the same tilt images (``image_path``,
         ``image_indices`` and ``scale``), the preprocessed images and their cache are
-        shared with this loader, so updating the alignment is cheap.
+        shared with this loader, so updating the alignment is cheap. If
+        ``tilt_model`` was not given, it is created again from the tilt angles.
         """
         tilt_series = _as_tilt_series(tilt_series)
         if _same_tilt_images(self.tilt_series, tilt_series):
             images = self._images.with_tilt_series(tilt_series)
         else:
             images = _TiltSeriesImages(tilt_series, self._images.preprocessor)
-        return self._with_images(images)
+        out = self._with_images(images)
+        if self._default_tilt_model:
+            out._tilt_model = _default_tilt_model(tilt_series, self.tomo_hand)
+        return out
 
     def exclude_tilts(self, indices: SupportsIndex | Iterable[SupportsIndex]) -> Self:
         """Return a new instance without the given tilts.
@@ -798,6 +803,187 @@ class BackProjectionLoader(LoaderBase):
         )
         return self.with_tilt_series(tilt_series)
 
+    def align_tilt_series(
+        self,
+        references: Sequence[tuple[Molecules, TemplateInputType]],
+        *,
+        max_shift: nm = 20.0,
+        cutoff: float | None = None,
+        group_by: str | None = None,
+        position_sigma: nm | None = 10.0,
+        tilt_axis: Literal["fixed", "global"] = "global",
+        max_tilt_angle_change: degree = 0.0,
+        progressive: bool = True,
+        niter: int = 3,
+        batch_size: int = 16,
+        ctf: bool = False,
+    ) -> TiltSeriesAlignment:
+        """Align the tilt series of large errors using particles and templates.
+
+        Unlike :meth:`refine_tilt_series`, which refines the shifts of each tilt
+        image independently within a few nm, the alignment of the tilt series and the
+        positions of the particles are optimized together, as the alignment using
+        fiducial markers. The projections of the templates placed at the particles are
+        compared with the tilt images by ZNCC within ``max_shift``, and the shifts of
+        the tilt images (``sample_translations``), the rotation of all the tilt images
+        (``tilt_axis_angle``) and the 3D offsets of the particles are optimized to
+        maximize the sum of the ZNCC of all the particles in all the tilt images. The
+        offsets are needed because the particles picked in a tomogram of a wrong
+        alignment are misplaced, especially along the z axis, which shifts the particles
+        differently in each tilt image. The mean offset of the particles is fixed to
+        zero, so the particles stay on average.
+
+        If ``max_tilt_angle_change`` is given, the tilt angles (``tilt_angles``) are
+        also optimized within the range around the current ones. The mean change of the
+        tilt angles is fixed to zero, because it is equivalent to a rotation of the
+        tomogram around the tilt axis. The ZNCC (and the projections of the templates)
+        is computed for the alignment at the beginning of each iteration, and the
+        changes of the parameters are applied to the positions of the particles during
+        the optimization, so the tilt angles and the rotation are optimized as fast as
+        the shifts. The projections of the templates are updated in the next iteration.
+
+        In the first iteration, the tilts are added in the order of their absolute
+        tilt angles if ``progressive``. The ZNCC of each added tilt is computed around
+        the positions predicted from the tilts already added (the current rotation and
+        offsets, and the shift of the nearest tilt), so the errors accumulating over
+        the tilts can be larger than ``max_shift``. The shift of the added tilt is
+        searched for the peak of the ZNCC summed over the particles, and then the
+        parameters of the added tilts are optimized. The ZNCC is computed again at the
+        updated alignment in the next iterations. The shift of a tilt image is kept
+        along the direction in which the summed ZNCC is flat, such as along filaments
+        all parallel in the tilt image, because it cannot be determined. The offsets
+        of the particles along such directions are not determined either, and only
+        restricted by ``position_sigma``.
+
+        This method is for the coarse alignment. Use the templates without periodic
+        structures (such as filament segments instead of the subunits of a lattice),
+        or remove them by ``cutoff``, because periodic structures give multiple peaks
+        of the ZNCC. Then refine the alignment by :meth:`refine_tilt_series`.
+
+        Parameters
+        ----------
+        references : sequence of (Molecules, template)
+            Particles and their templates. The templates must be in the pixel size of
+            ``scale`` and in the same contrast as the subtomograms of this loader.
+        max_shift : float, default is 20.0
+            Maximum shift of the particles in the tilt images from the predicted
+            positions in nm.
+        cutoff : float, optional
+            Cutoff frequency of the low-pass filter applied to both the projections and
+            the tilt images, in the same unit as the alignment models (cycles per pixel
+            of ``scale``, 0.5 is the Nyquist frequency). No filter by default.
+        group_by : str, optional
+            Name of the feature column of the molecules. The molecules of the same
+            reference with the same value of the feature share the 3D offset, such as
+            the molecules on the same filament. By default, each molecule has its own
+            offset.
+        position_sigma : float or None, default is 10.0
+            Standard deviation of the prior of the offsets of the molecules in nm. The
+            penalty of each molecule is ``|offset|^2 / (2 * position_sigma^2)``,
+            compared with its ZNCC summed over the tilts. It keeps the offsets that
+            cannot be determined by the tilt images, such as along filaments. If None,
+            the molecules are not moved.
+        tilt_axis : "fixed" or "global", default is "global"
+            If "global", the rotation of all the tilt images (the change of the tilt
+            axis angle common to all the tilts) is optimized.
+        max_tilt_angle_change : float, default is 0.0
+            Maximum change of each tilt angle from the current one in degrees, such as
+            1.0 for ±1° (approximately, as the mean change is subtracted). The tilt
+            angles are not optimized if 0.
+        progressive : bool, default is True
+            Whether to add the tilts one by one in the first iteration. If false, the
+            shift of each tilt is searched independently within ``max_shift`` at
+            first.
+        niter : int, default is 3
+            Maximum number of iterations of computing the ZNCC and optimizing the
+            parameters. The iteration stops if the particles move less than 0.1 pixel.
+        batch_size : int, default is 16
+            Number of particles processed at once.
+        ctf : bool, default is False
+            If true, the CTF is applied to the projections of the templates, as
+            :meth:`refine_tilt_series`.
+
+        Returns
+        -------
+        TiltSeriesAlignment
+            Named tuple of ``loader``, a new loader with the aligned tilt series,
+            ``molecules``, the list of the molecules of the references moved by the
+            offsets (in the tomogram of the aligned tilt series), and ``scores``, the
+            list of the ZNCC (N, T) of the molecules in each tilt image at the aligned
+            positions.
+
+        Examples
+        --------
+        >>> result = loader.align_tilt_series(
+        ...     [(segments, tube_template)], max_shift=20.0, cutoff=0.2,
+        ...     group_by="spline-id",
+        ... )
+        >>> refined = result.loader.refine_tilt_series(
+        ...     [(lattice_molecules, subunit_template)], max_shift=2.0
+        ... )
+        """
+        from acryo.loader._tilt_align import align_tilt_series
+        from acryo.loader._tilt_refine import ParticleSet
+
+        if tilt_axis not in ("fixed", "global"):
+            raise ValueError(
+                f"'tilt_axis' must be 'fixed' or 'global', got {tilt_axis!r}."
+            )
+        particle_sets: list[ParticleSet] = []
+        groups: list[NDArray[np.intp]] = []
+        ngroups = 0
+        for mole, template in references:
+            pos, rotations = self._to_tilt_series_frame(mole)
+            particle_sets.append(
+                ParticleSet(
+                    pos - self.tomogram_center,
+                    rotations,
+                    self.normalize_template(template),
+                )
+            )
+            if group_by is None or mole.count() == 0:
+                inverse = np.arange(mole.count())
+            else:
+                values = mole.features[group_by].to_numpy()
+                _, inverse = np.unique(values, return_inverse=True)
+            groups.append(inverse.ravel() + ngroups)
+            ngroups += int(inverse.max()) + 1 if inverse.size > 0 else 0
+        tilt_series, images = self._tilt_images()
+        result = align_tilt_series(
+            tilt_series,
+            images,
+            particle_sets,
+            np.concatenate(groups) if groups else np.zeros(0, dtype=np.intp),
+            scale=self.scale,
+            max_shift=max_shift,
+            cutoff=cutoff,
+            position_sigma=position_sigma,
+            fit_angle=tilt_axis == "global",
+            max_tilt_angle_change=max_tilt_angle_change,
+            progressive=progressive,
+            niter=niter,
+            batch_size=batch_size,
+            ctf=self._projection_ctf(tilt_series) if ctf else None,
+        )
+        # the geometry is in nm, so it does not depend on the binning of the images
+        aligned = self.tilt_series.replace(
+            tilt_angles=result.tilt_series.tilt_angles,
+            tilt_axis_angle=result.tilt_series.tilt_axis_angle,
+            sample_translations=result.tilt_series.sample_translations,
+        )
+        molecules: list[Molecules] = []
+        scores: list[NDArray[np.float32]] = []
+        start = 0
+        for (mole, _), group in zip(references, groups):
+            shifts = result.offsets[group]
+            if self.tomo_hand == -1:
+                # the offsets in the mirrored tomogram
+                shifts[:, 0] *= -1
+            molecules.append(mole.translate(shifts))
+            scores.append(result.scores[start : start + mole.count()])
+            start += mole.count()
+        return TiltSeriesAlignment(self.with_tilt_series(aligned), molecules, scores)
+
     def score_on_tilt(
         self,
         templates: list[TemplateInputType],
@@ -896,6 +1082,17 @@ class BackProjectionLoader(LoaderBase):
     def _default_align_kwargs(self) -> dict[str, Any]:
         """Return default keyword arguments for alignment."""
         return {"tilt": self.tilt_model}
+
+
+class TiltSeriesAlignment(NamedTuple):
+    """The result of :meth:`BackProjectionLoader.align_tilt_series`."""
+
+    loader: BackProjectionLoader
+    """A new loader with the aligned tilt series."""
+    molecules: list[Molecules]
+    """Molecules of each reference moved by the offsets."""
+    scores: list[NDArray[np.float32]]
+    """ZNCC (N, T) of the molecules of each reference in each tilt image."""
 
 
 class _ImageCache:
