@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import Callable, NamedTuple, Sequence
+from typing import Callable, Literal, NamedTuple, Sequence
 import warnings
 
 import numpy as np
@@ -21,6 +21,7 @@ from acryo.loader._tilt_refine import (
     _subpixel_peak,
 )
 from acryo.projection import TiltSeries
+from acryo.projection._tilt_series import _rotation
 
 # The correlation maps are padded by zeros, so that the particles are not pulled out of
 # the maps.
@@ -41,7 +42,8 @@ class TiltAlignment(NamedTuple):
     """The result of :func:`align_tilt_series`."""
 
     tilt_series: TiltSeries
-    offsets: NDArray[np.float64]  # (G, 3) offsets of the particle groups in nm
+    points: NDArray[np.float64]  # (N, 3) aligned positions of the particles in nm
+    rotation: NDArray[np.float64]  # (3, 3) rotation of the particles in the tomogram
     scores: NDArray[np.float32]  # (N, T) correlation of the particles
 
 
@@ -54,8 +56,9 @@ def align_tilt_series(
     max_shift: nm,
     cutoff: float | None = None,
     position_sigma: nm | None = 10.0,
-    fit_angle: bool = True,
+    tilt_axis: Literal["fixed", "global", "per_tilt"] = "global",
     max_tilt_angle_change: degree = 0.0,
+    max_x_tilt_change: degree = 0.0,
     progressive: bool = True,
     niter: int = 3,
     batch_size: int = 16,
@@ -65,13 +68,22 @@ def align_tilt_series(
 
     For each particle and tilt, the projection of the template is compared with the
     tilt image around the projected position by ZNCC within ``max_shift``. The shifts
-    of the tilt images, the rotation of all the tilt images (tilt axis angle), the tilt
-    angles and the 3D offsets of the groups of particles are optimized together to
-    maximize the sum of the ZNCC of all the particles in all the tilt images, as the
-    alignment of a tilt series using fiducial markers. The mean offset of the particles
-    and the mean change of the tilt angles are fixed to zero. The ZNCC is computed for
+    of the tilt images, the rotation of the tilt images (tilt axis angle), the tilt
+    angles, the x tilts and the 3D offsets of the groups of particles are optimized
+    together to maximize the sum of the ZNCC of all the particles in all the tilt
+    images, as the alignment of a tilt series using fiducial markers. The mean offset
+    of the particles and the mean changes of the tilt angles and the x tilts are fixed
+    to zero. The ZNCC is computed for
     the alignment at the beginning of each iteration, and the projections of the
     templates are not updated by the corrections during the optimization.
+
+    The particles are picked in the tomogram of the input alignment, which is rotated
+    around the normal of the sample if the tilt axis angle is wrong. Unless
+    ``position_sigma`` is None, the rotation common to all the tilt images is applied
+    together with the opposite rotation of the particles (positions and orientations)
+    around the normal of the sample through the tomogram center, which keeps the
+    projections at the zero tilt. The prior of the offsets is of the offsets after the
+    rotation.
 
     In the first iteration, the tilts are added in the order of their absolute tilt
     angles if ``progressive``. The ZNCC of each added tilt is computed around the
@@ -105,12 +117,17 @@ def align_tilt_series(
     position_sigma : float, optional
         Standard deviation of the prior of the offsets of the particles in nm. The
         penalty of each particle is ``|offset|^2 / (2 * position_sigma^2)``, compared
-        with its ZNCC summed over the tilts. If None, the particles are not moved.
-    fit_angle : bool, default is True
-        Whether to optimize the rotation of all the tilt images.
+        with its ZNCC summed over the tilts. If None, the particles are not moved (nor
+        rotated with the tilt images).
+    tilt_axis : "fixed", "global" or "per_tilt", default is "global"
+        The rotation of the tilt images to optimize: none, the one common to all the
+        tilt images, or the one of each tilt image.
     max_tilt_angle_change : float, default is 0.0
         Maximum change of each tilt angle in degrees from the input. The tilt angles
         are not optimized if 0.
+    max_x_tilt_change : float, default is 0.0
+        Maximum change of each x tilt (``x_tilts``) in degrees from the input. The x
+        tilts are not optimized if 0.
     progressive : bool, default is True
         Whether to add the tilts one by one in the first iteration.
     niter : int, default is 3
@@ -131,11 +148,12 @@ def align_tilt_series(
         raise ValueError(f"'cutoff' must be positive, got {cutoff!r}.")
     if position_sigma is not None and position_sigma <= 0:
         raise ValueError(f"'position_sigma' must be positive, got {position_sigma!r}.")
-    if max_tilt_angle_change < 0:
-        raise ValueError(
-            "'max_tilt_angle_change' must be non-negative, got "
-            f"{max_tilt_angle_change!r}."
-        )
+    for name, value in [
+        ("max_tilt_angle_change", max_tilt_angle_change),
+        ("max_x_tilt_change", max_x_tilt_change),
+    ]:
+        if value < 0:
+            raise ValueError(f"'{name}' must be non-negative, got {value!r}.")
     if niter < 1:
         raise ValueError(f"'niter' must be positive, got {niter!r}.")
     if batch_size <= 0:
@@ -154,13 +172,19 @@ def align_tilt_series(
         prior = (spacing / position_sigma) ** 2  # per pixel^2 of the offsets
     starts = np.cumsum([0] + [len(ps.points) for ps in particle_sets])
     points = np.concatenate([ps.points for ps in particle_sets])  # (N, 3) in nm
+    # The particles are at origin + rotation @ (points + offsets - origin), rotated
+    # around the origin of the sample space (the tomogram center), as the tilt images.
+    tomo2sample = tilt_series.tomo2sample[:3, :3]
+    origin = np.linalg.solve(tomo2sample, -tilt_series.tomo2sample[:3, 3])
     offsets = np.zeros((int(groups.max()) + 1, 3))  # in nm
+    rotation = np.eye(3)
     tilt_changes = np.zeros(tilt_series.ntilts)  # in radian
+    x_tilt_changes = np.zeros(tilt_series.ntilts)  # in radian
 
     for i in range(niter):
-        moved = points + offsets[groups]
+        moved = origin + (points + offsets[groups] - origin) @ rotation.T
         moved_sets = [
-            ps._replace(points=moved[s0:s1])
+            ps._replace(points=moved[s0:s1], rotations=rotation @ ps.rotations)
             for ps, s0, s1 in zip(particle_sets, starts[:-1], starts[1:])
         ]
 
@@ -191,10 +215,17 @@ def align_tilt_series(
             groups,
             radius=geometry.radius,
             prior=prior,
-            offsets=offsets / spacing,
-            fit_angle=fit_angle,
+            # the prior is of the offsets in the rotated tomogram
+            offsets=offsets @ rotation.T / spacing,
+            tilt_axis=tilt_axis,
             max_tilt=math.radians(max_tilt_angle_change),
             tilt_changes=tilt_changes,
+            tilt_rotations=_rotation(tilt_series.tilt_angles, "y")[:, :3, :3],
+            max_x_tilt=math.radians(max_x_tilt_change),
+            x_tilt_changes=x_tilt_changes,
+            sample_rotations=(
+                None if prior is None else tilt_series.sample2scope[:, :3, :3]
+            ),
         )
         if i == 0 and progressive:
             order = np.argsort(np.abs(tilt_series.tilt_angles), kind="stable")
@@ -216,24 +247,47 @@ def align_tilt_series(
             sample_translations=tilt_series.sample_translations
             + corrections.shifts * spacing,
             tilt_axis_angle=tilt_series.tilt_axis_angle
-            + math.degrees(corrections.angle),
+            + np.degrees(corrections.angles),
             tilt_angles=tilt_series.tilt_angles + np.degrees(corrections.tilt_angles),
+            x_tilts=tilt_series.x_tilts + np.degrees(corrections.x_tilts),
         )
-        offsets = offsets + corrections.offsets * spacing
+        # the offsets in the rotated tomogram to the ones before the rotation
+        current = corrections.offsets * spacing
+        offsets = offsets + np.linalg.solve(rotation, current.T).T
+        # rotation around the normal of the sample, in the tomogram
+        rz = _axis_rotation(np.asarray(corrections.particle_rotation), "z")[0]
+        rotation = np.linalg.solve(tomo2sample, rz @ tomo2sample) @ rotation
         tilt_changes = tilt_changes + corrections.tilt_angles
+        x_tilt_changes = x_tilt_changes + corrections.x_tilts
         displacement = np.linalg.norm(problem.displacements(corrections), axis=-1)
         if displacement.max() < _TOLERANCE:
             break
-    if (nlimit := problem.tilts_at_limit.size) > 0:
-        warnings.warn(
-            f"The changes of {nlimit} tilt angles reached the limit of "
-            f"±{max_tilt_angle_change:g}°. The tilt angles may not be determined by "
-            "the particles, such as when the particles are few or at similar depths, "
-            "or 'max_tilt_angle_change' is too small.",
-            UserWarning,
-            stacklevel=3,
-        )
-    return TiltAlignment(tilt_series, offsets, scores)
+    _warn_at_limit(
+        problem.tilts_at_limit,
+        "tilt angles",
+        "max_tilt_angle_change",
+        max_tilt_angle_change,
+    )
+    _warn_at_limit(
+        problem.x_tilts_at_limit, "x tilts", "max_x_tilt_change", max_x_tilt_change
+    )
+    moved = origin + (points + offsets[groups] - origin) @ rotation.T
+    return TiltAlignment(tilt_series, moved, rotation, scores)
+
+
+def _warn_at_limit(
+    at_limit: NDArray[np.intp], what: str, name: str, limit: degree
+) -> None:
+    """Warn that the changes of the tilts reached the limit of the option ``name``."""
+    if (nlimit := at_limit.size) == 0:
+        return
+    warnings.warn(
+        f"The changes of {nlimit} {what} reached the limit of ±{limit:g}°. The "
+        f"{what} may not be determined by the particles, such as when the particles "
+        f"are few or at similar depths, or '{name}' is too small.",
+        UserWarning,
+        stacklevel=4,
+    )
 
 
 def _microscope_frame(
@@ -284,27 +338,58 @@ class _Corrections(NamedTuple):
     """Corrections of the alignment relative to the current alignment."""
 
     shifts: NDArray[np.float64]  # (T, 2) shifts of the tilt images in pixel
-    angle: float  # rotation of all the tilt images in radian
+    angles: NDArray[np.float64]  # (T,) rotations of the tilt images in radian
     tilt_angles: NDArray[np.float64]  # (T,) changes of the tilt angles in radian
+    x_tilts: NDArray[np.float64]  # (T,) changes of the x tilts in radian
     offsets: NDArray[np.float64]  # (G, 3) offsets of the particle groups in pixel
+    # rotation of the particles around the normal of the sample in radian, which is
+    # minus the rotation common to the tilt images if coupled
+    particle_rotation: float = 0.0
+
+
+class _Positions(NamedTuple):
+    """Positions of the particles in each step of the displacement model."""
+
+    offset: NDArray[np.float64]  # (N, Ta, 3) in the microscope frame with the offsets
+    rotated: NDArray[np.float64]  # (N, Ta, 3) rotated by the particle rotation
+    xtilted: NDArray[np.float64]  # (N, Ta, 3) rotated by the changes of the x tilts
+    detected: NDArray[np.float64]  # (N, Ta, 2) before the rotation of the tilt images
+    disp: NDArray[np.float64]  # (N, Ta, 2) displacements in the tilt images
 
 
 class _AlignmentProblem:
     """Maximize the correlation of the particles over the corrections of alignment.
 
     The position of the n-th particle in the microscope frame of the t-th tilt is
-    ``v = v0[n, t] + L[t] @ offsets[g[n]]``, which is rotated by the change of the tilt
-    angle ``e[t]`` around the y axis as ``w = (v_y, sin(e) v_z + cos(e) v_x)``. The
+    ``v = v0[n, t] + L[t] @ offsets[g[n]]``. If ``sample_rotations`` is given, it is
+    rotated around the normal of the sample through its origin by ``p``, the particle
+    rotation, as ``v' = S[t] @ Z(p) @ S[t].T @ v``, where ``S`` is the rotation from
+    the sample to the microscope frame and ``Z`` is the rotation around the z axis. The
+    image of the origin is the center of the rotation of the tilt images, so the
+    projections at the zero tilt are kept if the rotations cancel. It is rotated by the
+    change of the x tilt
+    ``a[t]`` as ``u = Y[t] @ X(a) @ Y[t].T @ v'``, where ``Y`` is the rotation by the
+    tilt angle and ``X`` is the rotation around the x axis (the x tilt is applied to
+    the sample before the tilt angle), and then by the change of the tilt angle ``e[t]``
+    around the y axis as ``w = (u_y, sin(e) u_z + cos(e) u_x)``. The
     displacement of the particle in the tilt image from the current alignment is
-    ``R @ D[t] @ w - D[t] @ v0_yx + shifts[t]``, where ``D`` is the rotation by the tilt
-    axis angle and ``R`` is the rotation of all the tilt images. The correlation is the
+    ``R[t] @ D[t] @ w - D[t] @ v0_yx + shifts[t]``, where ``D`` is the rotation by the
+    tilt axis angle and ``R`` is the rotation of the tilt image. The correlation is the
     value of the map at the displacement from the center of the map. The maps (and the
     projections of the templates) are not changed by the corrections.
 
+    The rotation of the tilt images is ``r + d[t]``, where ``r`` is common to the tilt
+    images and ``d`` is the deviation of each tilt if ``tilt_axis`` is "per_tilt". If
+    ``sample_rotations`` is given, the particle rotation is ``-r``, so the projections
+    at the zero tilt are kept by ``r``, and the mean of ``d`` (of the tilts in the
+    optimization) is fixed to zero. Otherwise, the particles are not rotated, and ``r``
+    is fixed to zero if "per_tilt".
+
     The weighted mean of the offsets is fixed to zero, as the shifts of the tilt images
-    can compensate a common offset. The mean change of the tilt angles (of the tilts in
-    the optimization) is also fixed to zero, as it is a rotation of the tomogram around
-    the tilt axis. The shift of each tilt image is kept at the center of its maps by a
+    can compensate a common offset. The mean changes of the tilt angles and the x tilts
+    (of the tilts in the optimization) are also fixed to zero, as they are rotations of
+    the tomogram around the y and x axes. The shift of each tilt image is kept at the
+    center of its maps by a
     prior along the direction in which the ZNCC summed over particles is flat (see
     :meth:`_consensus`), such as along parallel filaments.
 
@@ -327,13 +412,24 @@ class _AlignmentProblem:
     offsets : (G, 3) array
         Offsets of the groups already applied to the particles, in pixel. The prior is
         of the total offsets.
-    fit_angle : bool
-        Whether to optimize the rotation of the tilt images.
+    tilt_axis : "fixed", "global" or "per_tilt"
+        The rotation of the tilt images to optimize: none, the one common to all the
+        tilt images, or the one of each tilt image.
     max_tilt : float, default is 0.0
         Maximum change of the tilt angles in radian, including ``tilt_changes``. Not
         optimized if 0.
     tilt_changes : (T,) array, optional
         Changes of the tilt angles already applied, in radian.
+    tilt_rotations : (T, 3, 3) array, optional
+        Rotation ``Y`` of each tilt by the tilt angle, required if ``max_x_tilt > 0``.
+    max_x_tilt : float, default is 0.0
+        Maximum change of the x tilts in radian, including ``x_tilt_changes``. Not
+        optimized if 0.
+    x_tilt_changes : (T,) array, optional
+        Changes of the x tilts already applied, in radian.
+    sample_rotations : (T, 3, 3) array, optional
+        Rotation ``S`` from the sample space to the microscope frame of each tilt. If
+        given, the particles are rotated with the rotation common to the tilt images.
     """
 
     def __init__(
@@ -345,10 +441,18 @@ class _AlignmentProblem:
         radius: int,
         prior: float | None,
         offsets: NDArray[np.float64],
-        fit_angle: bool,
+        tilt_axis: Literal["fixed", "global", "per_tilt"],
         max_tilt: float = 0.0,
         tilt_changes: NDArray[np.float64] | None = None,
+        tilt_rotations: NDArray[np.float64] | None = None,
+        max_x_tilt: float = 0.0,
+        x_tilt_changes: NDArray[np.float64] | None = None,
+        sample_rotations: NDArray[np.float64] | None = None,
     ):
+        if tilt_axis not in ("fixed", "global", "per_tilt"):
+            raise ValueError(f"Invalid 'tilt_axis': {tilt_axis!r}.")
+        if max_x_tilt > 0 and tilt_rotations is None:
+            raise ValueError("'tilt_rotations' is required to optimize the x tilts.")
         npoints, ntilts = scope.shape[:2]
         # the projected positions before the shifts of the tilt images
         projected = np.einsum("tij,ntj->nti", detector, scope[..., 1:])
@@ -375,19 +479,35 @@ class _AlignmentProblem:
         self._counts = counts.astype(np.float64)  # weights of the groups
         self._prior = prior
         self._offsets = offsets
-        self._fit_angle = fit_angle
+        self._tilt_axis = tilt_axis
+        # number of the parameters of the rotations, the common one (fixed to zero if
+        # "fixed") and the deviations of the tilts if "per_tilt"
+        self._nangles = 1 + ntilts if tilt_axis == "per_tilt" else 1
+        # whether the particles are rotated with the common rotation of the tilt images
+        self._coupled = sample_rotations is not None and tilt_axis != "fixed"
+        self._sample_rotations = sample_rotations
         self._max_tilt = max_tilt
-        if tilt_changes is None:
-            tilt_changes = np.zeros(ntilts)
-        self._tilt_changes = tilt_changes
-        # tilts whose angles reached the limit in the last optimization
+        self._tilt_changes = np.zeros(ntilts) if tilt_changes is None else tilt_changes
+        self._tilt_rotations = tilt_rotations
+        self._max_x_tilt = max_x_tilt
+        self._x_tilt_changes = (
+            np.zeros(ntilts) if x_tilt_changes is None else x_tilt_changes
+        )
+        # tilts whose angles (x tilts) reached the limit in the last optimization
         self.tilts_at_limit = np.zeros(0, dtype=np.intp)
+        self.x_tilts_at_limit = np.zeros(0, dtype=np.intp)
         # The rotations are optimized as the displacements at the typical distances
         # from the axes, so that they are of the same order as the shifts.
         rms = float(np.sqrt((projected**2).sum(axis=-1).mean()))
         self._angle_unit = 1.0 / max(rms, 1.0)
         depth = float(np.sqrt((scope[..., 0] ** 2).mean()))
         self._tilt_unit = 1.0 / max(depth, 1.0)
+        self._x_tilt_unit = 1.0
+        if tilt_rotations is not None:
+            # distances from the x axis of the sample
+            sample = np.einsum("tji,ntj->nti", tilt_rotations, scope)
+            dist = float(np.sqrt((sample[..., :2] ** 2).sum(axis=-1).mean()))
+            self._x_tilt_unit = 1.0 / max(dist, 1.0)
 
     @property
     def ntilts(self) -> int:
@@ -405,7 +525,8 @@ class _AlignmentProblem:
         """No correction."""
         return _Corrections(
             np.zeros((self.ntilts, 2)),
-            0.0,
+            np.zeros(self.ntilts),
+            np.zeros(self.ntilts),
             np.zeros(self.ntilts),
             np.zeros((self.ngroups, 3)),
         )
@@ -435,7 +556,7 @@ class _AlignmentProblem:
         self, corrections: _Corrections, tilts: Sequence[int] | None = None
     ) -> NDArray[np.float64]:
         """Displacements (N, Ta, 2) of the particles in the tilts in pixel."""
-        return self._displace(corrections, tilts)[2]
+        return self._displace(corrections, tilts).disp
 
     def scores(self, corrections: _Corrections) -> NDArray[np.float32]:
         """ZNCC (N, T) of the particles at the corrected alignment."""
@@ -471,13 +592,14 @@ class _AlignmentProblem:
 
         The maps of each added tilt are computed by ``compute_maps(t, displacements)``
         around the displacements (N, 2) in pixel predicted from the current corrections
-        and the shift of the ``preceding`` tilt.
+        and the shift (and the rotation) of the ``preceding`` tilt.
         """
         corrections = self.zeros()
         active = np.zeros(self.ntilts, dtype=bool)
         for t, prev in zip(order, preceding):
             shift = corrections.shifts[prev].copy()
             corrections.shifts[t] = shift
+            corrections.angles[t] = corrections.angles[prev]
             centers = self.displacements(corrections, [t])[:, 0]
             self.set_maps(compute_maps(t, centers), t, centers, shift)
             corrections.shifts[t] = self._consensus(corrections, t)
@@ -495,7 +617,8 @@ class _AlignmentProblem:
     ) -> _Corrections:
         """Optimize the corrections using the maps of the given tilts.
 
-        The shifts of the other tilts are kept, and their tilt angles are not changed.
+        The shifts and the rotations (if "per_tilt") of the other tilts are kept, and
+        their tilt angles and x tilts are not changed.
         """
         radius = self._radius
         active = np.zeros(self.ntilts, dtype=bool)
@@ -507,18 +630,26 @@ class _AlignmentProblem:
                     bounds.append((center - radius, center + radius))
                 else:
                     bounds.append((value, value))
-        if self._fit_angle:
-            max_angle = min(float(radius), _MAX_ANGLE / self._angle_unit)
-            bounds.append((-max_angle, max_angle))
-        else:
+        max_angle = min(float(radius), _MAX_ANGLE / self._angle_unit)
+        # the common rotation, and the deviations of the tilts if "per_tilt"
+        if self._tilt_axis == "fixed" or (
+            self._tilt_axis == "per_tilt" and not self._coupled
+        ):
             bounds.append((0.0, 0.0))
-        # changes of the tilt angles within the limit including the applied ones
-        tilt_bounds = np.zeros((self.ntilts, 2))
-        if self._max_tilt > 0:
-            tilt_bounds[active, 0] = -self._max_tilt - self._tilt_changes[active]
-            tilt_bounds[active, 1] = self._max_tilt - self._tilt_changes[active]
+        else:
+            bounds.append((-max_angle, max_angle))
+        if self._tilt_axis == "per_tilt":
+            for t, value in enumerate(self._pack_angles(init)[1:]):
+                if active[t]:
+                    bounds.append((-max_angle, max_angle))
+                else:
+                    bounds.append((value, value))
+        tilt_bounds = _change_bounds(self._max_tilt, self._tilt_changes, active)
         tilt_bounds /= self._tilt_unit
+        x_bounds = _change_bounds(self._max_x_tilt, self._x_tilt_changes, active)
+        x_bounds /= self._x_tilt_unit
         bounds += [(float(lo), float(hi)) for lo, hi in tilt_bounds]
+        bounds += [(float(lo), float(hi)) for lo, hi in x_bounds]
         if self._prior is None:
             bounds += [(0.0, 0.0)] * (3 * self.ngroups)
         else:
@@ -532,38 +663,79 @@ class _AlignmentProblem:
             bounds=bounds,
             options={"maxiter": maxiter},
         )
+        ntilts = self.ntilts
+        start = 2 * ntilts + self._nangles
         if self._max_tilt > 0:
-            ntilts = self.ntilts
-            tilt_params = result.x[2 * ntilts + 1 : 3 * ntilts + 1, np.newaxis]
-            at_limit = np.isclose(tilt_params, tilt_bounds, rtol=0, atol=1e-6).any(1)
-            self.tilts_at_limit = np.flatnonzero(active & at_limit)
+            tilt_params = result.x[start : start + ntilts]
+            self.tilts_at_limit = _at_limit(tilt_params, tilt_bounds, active)
+        if self._max_x_tilt > 0:
+            x_params = result.x[start + ntilts : start + 2 * ntilts]
+            self.x_tilts_at_limit = _at_limit(x_params, x_bounds, active)
         return self._unpack(result.x, tilts)
 
     def _pack(self, corrections: _Corrections) -> NDArray[np.float64]:
         return np.concatenate(
             [
                 corrections.shifts.ravel(),
-                [corrections.angle / self._angle_unit],
+                self._pack_angles(corrections),
                 corrections.tilt_angles / self._tilt_unit,
+                corrections.x_tilts / self._x_tilt_unit,
                 corrections.offsets.ravel(),
             ]
         )
+
+    def _pack_angles(self, corrections: _Corrections) -> NDArray[np.float64]:
+        """The parameters of the common rotation and the deviations ("per_tilt")."""
+        if self._coupled:
+            common = -corrections.particle_rotation
+        elif self._tilt_axis == "global":
+            common = float(corrections.angles[0])
+        else:
+            common = 0.0
+        params = [common]
+        if self._tilt_axis == "per_tilt":
+            params += list(corrections.angles - common)
+        return np.array(params) / self._angle_unit
 
     def _unpack(
         self, params: NDArray[np.float64], tilts: NDArray[np.intp] | None = None
     ) -> _Corrections:
         """The corrections of the parameters, optimized with the tilts."""
-        ntilts = self.ntilts
+        ntilts, nangles = self.ntilts, self._nangles
         shifts = params[: 2 * ntilts].reshape(ntilts, 2).copy()
-        angle = float(params[2 * ntilts]) * self._angle_unit
-        tilt_angles = params[2 * ntilts + 1 : 3 * ntilts + 1] * self._tilt_unit
-        free = params[3 * ntilts + 1 :].reshape(-1, 3)
+        common = float(params[2 * ntilts]) * self._angle_unit
+        angles = np.full(ntilts, common)
+        if self._tilt_axis == "per_tilt":
+            deviations = params[2 * ntilts + 1 : 2 * ntilts + nangles]
+            deviations = deviations * self._angle_unit
+            if self._coupled:
+                deviations = self._fix_deviation_gauge(deviations, tilts)
+            angles += deviations
+        start = 2 * ntilts + nangles
+        tilt_angles = params[start : start + ntilts] * self._tilt_unit
+        x_tilts = params[start + ntilts : start + 2 * ntilts] * self._x_tilt_unit
+        free = params[start + 2 * ntilts :].reshape(-1, 3)
         return _Corrections(
             shifts,
-            angle,
+            angles,
             self._fix_tilt_gauge(tilt_angles, tilts),
+            self._fix_tilt_gauge(x_tilts, tilts),
             self._fix_gauge(free),
+            particle_rotation=-common if self._coupled else 0.0,
         )
+
+    def _fix_deviation_gauge(
+        self, values: NDArray[np.float64], tilts: NDArray[np.intp] | None
+    ) -> NDArray[np.float64]:
+        """Subtract the mean over the tilts, and keep the others.
+
+        This is symmetric, so the same is applied to the gradient.
+        """
+        if tilts is None:
+            tilts = self.all_tilts
+        out = values.copy()
+        out[tilts] -= values[tilts].mean()
+        return out
 
     def _fix_tilt_gauge(
         self, values: NDArray[np.float64], tilts: NDArray[np.intp] | None
@@ -595,35 +767,75 @@ class _AlignmentProblem:
 
     def _displace(
         self, corrections: _Corrections, tilts: Sequence[int] | None = None
-    ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
-        """The displacements (N, Ta, 2) in pixel and the intermediate positions.
-
-        Returns the positions (N, Ta, 3) in the microscope frame, the positions
-        (N, Ta, 2) on the detector before the rotation of all the tilt images, and the
-        displacements.
-        """
+    ) -> _Positions:
+        """The displacements (N, Ta, 2) in pixel and the intermediate positions."""
         if tilts is None:
             tilts = self.all_tilts
-        scope = self._scope[:, tilts] + np.einsum(
+        offset = self._scope[:, tilts] + np.einsum(
             "tij,nj->nti", self._linear[tilts], corrections.offsets[self._groups]
         )
+        if self._coupled:
+            prot, _ = self._particle_rotations(corrections.particle_rotation, tilts)
+            rotated = np.einsum("tij,ntj->nti", prot, offset)
+        else:
+            rotated = offset
+        if self._max_x_tilt > 0:
+            xrot, _ = self._x_tilt_rotations(corrections.x_tilts, tilts)
+            xtilted = np.einsum("tij,ntj->nti", xrot, rotated)
+        else:
+            xtilted = rotated
         tilt = corrections.tilt_angles[tilts]
         cos, sin = np.cos(tilt), np.sin(tilt)
         tilted = np.stack(
-            [scope[..., 1], sin * scope[..., 0] + cos * scope[..., 2]], axis=-1
+            [xtilted[..., 1], sin * xtilted[..., 0] + cos * xtilted[..., 2]], axis=-1
         )
         detected = np.einsum("tij,ntj->nti", self._detector[tilts], tilted)
-        rot, _ = _rotation_2d(corrections.angle)
-        disp = detected @ rot.T - self._projected[:, tilts] + corrections.shifts[tilts]
-        return scope, detected, disp
+        rot, _ = _rotation_2d(corrections.angles[tilts])
+        disp = (
+            np.einsum("tij,ntj->nti", rot, detected)
+            - self._projected[:, tilts]
+            + corrections.shifts[tilts]
+        )
+        return _Positions(offset, rotated, xtilted, detected, disp)
+
+    def _particle_rotations(
+        self, angle: float, tilts: Sequence[int]
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        """Rotations (Ta, 3, 3) of the microscope frame by the particle rotation.
+
+        The particles are rotated around the normal of the sample, which is conjugated
+        by the rotation from the sample to the microscope frame. The derivatives with
+        respect to the angle are also returned.
+        """
+        assert self._sample_rotations is not None
+        s = self._sample_rotations[tilts]
+        rz, drz = _axis_rotation(np.asarray(angle), "z")
+        st = s.transpose(0, 2, 1)
+        return s @ rz @ st, s @ drz @ st
+
+    def _x_tilt_rotations(
+        self, x_tilts: NDArray[np.float64], tilts: Sequence[int]
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        """Rotations (Ta, 3, 3) of the microscope frame by the changes of the x tilts.
+
+        The x tilts are applied before the tilt angles, so the rotation around the x
+        axis of the sample is conjugated by the rotation of the tilt angle. The
+        derivatives with respect to the changes are also returned.
+        """
+        assert self._tilt_rotations is not None
+        y = self._tilt_rotations[tilts]
+        rx, drx = _axis_rotation(x_tilts[tilts], "x")
+        yt = y.transpose(0, 2, 1)
+        return y @ rx @ yt, y @ drx @ yt
 
     def _loss(
         self, params: NDArray[np.float64], tilts: NDArray[np.intp]
     ) -> tuple[float, NDArray[np.float64]]:
         """Negative sum of the correlation with the prior, and its gradient."""
         corrections = self._unpack(params, tilts)
-        scope, detected, disp = self._displace(corrections, tilts)
-        npoints = scope.shape[0]
+        positions = self._displace(corrections, tilts)
+        disp, detected, xtilted = positions.disp, positions.detected, positions.xtilted
+        npoints = disp.shape[0]
         # positions in the padded maps
         pos = disp - self._centers[:, tilts] + self._radius + _PAD
         index = (np.arange(npoints)[:, np.newaxis] * self.ntilts + tilts).ravel()
@@ -637,21 +849,40 @@ class _AlignmentProblem:
         grad = -np.stack([grad_y, grad_x], axis=-1).reshape(disp.shape)
         grad_shifts = np.zeros((self.ntilts, 2))
         grad_shifts[tilts] = grad.sum(axis=0)
-        rot, drot = _rotation_2d(corrections.angle)
-        grad_angle = float((grad * (detected @ drot.T)).sum()) * self._angle_unit
+        rot, drot = _rotation_2d(corrections.angles[tilts])
+        # gradient with respect to the rotation of each tilt image
+        grad_angles = np.zeros(self.ntilts)
+        grad_angles[tilts] = np.einsum("nti,tij,ntj->t", grad, drot, detected)
+        grad_common = grad_angles.sum()
         # gradients with respect to the positions before the rotations
-        grad_tilted = np.einsum("nti,tij->ntj", grad @ rot, self._detector[tilts])
+        grad_tilted = np.einsum("nti,tij,tjk->ntk", grad, rot, self._detector[tilts])
         tilt = corrections.tilt_angles[tilts]
         cos, sin = np.cos(tilt), np.sin(tilt)
         grad_tilt = np.zeros(self.ntilts)
         grad_tilt[tilts] = (
-            grad_tilted[..., 1] * (cos * scope[..., 0] - sin * scope[..., 2])
+            grad_tilted[..., 1] * (cos * xtilted[..., 0] - sin * xtilted[..., 2])
         ).sum(axis=0)
-        grad_scope = np.stack(
+        grad_xtilted = np.stack(
             [grad_tilted[..., 1] * sin, grad_tilted[..., 0], grad_tilted[..., 1] * cos],
             axis=-1,
         )
-        grad_points = np.einsum("ntk,tkj->nj", grad_scope, self._linear[tilts])
+        grad_x = np.zeros(self.ntilts)
+        if self._max_x_tilt > 0:
+            xrot, dxrot = self._x_tilt_rotations(corrections.x_tilts, tilts)
+            rotated = positions.rotated
+            grad_x[tilts] = np.einsum("nti,tij,ntj->t", grad_xtilted, dxrot, rotated)
+            grad_rotated = np.einsum("nti,tij->ntj", grad_xtilted, xrot)
+        else:
+            grad_rotated = grad_xtilted
+        if self._coupled:
+            # the particle rotation is minus the common rotation
+            prot, dprot = self._particle_rotations(corrections.particle_rotation, tilts)
+            offset = positions.offset
+            grad_common -= np.einsum("nti,tij,ntj->", grad_rotated, dprot, offset)
+            grad_offset = np.einsum("nti,tij->ntj", grad_rotated, prot)
+        else:
+            grad_offset = grad_rotated
+        grad_points = np.einsum("ntk,tkj->nj", grad_offset, self._linear[tilts])
         grad_offsets = np.stack(
             [
                 np.bincount(self._groups, grad_points[:, k], minlength=self.ngroups)
@@ -670,9 +901,16 @@ class _AlignmentProblem:
         loss += 0.5 * float((diff * weighted).sum())
         grad_shifts[tilts] += weighted
         grad_free = self._fix_gauge_grad(grad_offsets)
+        grad_rotations = [np.array([grad_common])]
+        if self._tilt_axis == "per_tilt":
+            if self._coupled:
+                grad_angles = self._fix_deviation_gauge(grad_angles, tilts)
+            grad_rotations.append(grad_angles)
+        grad_rot = np.concatenate(grad_rotations) * self._angle_unit
         grad_tilt = self._fix_tilt_gauge(grad_tilt, tilts) * self._tilt_unit
+        grad_x = self._fix_tilt_gauge(grad_x, tilts) * self._x_tilt_unit
         return loss, np.concatenate(
-            [grad_shifts.ravel(), [grad_angle], grad_tilt, grad_free.ravel()]
+            [grad_shifts.ravel(), grad_rot, grad_tilt, grad_x, grad_free.ravel()]
         )
 
     def _summed_map(
@@ -743,10 +981,59 @@ def _split_directions(
     return curved @ (curved.T @ peak), curvature.max() * flat @ flat.T
 
 
-def _rotation_2d(angle: float) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Rotation matrix of (y, x) by ``angle`` in radian, and its derivative.
+def _change_bounds(
+    limit: float, applied: NDArray[np.float64], active: NDArray[np.bool_]
+) -> NDArray[np.float64]:
+    """(T, 2) bounds of the changes within the limit including the applied ones.
+
+    The changes of the inactive tilts (or all the tilts if the limit is 0) are fixed to
+    zero.
+    """
+    bounds = np.zeros((applied.size, 2))
+    if limit > 0:
+        bounds[active, 0] = -limit - applied[active]
+        bounds[active, 1] = limit - applied[active]
+    return bounds
+
+
+def _at_limit(
+    params: NDArray[np.float64], bounds: NDArray[np.float64], active: NDArray[np.bool_]
+) -> NDArray[np.intp]:
+    """Indices of the active tilts whose parameters are at the bounds."""
+    at_limit = np.isclose(params[:, np.newaxis], bounds, rtol=0, atol=1e-6).any(axis=1)
+    return np.flatnonzero(active & at_limit)
+
+
+def _axis_rotation(
+    angles: NDArray[np.float64], axis: Literal["x", "z"]
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Rotations (..., 3, 3) of (z, y, x) around the axis in radian, and derivatives.
+
+    Same as the rotations of :class:`TiltSeries`, such as the rotation of the sample by
+    ``x_tilts`` around the x axis, and the rotation of the tilt images by
+    ``tilt_axis_angle`` around the z axis.
+    """
+    i, j = {"x": (0, 1), "z": (1, 2)}[axis]
+    c, s = np.cos(angles), np.sin(angles)
+    rot = np.zeros(angles.shape + (3, 3))
+    drot = np.zeros(angles.shape + (3, 3))
+    rot[..., i, i] = rot[..., j, j] = c
+    rot[..., i, j], rot[..., j, i] = s, -s
+    k = 3 - i - j
+    rot[..., k, k] = 1.0
+    drot[..., i, i] = drot[..., j, j] = -s
+    drot[..., i, j], drot[..., j, i] = c, -c
+    return rot, drot
+
+
+def _rotation_2d(
+    angles: NDArray[np.float64],
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Rotation matrices (T, 2, 2) of (y, x) by ``angles`` in radian, and derivatives.
 
     Same as the rotation of the tilt images by ``tilt_axis_angle``.
     """
-    c, s = math.cos(angle), math.sin(angle)
-    return np.array([[c, s], [-s, c]]), np.array([[-s, c], [-c, -s]])
+    c, s = np.cos(angles), np.sin(angles)
+    rot = np.stack([np.stack([c, s], -1), np.stack([-s, c], -1)], -2)
+    drot = np.stack([np.stack([-s, c], -1), np.stack([-c, -s], -1)], -2)
+    return rot, drot
