@@ -2,7 +2,7 @@
 
 # CTFCorrection is in acryo.ctf, and also exported here for compatibility
 from acryo.ctf import CTFCorrection
-from acryo.projection._insertion import CentralSliceInsertion
+from acryo.projection._insertion import CentralSliceInsertion, LocalSliceInsertion
 from acryo.projection._local_shifts import (
     AffineShifts2D,
     FunctionShifts,
@@ -30,6 +30,7 @@ __all__ = [
     "LocalAlignment",
     "LocalShiftModel",
     "LocalShifts2D",
+    "LocalSliceInsertion",
     "TiltImageFilter",
     "TiltImagePreprocessor",
     "TiltSeries",

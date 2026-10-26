@@ -223,6 +223,64 @@ def test_local_detector2tomo():
     assert_allclose(projected, expected, atol=1e-8)
 
 
+def test_position_dependent():
+    ts = _tilt_series()
+    assert not ts.position_dependent
+    rng = np.random.default_rng(12)
+    affine = AffineShifts2D(np.eye(2) + rng.normal(scale=0.03, size=(NTILTS, 2, 2)))
+    assert not ts.replace(local_shifts_2d=affine).position_dependent
+    local = _uniform_alignment(tilt_angles=rng.normal(size=NTILTS))
+    smooth = LocalShifts2D(np.ones((NTILTS, 2, 2, 3)), [300.0, 300.0])
+    for model in [
+        local,
+        smooth,
+        AffineShifts2D(affine.matrices, base=local),
+        FunctionShifts(lambda p: np.zeros_like(p)),
+    ]:
+        assert model.position_dependent
+        assert ts.replace(local_shifts_2d=model).position_dependent
+    assert ts.replace(local_shifts=lambda p: np.zeros_like(p)).position_dependent
+
+
+def test_local_detector2tomo_at():
+    rng = np.random.default_rng(13)
+    points = _points(n=6)
+    affine = AffineShifts2D(np.eye(2) + rng.normal(scale=0.03, size=(NTILTS, 2, 2)))
+    ts = _tilt_series(local_shifts_2d=affine)
+    out = ts.local_detector2tomo_at(points)
+    assert out.shape == (6, NTILTS, 3, 3)
+    assert_allclose(out, np.broadcast_to(ts.local_detector2tomo, out.shape), atol=1e-8)
+    nested = ts.local_detector2tomo_at(points.reshape(2, 3, 3))
+    assert nested.shape == (2, 3, NTILTS, 3, 3)
+
+    # the local alignments of the areas differ in the tilt angles and the rotation
+    gy, gx = 3, 4
+    angles = np.deg2rad(rng.normal(scale=1.0, size=(gy, gx, NTILTS)))
+    c, s = np.cos(angles), np.sin(angles)
+    local = LocalAlignment(
+        origin=[-100.0, -150.0],
+        spacing=[100.0, 100.0],
+        tilt_angles=rng.normal(scale=2.0, size=(gy, gx, NTILTS)),
+        x_tilts=rng.normal(scale=1.0, size=(gy, gx, NTILTS)),
+        matrices=np.stack([np.stack([c, -s], -1), np.stack([s, c], -1)], -2),
+    )
+    ts = ts.replace(local_shifts_2d=AffineShifts2D(affine.matrices, base=local))
+    maps = ts.local_detector2tomo_at(points)
+    # the small offsets from each point are mapped to the offsets from its projection
+    offsets = rng.normal(scale=0.2, size=(6, 3))
+    projected = ts.project_points(points + offsets) - ts.project_points(points)
+    inverse = np.linalg.inv(maps)[:, :, 1:, :]
+    approx = np.einsum("ntij,nj->nti", inverse, offsets)
+    error = np.abs(approx - projected).max()
+    assert error < 1e-4
+    # not by the linear maps of the whole tilt series
+    inverse = np.linalg.inv(ts.local_detector2tomo)[:, 1:, :]
+    error_global = np.abs(np.einsum("tij,nj->nti", inverse, offsets) - projected).max()
+    assert error_global > 10 * error
+    with pytest.raises(ValueError):
+        ts.local_detector2tomo_at(points[:, :2])
+
+
 def test_serialization():
     ts = _tilt_series()
     points = _points()
@@ -512,6 +570,13 @@ def test_from_etomo_directory_ctf(tmp_path, monkeypatch, invert, inverted):
     assert ts.ctf.voltage == 300
     assert ts.ctf.spherical_aberration == 2.7
     assert ts.ctf.amplitude_contrast == 0.07
+    # as ctfphaseflip, the defocus is at the center of the raw images
+    assert ts.ctf.defocus_at == "image_center"
+    correction = ts.ctf_correction()
+    for t in range(ts.ntilts):
+        du, dv = correction.defocus(t, (0.0, 0.0))
+        assert du == pytest.approx(ts.ctf.defocus_u[t])
+        assert dv == pytest.approx(ts.ctf.defocus_v[t])
     assert TiltSeries.from_etomo_directory(tmp_path, scale=0.2, ctf=False).ctf is None
 
 
@@ -532,6 +597,8 @@ def test_from_etomo_directory_ctf_of_aligned_stack(tmp_path, monkeypatch):
     assert ts.ctf.voltage == 200
     # rotated to the angles of the raw stack
     assert_allclose(ts.ctf.astigmatism_angle, 5 * views + ts.tilt_axis_angle)
+    # the center of the aligned images is the projection of the tomogram center
+    assert ts.ctf.defocus_at == "tomogram_center"
 
 
 def test_from_etomo_directory_ctf_not_found(tmp_path, monkeypatch):

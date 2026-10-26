@@ -237,9 +237,10 @@ class CTFCorrection:
 class TiltSeriesCTF:
     """CTF parameters of each tilt of a tilt series.
 
-    The defocus of each tilt is the defocus at the projection of the tomogram center.
-    The defocus in tilted images changes with the depth of the specimen, which is
-    considered by :class:`PatchCTFCorrection` (see
+    The defocus of each tilt is the defocus at the projection of the tomogram center,
+    or at the center of the tilt image (see ``defocus_at``). The defocus in tilted
+    images changes with the depth of the specimen, which is considered by
+    :class:`PatchCTFCorrection` (see
     :meth:`acryo.projection.TiltSeries.ctf_correction`).
 
     Parameters
@@ -259,6 +260,12 @@ class TiltSeriesCTF:
         Spherical aberration in mm.
     amplitude_contrast : float, default is 0.07
         Fraction of amplitude contrast.
+    defocus_at : {"tomogram_center", "image_center"}, default is "tomogram_center"
+        Where the defocus of each tilt is. "tomogram_center" is the projection of the
+        tomogram center, as RELION. "image_center" is the center of the tilt image,
+        where ctfplotter of IMOD measures the defocus on the raw tilt images. They
+        differ by the depth between them, which is large if the tilt images are
+        shifted by the alignment.
     """
 
     defocus_u: NDArray[np.float64]
@@ -267,8 +274,14 @@ class TiltSeriesCTF:
     voltage: float = 300.0
     spherical_aberration: float = 2.7
     amplitude_contrast: float = 0.07
+    defocus_at: Literal["tomogram_center", "image_center"] = "tomogram_center"
 
     def __post_init__(self):
+        if self.defocus_at not in ("tomogram_center", "image_center"):
+            raise ValueError(
+                "'defocus_at' must be 'tomogram_center' or 'image_center', got "
+                f"{self.defocus_at!r}."
+            )
         defocus_u = np.asarray(self.defocus_u, dtype=np.float64)
         if defocus_u.ndim != 1 or defocus_u.size == 0:
             raise ValueError(
@@ -327,6 +340,7 @@ class TiltSeriesCTF:
             voltage=self.voltage,
             spherical_aberration=self.spherical_aberration,
             amplitude_contrast=self.amplitude_contrast,
+            defocus_at=self.defocus_at,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -338,6 +352,7 @@ class TiltSeriesCTF:
             "voltage": self.voltage,
             "spherical_aberration": self.spherical_aberration,
             "amplitude_contrast": self.amplitude_contrast,
+            "defocus_at": self.defocus_at,
         }
 
     @classmethod
