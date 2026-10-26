@@ -1061,7 +1061,10 @@ class BackProjectionLoader(LoaderBase):
         their Fourier transforms) to each tilt image at the positions and orientations
         of the molecules, and compared with the patches of the tilt images at the
         projected positions. The patches are of the size of the templates (padded to
-        cubes) at the pixel size of ``scale``, and no shift is searched.
+        cubes) at the pixel size of ``scale``, and no shift is searched. The
+        projections are distorted as the tilt images around each molecule, such as by
+        the magnification and the local alignments of IMOD, in the same way as the
+        reconstruction.
 
         Parameters
         ----------

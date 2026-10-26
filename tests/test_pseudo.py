@@ -11,6 +11,7 @@ from acryo.ctf import CTFModel, TiltSeriesCTF
 from acryo.pipe import soft_otsu
 from acryo.loader import ExtractedSubvolumeLoader, TiltSeriesAlignment
 from acryo.projection import (
+    AffineShifts2D,
     LocalAlignment,
     LocalShifts2D,
     TiltImagePreprocessor,
@@ -772,6 +773,51 @@ def test_score_on_tilt_isolated(tmp_path, scale, size, tomo_hand):
     assert loader.score_on_tilt([template], mask=_sphere_mask(size)).min() > 0.97
     assert loader.score_on_tilt([template], cutoff=0.2).min() > 0.97
     assert loader.score_on_tilt([template], method="ncc").min() > 0.85
+
+
+# extended particle of 5 blobs, in nm, whose projections are distorted noticeably by
+# the magnification
+LARGE_PARTICLE = np.array(
+    [
+        [0.0, 0.0, 0.0],
+        [0.0, 6.0, 0.0],
+        [3.0, 0.0, -6.0],
+        [-3.0, -5.0, 4.0],
+        [1.0, 4.0, 5.0],
+    ]
+)
+
+
+@pytest.mark.parametrize("local", [False, True])
+def test_score_on_tilt_magnified(tmp_path, local):
+    # The tilt images are magnified, and around each particle also rotated and tilted
+    # by the local alignments. The projections of the template are distorted in the
+    # same way (the minimum score was 0.93 and 0.86 by the rigid projection).
+    rng = np.random.default_rng(5)
+    ntilts = TILT_ANGLES.size
+    mags = 1.04 * np.eye(2) + rng.uniform(-0.04, 0.04, size=(ntilts, 2, 2))
+    base = None
+    if local:
+        angles = np.deg2rad(rng.normal(scale=2.0, size=(2, 2, ntilts)))
+        c, s = np.cos(angles), np.sin(angles)
+        base = LocalAlignment(
+            origin=[-20.0, -25.0],
+            spacing=[40.0, 50.0],
+            tilt_angles=rng.normal(scale=2.0, size=(2, 2, ntilts)),
+            matrices=np.stack([np.stack([c, -s], -1), np.stack([s, c], -1)], -2),
+        )
+    centers = np.array([[1.0, -12.0, 14.0], [-2.0, 14.0, -15.0]])
+    rot = Rotation.random(2, random_state=3)
+    ts = _make_tilt_series(
+        tmp_path / "ts.mrc",
+        _particle_points(centers, rot, LARGE_PARTICLE),
+        local_shifts_2d=AffineShifts2D(mags, base=base),
+    )
+    assert ts.position_dependent == local
+    mole = Molecules(centers + CENTER, rot)
+    loader = _loader(ts, mole, scale=0.5, preprocess=False)
+    template = _particle_template(0.5, 32, LARGE_PARTICLE)
+    assert loader.score_on_tilt([template]).min() > 0.99
 
 
 def test_score_on_tilt(tmp_path):

@@ -340,6 +340,38 @@ def test_volume_projector(size):
     assert_allclose(out[1, :, start:], out[0, :, start:][:, ::-1], atol=1e-5)
 
 
+def test_volume_projector_magnified():
+    from scipy.spatial.transform import Rotation
+
+    # a Gaussian, whose projection along any ray is known
+    size, sigma = 32, 2.0
+    center = np.array([2.0, -3.0, 4.0])
+    grid = np.arange(size) - size // 2
+    coords = np.stack(np.meshgrid(grid, grid, grid, indexing="ij"), axis=-1)
+    vol = np.exp(-np.sum((coords - center) ** 2, axis=-1) / (2 * sigma**2))
+    projector = VolumeProjector(vol)
+    rotations = Rotation.random(3, random_state=1).as_matrix()
+    # the projection planes are magnified and sheared
+    rng = np.random.default_rng(2)
+    planes = np.tile(np.eye(3), (3, 1, 1))
+    planes[:, 1:, 1:] += rng.uniform(-0.06, 0.06, size=(3, 2, 2))
+    matrices = rotations @ np.linalg.inv(planes)
+    out = projector(matrices)
+    uy, ux = np.meshgrid(grid, grid, indexing="ij")
+    for img, mat in zip(out, matrices):
+        # line integrals along the rays through the points of the projection plane
+        direction = mat[:, 0] / np.linalg.norm(mat[:, 0])
+        rel = np.stack([uy, ux], axis=-1) @ mat[:, 1:].T - center
+        perp = rel - (rel @ direction)[..., np.newaxis] * direction
+        dist2 = np.sum(perp**2, axis=-1)
+        expected = np.sqrt(2 * np.pi) * sigma * np.exp(-dist2 / (2 * sigma**2))
+        # as accurate as the projections of rotations (0.2-0.5%)
+        assert np.abs(img - expected).max() < 0.01 * expected.max()
+    # the background is the same in a magnified projection
+    out = VolumeProjector(np.full((10, 10, 10), 2.0))(np.diag([1.0, 0.8, 0.8]))
+    assert_allclose(out, 20.0, rtol=1e-5)
+
+
 def test_volume_projector_background():
     # the average near the faces is projected exactly
     out = VolumeProjector(np.full((10, 10, 10), 2.0))(np.eye(3)[np.newaxis])
