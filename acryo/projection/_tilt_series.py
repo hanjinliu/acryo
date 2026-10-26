@@ -266,7 +266,7 @@ class TiltSeries:
         projection of a point on each tilt image are mapped to the offsets from the
         point in the tomogram space. The patches of the tilt images around the
         projected points are reconstructed by these maps. The position-dependent
-        shifts are not included.
+        shifts are not included (see :meth:`local_detector2tomo_at`).
         """
         rotations = self.detector2tomo
         if self.local_shifts_2d is None:
@@ -277,6 +277,69 @@ class TiltSeries:
         inverse[:, 0, 0] = 1.0
         inverse[:, 1:, 1:] = np.linalg.inv(linear)
         return rotations @ inverse
+
+    @property
+    def position_dependent(self) -> bool:
+        """Whether the linear map of the projection around a point depends on it.
+
+        True if the tilt series has ``local_shifts``, or ``local_shifts_2d`` that is
+        not affine (:attr:`LocalShiftModel.position_dependent`), such as the local
+        alignments of IMOD (:class:`LocalAlignment`). Then, the subtomograms are
+        reconstructed by :meth:`local_detector2tomo_at` of each point instead of
+        :attr:`local_detector2tomo`.
+        """
+        if self.local_shifts is not None:
+            return True
+        return (
+            self.local_shifts_2d is not None and self.local_shifts_2d.position_dependent
+        )
+
+    def local_detector2tomo_at(
+        self, points: ArrayLike, step: nm = 0.5
+    ) -> NDArray[np.float64]:
+        """Linear maps from the detector (z, y, x) to the tomogram space around points.
+
+        Same as :attr:`local_detector2tomo`, but the image plane is mapped by the
+        linear part of the projection around each point, including the
+        position-dependent shifts (``local_shifts`` and ``local_shifts_2d``), so that
+        the patches of the tilt images around the projected point are reconstructed
+        consistently with the projection of its neighborhood. For example, the local
+        alignments of IMOD change the tilt angles, the rotation and the magnification
+        of each local area. The linear part is computed by the central differences of
+        :meth:`project_points`.
+
+        Parameters
+        ----------
+        points : (..., 3) array
+            (z, y, x) coordinates in nm relative to the center of the tomogram.
+        step : float, default is 0.5
+            Step of the central differences in nm.
+
+        Returns
+        -------
+        (..., T, 3, 3) array
+            The linear maps of each point and tilt. They are the same as
+            :attr:`local_detector2tomo` if the projection is affine.
+        """
+        points = np.asarray(points, dtype=np.float64)
+        if points.shape[-1:] != (3,):
+            raise ValueError(f"Shape of points must be (..., 3), got {points.shape}.")
+        batch_shape = points.shape[:-1]
+        points = points.reshape(-1, 3)
+        npoints, ntilts = points.shape[0], self.ntilts
+        offsets = np.concatenate([np.eye(3), -np.eye(3)]) * step
+        shifted = points[:, np.newaxis, :] + offsets  # (N, 6, 3)
+        projected = self.project_points(shifted).reshape(npoints, 2, 3, ntilts, 2)
+        # (N, T, 2, 3) derivatives of the projected (y, x) by the (z, y, x) of points
+        jacobian = (projected[:, 0] - projected[:, 1]) / (2 * step)
+        jacobian = jacobian.transpose(0, 2, 3, 1)
+        # The depth of the projection is not used for the reconstruction, so that of
+        # the tilt series is used, as `detector2tomo`.
+        linear = self.projection_matrices[:, :3, :3] @ self.tomo2sample[:3, :3]
+        linear = np.repeat(linear[np.newaxis], npoints, axis=0)
+        linear[:, :, 1:, :] = jacobian
+        out = np.linalg.inv(linear)
+        return out.reshape(batch_shape + (ntilts, 3, 3))
 
     def project_points(self, points: ArrayLike) -> NDArray[np.float64]:
         """Project points in the tomogram space to the detector.
@@ -345,7 +408,8 @@ class TiltSeries:
         The returned filter can be added to :class:`TiltImagePreprocessor`. Each patch
         of the tilt images is phase-flipped by the CTF at the center of the patch. The
         defocus there is that of the plane z = 0 of the tomogram, which is the defocus
-        of ``ctf`` at the projection of the tomogram center, changed by the depth of
+        of ``ctf`` at the projection of the tomogram center (or at the center of the
+        tilt images, see :attr:`TiltSeriesCTF.defocus_at`), changed by the depth of
         the plane in the microscope (by the tilt angle and the position). The local
         shifts are not considered.
 
@@ -365,7 +429,11 @@ class TiltSeries:
         linear = mtx[:, 1:3, 1:3]
         depth = mtx[:, 0, 1:3]
         gradient = np.linalg.solve(linear.transpose(0, 2, 1), depth[..., np.newaxis])
-        return PatchCTFCorrection(self.ctf, gradient[..., 0], mtx[:, 1:3, 3], hand=hand)
+        if self.ctf.defocus_at == "tomogram_center":
+            center = mtx[:, 1:3, 3]
+        else:
+            center = np.zeros((self.ntilts, 2))
+        return PatchCTFCorrection(self.ctf, gradient[..., 0], center, hand=hand)
 
     @classmethod
     def from_etomo_directory(
@@ -995,6 +1063,11 @@ def _read_imod_ctf(
     if stack and stack[0].endswith(".ali"):
         # astigmatism angles of the aligned stack, whose tilt axis is vertical
         angle = angle + tilt_axis_angle
+        defocus_at = "tomogram_center"
+    else:
+        # As ctfphaseflip, the defocus measured on the raw images is at their center,
+        # which is moved by the shifts of the alignment.
+        defocus_at = "image_center"
     invert = params.get("INVERTTILTANGLES")
     if invert is not None and (not invert or invert[0] != "0"):
         _warn_ignored(_inverted_hand_message(f"InvertTiltAngles in {path}"))
@@ -1005,6 +1078,7 @@ def _read_imod_ctf(
         voltage=float(params["VOLTAGE"][0]),
         spherical_aberration=float(params["SPHERICALABERRATION"][0]),
         amplitude_contrast=float(params["AMPLITUDECONTRAST"][0]),
+        defocus_at=defocus_at,
     )
 
 

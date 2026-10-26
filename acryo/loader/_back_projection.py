@@ -572,6 +572,11 @@ class BackProjectionLoader(LoaderBase):
         projected = tilt_series.project_points(pos - self.tomogram_center)
         # (nm from the detector center) -> (pixels from the center of the tilt images)
         offsets = projected / tilt_series.scale
+        local_maps = None
+        if tilt_series.position_dependent:
+            # The projection around each molecule, such as by the local alignments,
+            # is not that of the reconstructor.
+            local_maps = tilt_series.local_detector2tomo_at(pos - self.tomogram_center)
         # The molecules are at the center of the cubes (sidelength // 2). Crop the
         # rotated subtomograms from the cubes, similar to `SubtomogramLoader`.
         nmole = rotations.shape[0]
@@ -590,6 +595,7 @@ class BackProjectionLoader(LoaderBase):
             sidelength,
             self.order,
             self.batch_size or 1,
+            local_maps=local_maps,
         )
 
     def _to_tilt_series_frame(
@@ -1411,6 +1417,7 @@ class _ReconstructionPlan:
         sidelength: int,
         order: int,
         batch_size: int,
+        local_maps: NDArray[np.float64] | None = None,
     ):
         self.get_reconstructor = get_reconstructor  # loads the tilt images
         self.offsets = offsets  # (N, T, 2) positions from the center of the images
@@ -1419,6 +1426,9 @@ class _ReconstructionPlan:
         self.sidelength = sidelength  # of the cubes
         self.order = order
         self.batch_size = batch_size
+        # (N, T, 3, 3) maps from the detector to the tomogram around each molecule, if
+        # the projection depends on the position
+        self.local_maps = local_maps
 
     def to_dask(
         self, backend: Backend, lazy: bool = True, crop: bool = True
@@ -1454,6 +1464,7 @@ class _ReconstructionPlan:
                 ib,
                 self.offsets[sl],
                 self.matrices[sl],
+                None if self.local_maps is None else self.local_maps[sl],
             )
             sizes.append(self.offsets[sl].shape[0])
         graph = HighLevelGraph.from_collections(name, layer, dependencies=[])
@@ -1519,11 +1530,14 @@ class _ReconstructionTask:
         index: int,
         offsets: NDArray[np.float64],
         matrices: NDArray[np.float32],
+        local_maps: NDArray[np.float64] | None = None,
     ) -> NDArray[np.float32]:
         if not isinstance(reconstructor, _LazyReconstructor):
-            return self._reconstruct(reconstructor, offsets, matrices)
+            return self._reconstruct(reconstructor, offsets, matrices, local_maps)
         try:
-            return self._reconstruct(reconstructor.acquire(), offsets, matrices)
+            return self._reconstruct(
+                reconstructor.acquire(), offsets, matrices, local_maps
+            )
         finally:
             reconstructor.release(index)
 
@@ -1532,11 +1546,12 @@ class _ReconstructionTask:
         reconstructor: DirectFourierReconstructor,
         offsets: NDArray[np.float64],
         matrices: NDArray[np.float32],
+        local_maps: NDArray[np.float64] | None,
     ) -> NDArray[np.float32]:
         xp = self.backend
         # (pixels from the center of the tilt images) -> (pixels of the tilt images)
         positions = offsets + np.array(reconstructor.images.shape[1:]) // 2
-        cubes = reconstructor(positions)
+        cubes = reconstructor(positions, local_maps)
         # the tilt images have dark densities on a light background
         cubes *= -1
         if not self.crop:

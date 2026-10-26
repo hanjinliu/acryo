@@ -74,6 +74,16 @@ class LocalShiftModel(ABC):
         """
         return None
 
+    @property
+    def position_dependent(self) -> bool:
+        """Whether the model is not a constant shift plus :meth:`linear_part`.
+
+        If true, the patches of the tilt images around each point are reconstructed
+        by the linear part of the projection around the point (see
+        :meth:`TiltSeries.local_detector2tomo_at`).
+        """
+        return True
+
     def select_tilts(self, indices: ArrayLike) -> LocalShiftModel:
         """Return the model of the selected tilts."""
         raise NotImplementedError(f"{type(self).__name__} cannot select tilts.")
@@ -292,6 +302,10 @@ class AffineShifts2D(LocalShiftModel):
         # the base is applied before this model
         base = _linear_part(self.base)
         return self.matrices if base is None else self.matrices @ base
+
+    @property
+    def position_dependent(self) -> bool:
+        return self.base is not None and self.base.position_dependent
 
     def select_tilts(self, indices: ArrayLike) -> AffineShifts2D:
         idx = np.asarray(indices, dtype=np.intp)

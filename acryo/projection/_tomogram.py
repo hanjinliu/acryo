@@ -128,11 +128,14 @@ def reconstruct_tomogram(
     image_center = np.array(images.shape[1:]) // 2
     yx_centers = [(cy, cx) for cy in centers[1] for cx in centers[2]]
     nrows = len(centers[0])
+    position_dependent = tilt_series.position_dependent
 
     def _add_patch(row: _PatchRow, cz: int, cy: int, cx: int):
         point = (np.array([cz, cy, cx]) - volume_center) * scale
         positions = tilt_series.project_points(point) / tilt_series.scale
-        patch = reconstructor(positions + image_center)
+        # the projection around each patch, such as by the local alignments
+        maps = tilt_series.local_detector2tomo_at(point) if position_dependent else None
+        patch = reconstructor(positions + image_center, maps)
         patch *= window_3d
         row.add((cz - half, cy - half, cx - half), patch)
 

@@ -36,6 +36,14 @@ def test_tilt_series_ctf():
     for name in ["defocus_u", "defocus_v", "astigmatism_angle"]:
         assert_allclose(getattr(out, name), getattr(ctf, name))
     assert out.voltage == ctf.voltage
+    assert out.defocus_at == "tomogram_center"
+    centered = dataclasses.replace(ctf, defocus_at="image_center")
+    assert TiltSeriesCTF.from_dict(centered.to_dict()).defocus_at == "image_center"
+    assert centered.select_tilts([3, 1]).defocus_at == "image_center"
+    # dicts made before defocus_at was added
+    data = ctf.to_dict()
+    data.pop("defocus_at")
+    assert TiltSeriesCTF.from_dict(data).defocus_at == "tomogram_center"
     repr(ctf)
 
 
@@ -48,6 +56,7 @@ def test_tilt_series_ctf():
         {"defocus_u": [-1.0], "voltage": 0},
         {"defocus_u": [-1.0], "spherical_aberration": -1},
         {"defocus_u": [-1.0], "amplitude_contrast": 1.5},
+        {"defocus_u": [-1.0], "defocus_at": "center"},
     ],
 )
 def test_tilt_series_ctf_invalid_input(kwargs):
@@ -122,6 +131,34 @@ def test_defocus_at_projected_points():
             du, dv = correction.defocus(t, (proj[1], proj[2]))
             assert du == pytest.approx(ts.ctf.defocus_u[t] - depth / 1000)
             assert dv == pytest.approx(ts.ctf.defocus_v[t] - depth / 1000)
+
+
+def test_defocus_at_image_center():
+    rng = np.random.default_rng(4)
+    ntilts = 5
+    ts = TiltSeries(
+        tilt_angles=np.linspace(-50, 50, ntilts),
+        tilt_axis_angle=rng.normal(85, 2, ntilts),
+        sample_translations=rng.normal(scale=50, size=(ntilts, 2)),
+        ctf=_ctf(ntilts, defocus_at="image_center"),
+    )
+    correction = ts.ctf_correction()
+    ctf = dataclasses.replace(ts.ctf, defocus_at="tomogram_center")
+    reference = ts.replace(ctf=ctf).ctf_correction()
+    # the projection of the tomogram center
+    center = ts.sample_translations
+    for t in range(ntilts):
+        assert correction.defocus(t)[0] == pytest.approx(ts.ctf.defocus_u[t])
+        assert reference.defocus(t, tuple(center[t]))[0] == pytest.approx(
+            ts.ctf.defocus_u[t]
+        )
+        # the same gradient of the defocus, but shifted by the depth between them
+        offset = correction.defocus(t)[0] - reference.defocus(t)[0]
+        gradient = correction.depth_gradient[t]
+        assert offset == pytest.approx(gradient @ center[t] / 1000)  # hand = -1
+        for y, x in rng.uniform(-200, 200, (3, 2)):
+            diff = correction.defocus(t, (y, x))[0] - reference.defocus(t, (y, x))[0]
+            assert diff == pytest.approx(offset)
 
 
 def test_patch_ctf_correction_select_tilts():

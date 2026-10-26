@@ -185,9 +185,9 @@ def recorded_calls(monkeypatch) -> list[tuple[int, int]]:
     calls: list[tuple[int, int]] = []
     _call = DirectFourierReconstructor.__call__
 
-    def _call_record(self, positions):
+    def _call_record(self, positions, rotations=None):
         calls.append((len(positions), self.sidelength))
-        return _call(self, positions)
+        return _call(self, positions, rotations)
 
     monkeypatch.setattr(DirectFourierReconstructor, "__call__", _call_record)
     return calls
@@ -325,6 +325,45 @@ def test_tomo_hand(tmp_path, corner_safe):
     loader = _loader(ts, mole, tomo_hand=-1, **kwargs)
     for subtomo in loader.asnumpy():
         assert_allclose(_center_of_mass(subtomo), [8, 6, 9], atol=0.15)
+
+
+def test_local_alignment_around_molecules(tmp_path, monkeypatch):
+    # The local alignments change the tilt angles, the rotation and the magnification
+    # of each local area, so the blobs around a molecule are reconstructed sharply
+    # only if the projection around the molecule is used.
+    rng = np.random.default_rng(14)
+    ntilts = TILT_ANGLES.size
+    angles = np.deg2rad(rng.normal(scale=2.0, size=(2, 2, ntilts)))
+    mags = 1 + rng.normal(scale=0.03, size=(2, 2, ntilts, 1, 1))
+    c, s = np.cos(angles), np.sin(angles)
+    local = LocalAlignment(
+        origin=[-20.0, -25.0],
+        spacing=[40.0, 50.0],
+        tilt_angles=rng.normal(scale=3.0, size=(2, 2, ntilts)),
+        matrices=mags * np.stack([np.stack([c, -s], -1), np.stack([s, c], -1)], -2),
+    )
+    center = np.array([1.0, 6.0, -8.0])
+    blobs = center + np.array(
+        [[0.0, 0.0, 0.0], [0.0, 4.5, 0.0], [0.0, 0.0, -4.5], [4.0, 0.0, 0.0]]
+    )
+    mole = Molecules((center + CENTER)[np.newaxis])
+    kwargs = dict(output_shape=(25, 25, 25), order=1)
+    # reconstructed from the tilt series of the exact geometry without the local
+    # alignments
+    ts = _make_tilt_series(tmp_path / "global.mrc", blobs, sigma=1.0)
+    expected = _loader(ts, mole, **kwargs).asnumpy()[0]
+    ts = _make_tilt_series(
+        tmp_path / "local.mrc", blobs, sigma=1.0, local_shifts_2d=local
+    )
+    assert ts.position_dependent
+    out = _loader(ts, mole, **kwargs).asnumpy()[0]
+    corr = np.corrcoef(out.ravel(), expected.ravel())[0, 1]
+    assert corr > 0.98
+    # by the linear maps of the whole tilt series
+    monkeypatch.setattr(TiltSeries, "position_dependent", property(lambda _: False))
+    out = _loader(ts, mole, **kwargs).asnumpy()[0]
+    corr_global = np.corrcoef(out.ravel(), expected.ravel())[0, 1]
+    assert 1 - corr_global > 2 * (1 - corr)
 
 
 def test_properties(blob_tilt_series):
