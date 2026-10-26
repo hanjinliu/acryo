@@ -314,9 +314,11 @@ def score_on_tilt(
     For each particle and tilt, the projection of the template is compared with the
     patch of the tilt image at the projected position (no shift is searched) by
     ZNCC or NCC. The patches are of the size of the template (padded to a cube), at
-    the pixel size of ``scale``. If a mask is given, it is projected in the same way
-    and normalized to the maximum of 1, and multiplied to both the projection and
-    the patch.
+    the pixel size of ``scale``. The template is projected by the linear map of the
+    projection around each particle (see `_detector_maps`), so the projections are
+    distorted as the tilt images, such as by the magnification and the local
+    alignments. If a mask is given, it is projected in the same way and normalized to
+    the maximum of 1, and multiplied to both the projection and the patch.
 
     Parameters
     ----------
@@ -371,14 +373,13 @@ def score_on_tilt(
     if npoints == 0 or len(scorers) == 0:
         return np.zeros((len(scorers), npoints, tilt_series.ntilts), dtype=np.float32)
     image_center = np.array(images.shape[1:]) // 2
-    # rotations from the detector to the tomogram, as used in reconstruction
-    rot_detector = tilt_series.detector2tomo
 
     def _batch(sl: slice) -> NDArray[np.float32]:
         """Scores (n_templates, b, T) of a batch of particles."""
         # (b, T, 2) projected positions in nm, including the local shifts
         projected = tilt_series.project_points(points[sl])
         positions = projected / input_spacing + image_center
+        rot_detector = _detector_maps(tilt_series, points[sl])
         matrices = _template_to_detector(rotations[sl], rot_detector)
         # the templates of the same geometry share the patches and the CTF
         observed: dict[tuple[int, int], NDArray[np.complexfloating]] = {}
@@ -540,18 +541,17 @@ def _particle_maps(
     input_spacing = tilt_series.scale
     image_center = np.array(images.shape[1:]) // 2
     box, native, spacing, radius = geometry
-    # rotations from the detector to the tomogram, as used in reconstruction
-    rot_detector = tilt_series.detector2tomo
     if tilts is not None:
         tilts = list(tilts)
         images = images[tilts]
-        rot_detector = rot_detector[tilts]
 
     def _batch(ps: ParticleSet, projector: VolumeProjector, sl: slice, start: int):
         # (b, T, 2) projected positions in nm, including the local shifts
         projected = tilt_series.project_points(ps.points[sl])
+        rot_detector = _detector_maps(tilt_series, ps.points[sl])
         if tilts is not None:
             projected = projected[:, tilts]
+            rot_detector = rot_detector[..., tilts, :, :]
         if displacements is not None:
             projected = projected + displacements[start : start + projected.shape[0]]
         if ctf is None:
@@ -717,11 +717,29 @@ def _observed_patches(
     return _fourier_resize(observed, box)
 
 
+def _detector_maps(
+    tilt_series: TiltSeries, points: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """Maps from the detector to the tomogram around the points (nm), as reconstructed.
+
+    They are (b, T, 3, 3) of each point if the projection depends on the position,
+    such as by the local alignments, or (T, 3, 3) of the whole tilt series.
+    """
+    if tilt_series.position_dependent:
+        return tilt_series.local_detector2tomo_at(points)
+    return tilt_series.local_detector2tomo
+
+
 def _template_to_detector(
     rotations: NDArray[np.float64], rot_detector: NDArray[np.float64]
 ) -> NDArray[np.float64]:
-    """Matrices (b, T, 3, 3) of the projections of the templates on the detector."""
-    return rotations.transpose(0, 2, 1)[:, np.newaxis] @ rot_detector[np.newaxis]
+    """Matrices (b, T, 3, 3) of the projections of the templates on the detector.
+
+    ``rot_detector`` is (T, 3, 3) of all the particles, or (b, T, 3, 3) of each.
+    """
+    if rot_detector.ndim == 3:
+        rot_detector = rot_detector[np.newaxis]
+    return rotations.transpose(0, 2, 1)[:, np.newaxis] @ rot_detector
 
 
 def _padded_projections(
