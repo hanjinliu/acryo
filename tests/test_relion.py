@@ -293,6 +293,23 @@ def test_ctf(tmp_path):
     assert correction.hand == -1
 
 
+def test_ctf_of_different_pixel_size(tmp_path):
+    _make_project(tmp_path)
+    path = tmp_path / "AlignTiltSeries/job005/tilt_series.star"
+    ref = TiltSeries.from_relion_tilt_series_star(path)
+    # a calibrated pixel size, different from rlnTomoTiltSeriesPixelSize
+    scale = PIXEL_SIZE / 10 * 1.04
+    ts = TiltSeries.from_relion_tilt_series_star(path, scale=scale)
+    # the CTF at each frequency in pixels is the estimated one
+    assert_allclose(ts.ctf.defocus_u, ref.ctf.defocus_u * 1.04**2)
+    assert_allclose(ts.ctf.defocus_v, ref.ctf.defocus_v * 1.04**2)
+    assert ref.ctf.spherical_aberration == 2.7
+    assert ts.ctf.spherical_aberration == pytest.approx(2.7 * 1.04**4)
+    assert_allclose(ts.ctf.astigmatism_angle, ref.ctf.astigmatism_angle)
+    with pytest.warns(UserWarning, match="very different"):
+        TiltSeries.from_relion_tilt_series_star(path, scale=PIXEL_SIZE / 10 * 2)
+
+
 def test_ctf_inverted_hand(tmp_path):
     _make_project(tmp_path, hand=1)
     path = tmp_path / "AlignTiltSeries/job005/tilt_series.star"

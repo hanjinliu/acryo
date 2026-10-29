@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, ClassVar
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -80,7 +80,9 @@ class LocalShiftModel(ABC):
 
         If true, the patches of the tilt images around each point are reconstructed
         by the linear part of the projection around the point (see
-        :meth:`TiltSeries.local_detector2tomo_at`).
+        :meth:`TiltSeries.local_detector2tomo_at`). A model can be used only for the
+        shifts of the points by returning False, such as :class:`LocalAlignment` of
+        ``mode="shift"``.
         """
         return True
 
@@ -374,6 +376,13 @@ class LocalAlignment(LocalShiftModel):
     base : LocalShiftModel or callable, optional
         Local shifts applied before this model. The shifts of this model are
         evaluated at the projected positions shifted by the base.
+    mode : {"shift", "full"}, default is "shift"
+        How the local alignments are used. "shift" uses them only for the shifts of
+        the projected points, and the patches of the tilt images around them are
+        reconstructed (and the templates are projected) by the geometry of the whole
+        tilt series (:attr:`TiltSeries.local_detector2tomo`). "full" also uses the
+        local tilt angles, rotation and magnification around each point
+        (:meth:`TiltSeries.local_detector2tomo_at`, see :attr:`position_dependent`).
     """
 
     origin: NDArray[np.float64]
@@ -384,9 +393,12 @@ class LocalAlignment(LocalShiftModel):
     matrices: NDArray[np.float64] = None  # type: ignore
     translations: NDArray[np.float64] = None  # type: ignore
     base: LocalShiftModel | None = None
+    mode: Literal["shift", "full"] = "shift"
 
     def __post_init__(self):
         _set = object.__setattr__
+        if self.mode not in ("shift", "full"):
+            raise ValueError(f"'mode' must be 'shift' or 'full', got {self.mode!r}.")
         tilt_angles = np.asarray(self.tilt_angles, dtype=np.float64)
         if tilt_angles.ndim != 3:
             raise ValueError(
@@ -424,7 +436,8 @@ class LocalAlignment(LocalShiftModel):
         return (
             f"{type(self).__name__}(grid_shape={self.grid_shape}, "
             f"ntilts={self.ntilts}, origin={self.origin.tolist()}, "
-            f"spacing={self.spacing.tolist()}, base={self.base!r})"
+            f"spacing={self.spacing.tolist()}, mode={self.mode!r}, "
+            f"base={self.base!r})"
         )
 
     @property
@@ -480,6 +493,13 @@ class LocalAlignment(LocalShiftModel):
         # the alignments of the local areas depend on the position
         return _linear_part(self.base)
 
+    @property
+    def position_dependent(self) -> bool:
+        # the local geometry is used only in the "full" mode
+        if self.mode == "full":
+            return True
+        return self.base is not None and self.base.position_dependent
+
     def _corners(self, yx: NDArray[np.float64]):
         """Indices and bilinear weights of the four nearest local areas."""
         axes = []
@@ -508,6 +528,7 @@ class LocalAlignment(LocalShiftModel):
             matrices=self.matrices[:, :, idx],
             translations=self.translations[:, :, idx],
             base=_select_tilts(self.base, idx),
+            mode=self.mode,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -527,6 +548,7 @@ class LocalAlignment(LocalShiftModel):
         if np.any(self.translations != 0):
             out["translations"] = self.translations.tolist()
         out["base"] = None if self.base is None else self.base.to_dict()
+        out["mode"] = self.mode
         return out
 
     @classmethod
@@ -540,6 +562,7 @@ class LocalAlignment(LocalShiftModel):
             matrices=data.get("matrices"),
             translations=data.get("translations"),
             base=None if data.get("base") is None else cls.from_dict(data["base"]),
+            mode=data.get("mode", "shift"),
         )
 
     @classmethod
@@ -550,6 +573,7 @@ class LocalAlignment(LocalShiftModel):
         scale: nm,
         *,
         z_factors: bool = True,
+        mode: Literal["shift", "full"] = "shift",
     ) -> LocalAlignment:
         """Read the local alignments of IMOD (``OutputLocalFile`` of tiltalign).
 
@@ -569,6 +593,8 @@ class LocalAlignment(LocalShiftModel):
         z_factors : bool, default is True
             Whether to read the Z factors. ``tilt`` of IMOD ignores them unless
             ``ZFACTORFILE`` is given.
+        mode : {"shift", "full"}, default is "shift"
+            How the local alignments are used (see :class:`LocalAlignment`).
         """
         path = Path(path)
         header, *lines = path.read_text().splitlines()
@@ -623,6 +649,7 @@ class LocalAlignment(LocalShiftModel):
             z_factors=zfac,
             matrices=matrices,
             translations=translations,
+            mode=mode,
         )
 
 

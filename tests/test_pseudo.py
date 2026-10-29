@@ -1,3 +1,5 @@
+import dataclasses
+
 import dask
 import numpy as np
 from numpy.testing import assert_allclose
@@ -328,10 +330,10 @@ def test_tomo_hand(tmp_path, corner_safe):
         assert_allclose(_center_of_mass(subtomo), [8, 6, 9], atol=0.15)
 
 
-def test_local_alignment_around_molecules(tmp_path, monkeypatch):
+def test_local_alignment_around_molecules(tmp_path):
     # The local alignments change the tilt angles, the rotation and the magnification
     # of each local area, so the blobs around a molecule are reconstructed sharply
-    # only if the projection around the molecule is used.
+    # only if the projection around the molecule is used ("full").
     rng = np.random.default_rng(14)
     ntilts = TILT_ANGLES.size
     angles = np.deg2rad(rng.normal(scale=2.0, size=(2, 2, ntilts)))
@@ -342,6 +344,7 @@ def test_local_alignment_around_molecules(tmp_path, monkeypatch):
         spacing=[40.0, 50.0],
         tilt_angles=rng.normal(scale=3.0, size=(2, 2, ntilts)),
         matrices=mags * np.stack([np.stack([c, -s], -1), np.stack([s, c], -1)], -2),
+        mode="full",
     )
     center = np.array([1.0, 6.0, -8.0])
     blobs = center + np.array(
@@ -360,8 +363,9 @@ def test_local_alignment_around_molecules(tmp_path, monkeypatch):
     out = _loader(ts, mole, **kwargs).asnumpy()[0]
     corr = np.corrcoef(out.ravel(), expected.ravel())[0, 1]
     assert corr > 0.98
-    # by the linear maps of the whole tilt series
-    monkeypatch.setattr(TiltSeries, "position_dependent", property(lambda _: False))
+    # "shift" uses the linear maps of the whole tilt series
+    ts = ts.replace(local_shifts_2d=dataclasses.replace(local, mode="shift"))
+    assert not ts.position_dependent
     out = _loader(ts, mole, **kwargs).asnumpy()[0]
     corr_global = np.corrcoef(out.ravel(), expected.ravel())[0, 1]
     assert 1 - corr_global > 2 * (1 - corr)
@@ -805,6 +809,7 @@ def test_score_on_tilt_magnified(tmp_path, local):
             spacing=[40.0, 50.0],
             tilt_angles=rng.normal(scale=2.0, size=(2, 2, ntilts)),
             matrices=np.stack([np.stack([c, -s], -1), np.stack([s, c], -1)], -2),
+            mode="full",
         )
     centers = np.array([[1.0, -12.0, 14.0], [-2.0, 14.0, -15.0]])
     rot = Rotation.random(2, random_state=3)
