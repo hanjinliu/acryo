@@ -1,3 +1,5 @@
+import dataclasses
+
 import numpy as np
 from numpy.testing import assert_allclose
 import pytest
@@ -205,7 +207,7 @@ def test_file_is_closed_on_error(tmp_path, monkeypatch):
     pytest.importorskip("mrcfile")
     from acryo.projection import DirectFourierReconstructor
 
-    def _fail(self, positions):
+    def _fail(self, positions, rotations=None):
         raise RuntimeError("failed")
 
     monkeypatch.setattr(DirectFourierReconstructor, "__call__", _fail)
@@ -214,6 +216,42 @@ def test_file_is_closed_on_error(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError):
         reconstruct_tomogram(ts, images, (10, 20, 20), patch_size=8, save_path=path)
     path.unlink()  # the file is closed
+
+
+def test_local_alignment_of_patches(monkeypatch):
+    from acryo.projection import DirectFourierReconstructor, LocalAlignment
+
+    ts, images = _tilt_series_and_images()
+    rng = np.random.default_rng(1)
+    local = LocalAlignment(
+        origin=[-10.0, -10.0],
+        spacing=[20.0, 20.0],
+        tilt_angles=rng.normal(scale=2.0, size=(2, 2, ts.ntilts)),
+        mode="full",
+    )
+    calls = []
+    _call = DirectFourierReconstructor.__call__
+
+    def _call_record(self, positions, rotations=None):
+        calls.append(rotations)
+        return _call(self, positions, rotations)
+
+    monkeypatch.setattr(DirectFourierReconstructor, "__call__", _call_record)
+    reconstruct_tomogram(ts, images, (10, 20, 20), patch_size=10)
+    assert len(calls) > 0 and all(rot is None for rot in calls)
+    calls.clear()
+    # only shifted in the "shift" mode
+    shifted = ts.replace(local_shifts_2d=dataclasses.replace(local, mode="shift"))
+    reconstruct_tomogram(shifted, images, (10, 20, 20), patch_size=10)
+    assert len(calls) > 0 and all(rot is None for rot in calls)
+    calls.clear()
+    # each patch is reconstructed by the projection around its center
+    ts = ts.replace(local_shifts_2d=local)
+    reconstruct_tomogram(ts, images, (10, 20, 20), patch_size=10)
+    assert len(calls) == 4
+    rotations = np.stack(calls)
+    assert rotations.shape == (4, ts.ntilts, 3, 3)
+    assert np.abs(rotations - rotations[0]).max() > 1e-3
 
 
 def test_invalid_input():

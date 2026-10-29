@@ -52,28 +52,15 @@ class CentralSliceInsertion:
             raise ValueError(
                 f"Shape of rotations must be (T, 3, 3), got {rotations.shape}."
             )
-        self.slice_shape = ny, nx = _normalize_shape(slice_shape, 2)
+        self.slice_shape = _normalize_shape(slice_shape, 2)
         self.volume_shape = vshape = _normalize_shape(volume_shape, 3)
         self.nslices = rotations.shape[0]
-        qy, qx = np.meshgrid(
-            sfft.fftfreq(ny).astype(np.float32),
-            sfft.rfftfreq(nx).astype(np.float32),
-            indexing="ij",
+        self._keep, freqs = _slice_frequencies(
+            self.slice_shape, scale, slice_stretch(rotations).min()
         )
-        # (z, y, x) frequencies of the slices in cycles per pixel of the volume
-        freqs = np.stack([np.zeros_like(qy), qy, qx], axis=-1).reshape(-1, 3)
-        freqs *= np.float32(scale)
-        # Only up to the Nyquist frequency of the volume. Half of the frequencies of
-        # x = 0 are redundant because of the Friedel symmetry.
-        stretch_min = slice_stretch(rotations).min()
-        keep = (np.linalg.norm(freqs, axis=-1) <= 0.5 / stretch_min) & ~(
-            (freqs[:, 2] == 0) & (freqs[:, 1] < 0)
-        )
-        self._keep = np.flatnonzero(keep)
-        freqs = freqs[self._keep]
         nkeep = self._keep.size
 
-        self._dft_shape = dft_shape = vshape[:2] + (vshape[2] // 2 + 1,)
+        self._dft_shape = dft_shape = _rfft_shape(vshape)
         direct: list[tuple[NDArray, NDArray, NDArray]] = []
         conjugate: list[tuple[NDArray, NDArray, NDArray]] = []
         matrices = _frequency_matrices(rotations)
@@ -85,25 +72,11 @@ class CentralSliceInsertion:
             inside = np.linalg.norm(coords, axis=-1) <= 0.5 * (1 + 1e-6)
             if not inside.all():
                 coords, columns = coords[inside], columns[inside]
-            # the rfft only has x >= 0, where the conjugate values are inserted
-            is_conj = coords[:, 2] < 0
-            coords[is_conj] *= -1
-            index = coords * np.array(vshape, dtype=np.float32)
-            base = np.floor(index).astype(np.int64)
-            frac = index - base
-            for corner in np.ndindex(2, 2, 2):
-                weight = np.prod(
-                    [f if c else 1 - f for c, f in zip(corner, frac.T)], axis=0
-                )
-                iz = (base[:, 0] + corner[0]) % vshape[0]
-                iy = (base[:, 1] + corner[1]) % vshape[1]
-                ix = base[:, 2] + corner[2]
-                valid = ix < dft_shape[2]
-                rows = np.ravel_multi_index(
-                    (iz[valid], iy[valid], ix[valid]), dft_shape
-                )
+            is_conj, rows, weights = _trilinear_corners(coords, vshape)
+            for row, weight in zip(rows, weights):
+                valid = weight > 0
                 conj = is_conj[valid]
-                entries = (rows, columns[valid], weight[valid])
+                entries = (row[valid], columns[valid], weight[valid])
                 direct.append(tuple(e[~conj] for e in entries))
                 conjugate.append(tuple(e[conj] for e in entries))
         shape = (int(np.prod(dft_shape)), self.nslices * nkeep)
@@ -183,23 +156,223 @@ class CentralSliceInsertion:
         (..., *output_shape) float32 array
             The reconstructed volumes, corrected for the trilinear interpolation.
         """
-        vshape = self.volume_shape
-        if output_shape is None:
-            output_shape = vshape
-        output_shape = _normalize_shape(output_shape, 3)
-        # indices of the output, whose origin is moved to the center
-        indices = [
-            (np.arange(size) - size // 2) % length
-            for size, length in zip(output_shape, vshape)
-        ]
-        # The inverse transform is computed axis by axis, and each axis is cropped
-        # right after the transform, so the later transforms are smaller.
-        volume = sfft.ifft(self.insert(slices), axis=-3, overwrite_x=True)
-        volume = sfft.ifft(volume[..., indices[0], :, :], axis=-2, overwrite_x=True)
-        volume = sfft.irfft(volume[..., indices[1], :], n=vshape[2], overwrite_x=True)
-        volume = volume[..., indices[2]].astype(np.float32, copy=False)
-        volume /= _gridding_correction(vshape, output_shape)
-        return volume
+        return _inverse_rfft(self.insert(slices), self.volume_shape, output_shape)
+
+
+class LocalSliceInsertion:
+    """Insertion of central slices whose orientations differ for each volume.
+
+    Same as :class:`CentralSliceInsertion`, but the matrices of the slices are given
+    for each volume when the slices are inserted, such as the linear maps of the
+    projection around each particle of a locally distorted tilt series (see
+    :meth:`TiltSeries.local_detector2tomo_at`). The insertion is computed for each
+    volume, which is a few times slower than the precomputed operator of
+    :class:`CentralSliceInsertion`.
+
+    Parameters
+    ----------
+    slice_shape : int or (int, int)
+        Shape of the images whose rfft are inserted.
+    volume_shape : int or (int, int, int)
+        Shape of the volume.
+    scale : float, default is 1.0
+        Pixel size of the volume divided by the pixel size of the images.
+    """
+
+    def __init__(
+        self,
+        slice_shape: int | Sequence[int],
+        volume_shape: int | Sequence[int],
+        scale: float = 1.0,
+    ):
+        self.slice_shape = _normalize_shape(slice_shape, 2)
+        self.volume_shape = _normalize_shape(volume_shape, 3)
+        self.scale = float(scale)
+        self._dft_shape = _rfft_shape(self.volume_shape)
+
+    def insert(
+        self,
+        slices: NDArray[np.complexfloating],
+        rotations: NDArray[np.floating],
+    ) -> NDArray[np.complex64]:
+        """Insert the slices and return the 3D DFT normalized by the weights.
+
+        Parameters
+        ----------
+        slices : (..., T, ny, nx // 2 + 1) complex array
+            The rfft of the images (not fftshifted), whose origin is the origin of
+            the volume. Leading dimensions are for multiple volumes.
+        rotations : (..., T, 3, 3) array
+            Matrices of the slices of each volume, same as those of
+            :class:`CentralSliceInsertion`.
+
+        Returns
+        -------
+        (..., Z, Y, X // 2 + 1) complex array
+            The rfft of the volumes (not fftshifted).
+        """
+        slices = np.asarray(slices)
+        rotations = np.asarray(rotations, dtype=np.float64)
+        ny, nx = self.slice_shape
+        if slices.ndim < 3 or slices.shape[-2:] != (ny, nx // 2 + 1):
+            raise ValueError(
+                f"Shape of slices must be (..., T, {ny}, {nx // 2 + 1}), got "
+                f"{slices.shape}."
+            )
+        batch_shape, nslices = slices.shape[:-3], slices.shape[-3]
+        if rotations.shape != batch_shape + (nslices, 3, 3):
+            raise ValueError(
+                f"Shape of rotations must be {batch_shape + (nslices, 3, 3)}, got "
+                f"{rotations.shape}."
+            )
+        values = slices.reshape(-1, nslices, ny * (nx // 2 + 1))
+        matrices = rotations.reshape(-1, nslices, 3, 3)
+        out = np.empty((values.shape[0],) + self._dft_shape, dtype=np.complex64)
+        for i in range(values.shape[0]):
+            out[i] = self._insert_one(values[i], matrices[i])
+        return out.reshape(batch_shape + self._dft_shape)
+
+    def reconstruct(
+        self,
+        slices: NDArray[np.complexfloating],
+        rotations: NDArray[np.floating],
+        output_shape: int | Sequence[int] | None = None,
+    ) -> NDArray[np.float32]:
+        """Reconstruct the volumes from the slices.
+
+        Same as :meth:`CentralSliceInsertion.reconstruct`, but the matrices of the
+        slices are given for each volume (see :meth:`insert`).
+        """
+        dft = self.insert(slices, rotations)
+        return _inverse_rfft(dft, self.volume_shape, output_shape)
+
+    def _insert_one(
+        self, values: NDArray[np.complexfloating], rotations: NDArray[np.float64]
+    ) -> NDArray[np.complex64]:
+        """Insert (T, ny * (nx // 2 + 1)) values of the slices of a volume."""
+        matrices = _frequency_matrices(rotations)
+        keep, freqs = _slice_frequencies(
+            self.slice_shape, self.scale, slice_stretch(rotations).min()
+        )
+        coords = freqs @ matrices.astype(np.float32).transpose(0, 2, 1)
+        coords = coords.reshape(-1, 3)
+        values = values[:, keep].astype(np.complex64, copy=False)
+        # the pixels of a stretched slice are smaller in the volume
+        factors = (1 / _slice_areas(matrices)).astype(np.float32)
+        values = (values * factors[:, np.newaxis]).ravel()
+        # the frequencies beyond the Nyquist frequency of the volume
+        inside = np.einsum("ij,ij->i", coords, coords) <= 0.25 * (1 + 1e-6) ** 2
+        if not inside.all():
+            coords, values = coords[inside], values[inside]
+        is_conj, rows, weights = _trilinear_corners(coords, self.volume_shape)
+        real = values.real
+        imag = np.where(is_conj, -values.imag, values.imag)
+        rows = rows.ravel()
+        size = int(np.prod(self._dft_shape))
+        weight_sum = np.bincount(rows, weights.ravel(), minlength=size)
+        dft = np.empty(size, dtype=np.complex64)
+        dft.real = np.bincount(rows, (weights * real).ravel(), minlength=size)
+        dft.imag = np.bincount(rows, (weights * imag).ravel(), minlength=size)
+        valid = weight_sum > 1e-3
+        # normalize by the weights and by the pixel area of the images
+        normalizer = np.zeros(size, dtype=np.float32)
+        normalizer[valid] = 1 / weight_sum[valid] / self.scale**2
+        dft *= normalizer
+        return dft.reshape(self._dft_shape)
+
+
+def _inverse_rfft(
+    dft: NDArray[np.complex64],
+    volume_shape: tuple[int, int, int],
+    output_shape: int | Sequence[int] | None,
+) -> NDArray[np.float32]:
+    """Inverse transform of the inserted 3D DFT, cropped to the output shape."""
+    vshape = volume_shape
+    if output_shape is None:
+        output_shape = vshape
+    output_shape = _normalize_shape(output_shape, 3)
+    # indices of the output, whose origin is moved to the center
+    indices = [
+        (np.arange(size) - size // 2) % length
+        for size, length in zip(output_shape, vshape)
+    ]
+    # The inverse transform is computed axis by axis, and each axis is cropped
+    # right after the transform, so the later transforms are smaller.
+    volume = sfft.ifft(dft, axis=-3, overwrite_x=True)
+    volume = sfft.ifft(volume[..., indices[0], :, :], axis=-2, overwrite_x=True)
+    volume = sfft.irfft(volume[..., indices[1], :], n=vshape[2], overwrite_x=True)
+    volume = volume[..., indices[2]].astype(np.float32, copy=False)
+    volume /= _gridding_correction(vshape, output_shape)
+    return volume
+
+
+def _rfft_shape(volume_shape: tuple[int, ...]) -> tuple[int, int, int]:
+    return volume_shape[0], volume_shape[1], volume_shape[2] // 2 + 1
+
+
+def _slice_frequencies(
+    slice_shape: tuple[int, ...], scale: float, stretch_min: float
+) -> tuple[NDArray[np.intp], NDArray[np.float32]]:
+    """Indices of the rfft of the slices to insert, and their (z, y, x) frequencies.
+
+    The frequencies are in cycles per pixel of the volume. Only those up to the
+    Nyquist frequency of the volume are inserted. Half of the frequencies of x = 0 are
+    redundant because of the Friedel symmetry.
+    """
+    ny, nx = slice_shape
+    qy, qx = np.meshgrid(
+        sfft.fftfreq(ny).astype(np.float32),
+        sfft.rfftfreq(nx).astype(np.float32),
+        indexing="ij",
+    )
+    freqs = np.stack([np.zeros_like(qy), qy, qx], axis=-1).reshape(-1, 3)
+    freqs *= np.float32(scale)
+    keep = (np.linalg.norm(freqs, axis=-1) <= 0.5 / stretch_min) & ~(
+        (freqs[:, 2] == 0) & (freqs[:, 1] < 0)
+    )
+    keep = np.flatnonzero(keep)
+    return keep, freqs[keep]
+
+
+def _trilinear_corners(
+    coords: NDArray[np.float32], vshape: tuple[int, ...]
+) -> tuple[NDArray[np.bool_], NDArray[np.int64], NDArray[np.float32]]:
+    """Trilinear interpolation of (N, 3) frequencies in the rfft of the volume.
+
+    The rfft only has x >= 0, so the frequencies of x < 0 are inserted at the
+    opposite frequencies as conjugate values. Returns the (N,) mask of them, and the
+    (8, N) rows (indices of the flattened rfft) and weights of the 8 corners. The
+    weights of the corners outside the rfft are 0.
+    """
+    nz, ny, nxh = _rfft_shape(vshape)
+    is_conj = coords[:, 2] < 0
+    coords = np.where(is_conj[:, np.newaxis], -coords, coords)
+    index = coords * np.array(vshape, dtype=np.float32)
+    floor = np.floor(index)
+    frac = index - floor
+    # |frequencies| <= 0.5, so the indices are in [-size // 2 - 1, size // 2]
+    base = floor.astype(np.int32)
+    # (2, N) of the two corners along each axis, wrapped around along z and y
+    iz = np.where(base[:, 0] < 0, base[:, 0] + nz, base[:, 0])
+    iy = np.where(base[:, 1] < 0, base[:, 1] + ny, base[:, 1])
+    ix = base[:, 2]
+    rows_z = np.stack([iz, np.where(iz + 1 == nz, 0, iz + 1)]).astype(np.int64)
+    rows_z *= ny * nxh
+    rows_y = np.stack([iy, np.where(iy + 1 == ny, 0, iy + 1)]) * nxh
+    rows_x = np.stack([ix, np.minimum(ix + 1, nxh - 1)])
+    weights_z = np.stack([1 - frac[:, 0], frac[:, 0]])
+    weights_y = np.stack([1 - frac[:, 1], frac[:, 1]])
+    weights_x = np.stack([1 - frac[:, 2], np.where(ix + 1 < nxh, frac[:, 2], 0)])
+    rows = (
+        rows_z[:, np.newaxis, np.newaxis]
+        + (rows_y[:, np.newaxis] + rows_x[np.newaxis, :])[np.newaxis]
+    )
+    weights = (
+        weights_z[:, np.newaxis, np.newaxis]
+        * weights_y[np.newaxis, :, np.newaxis]
+        * weights_x[np.newaxis, np.newaxis, :]
+    )
+    return is_conj, rows.reshape(8, -1), weights.reshape(8, -1)
 
 
 def _normalize_shape(shape: int | Sequence[int], ndim: int) -> tuple[int, ...]:

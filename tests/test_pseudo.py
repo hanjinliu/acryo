@@ -1,3 +1,5 @@
+import dataclasses
+
 import dask
 import numpy as np
 from numpy.testing import assert_allclose
@@ -11,6 +13,7 @@ from acryo.ctf import CTFModel, TiltSeriesCTF
 from acryo.pipe import soft_otsu
 from acryo.loader import ExtractedSubvolumeLoader, TiltSeriesAlignment
 from acryo.projection import (
+    AffineShifts2D,
     LocalAlignment,
     LocalShifts2D,
     TiltImagePreprocessor,
@@ -185,9 +188,9 @@ def recorded_calls(monkeypatch) -> list[tuple[int, int]]:
     calls: list[tuple[int, int]] = []
     _call = DirectFourierReconstructor.__call__
 
-    def _call_record(self, positions):
+    def _call_record(self, positions, rotations=None):
         calls.append((len(positions), self.sidelength))
-        return _call(self, positions)
+        return _call(self, positions, rotations)
 
     monkeypatch.setattr(DirectFourierReconstructor, "__call__", _call_record)
     return calls
@@ -325,6 +328,47 @@ def test_tomo_hand(tmp_path, corner_safe):
     loader = _loader(ts, mole, tomo_hand=-1, **kwargs)
     for subtomo in loader.asnumpy():
         assert_allclose(_center_of_mass(subtomo), [8, 6, 9], atol=0.15)
+
+
+def test_local_alignment_around_molecules(tmp_path):
+    # The local alignments change the tilt angles, the rotation and the magnification
+    # of each local area, so the blobs around a molecule are reconstructed sharply
+    # only if the projection around the molecule is used ("full").
+    rng = np.random.default_rng(14)
+    ntilts = TILT_ANGLES.size
+    angles = np.deg2rad(rng.normal(scale=2.0, size=(2, 2, ntilts)))
+    mags = 1 + rng.normal(scale=0.03, size=(2, 2, ntilts, 1, 1))
+    c, s = np.cos(angles), np.sin(angles)
+    local = LocalAlignment(
+        origin=[-20.0, -25.0],
+        spacing=[40.0, 50.0],
+        tilt_angles=rng.normal(scale=3.0, size=(2, 2, ntilts)),
+        matrices=mags * np.stack([np.stack([c, -s], -1), np.stack([s, c], -1)], -2),
+        mode="full",
+    )
+    center = np.array([1.0, 6.0, -8.0])
+    blobs = center + np.array(
+        [[0.0, 0.0, 0.0], [0.0, 4.5, 0.0], [0.0, 0.0, -4.5], [4.0, 0.0, 0.0]]
+    )
+    mole = Molecules((center + CENTER)[np.newaxis])
+    kwargs = dict(output_shape=(25, 25, 25), order=1)
+    # reconstructed from the tilt series of the exact geometry without the local
+    # alignments
+    ts = _make_tilt_series(tmp_path / "global.mrc", blobs, sigma=1.0)
+    expected = _loader(ts, mole, **kwargs).asnumpy()[0]
+    ts = _make_tilt_series(
+        tmp_path / "local.mrc", blobs, sigma=1.0, local_shifts_2d=local
+    )
+    assert ts.position_dependent
+    out = _loader(ts, mole, **kwargs).asnumpy()[0]
+    corr = np.corrcoef(out.ravel(), expected.ravel())[0, 1]
+    assert corr > 0.98
+    # "shift" uses the linear maps of the whole tilt series
+    ts = ts.replace(local_shifts_2d=dataclasses.replace(local, mode="shift"))
+    assert not ts.position_dependent
+    out = _loader(ts, mole, **kwargs).asnumpy()[0]
+    corr_global = np.corrcoef(out.ravel(), expected.ravel())[0, 1]
+    assert 1 - corr_global > 2 * (1 - corr)
 
 
 def test_properties(blob_tilt_series):
@@ -733,6 +777,52 @@ def test_score_on_tilt_isolated(tmp_path, scale, size, tomo_hand):
     assert loader.score_on_tilt([template], mask=_sphere_mask(size)).min() > 0.97
     assert loader.score_on_tilt([template], cutoff=0.2).min() > 0.97
     assert loader.score_on_tilt([template], method="ncc").min() > 0.85
+
+
+# extended particle of 5 blobs, in nm, whose projections are distorted noticeably by
+# the magnification
+LARGE_PARTICLE = np.array(
+    [
+        [0.0, 0.0, 0.0],
+        [0.0, 6.0, 0.0],
+        [3.0, 0.0, -6.0],
+        [-3.0, -5.0, 4.0],
+        [1.0, 4.0, 5.0],
+    ]
+)
+
+
+@pytest.mark.parametrize("local", [False, True])
+def test_score_on_tilt_magnified(tmp_path, local):
+    # The tilt images are magnified, and around each particle also rotated and tilted
+    # by the local alignments. The projections of the template are distorted in the
+    # same way (the minimum score was 0.93 and 0.86 by the rigid projection).
+    rng = np.random.default_rng(5)
+    ntilts = TILT_ANGLES.size
+    mags = 1.04 * np.eye(2) + rng.uniform(-0.04, 0.04, size=(ntilts, 2, 2))
+    base = None
+    if local:
+        angles = np.deg2rad(rng.normal(scale=2.0, size=(2, 2, ntilts)))
+        c, s = np.cos(angles), np.sin(angles)
+        base = LocalAlignment(
+            origin=[-20.0, -25.0],
+            spacing=[40.0, 50.0],
+            tilt_angles=rng.normal(scale=2.0, size=(2, 2, ntilts)),
+            matrices=np.stack([np.stack([c, -s], -1), np.stack([s, c], -1)], -2),
+            mode="full",
+        )
+    centers = np.array([[1.0, -12.0, 14.0], [-2.0, 14.0, -15.0]])
+    rot = Rotation.random(2, random_state=3)
+    ts = _make_tilt_series(
+        tmp_path / "ts.mrc",
+        _particle_points(centers, rot, LARGE_PARTICLE),
+        local_shifts_2d=AffineShifts2D(mags, base=base),
+    )
+    assert ts.position_dependent == local
+    mole = Molecules(centers + CENTER, rot)
+    loader = _loader(ts, mole, scale=0.5, preprocess=False)
+    template = _particle_template(0.5, 32, LARGE_PARTICLE)
+    assert loader.score_on_tilt([template]).min() > 0.99
 
 
 def test_score_on_tilt(tmp_path):

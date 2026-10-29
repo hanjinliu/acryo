@@ -4,7 +4,7 @@ import dataclasses
 from dataclasses import dataclass
 from pathlib import Path
 import json
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any, Literal, Sequence
 import warnings
 import polars as pl
 
@@ -266,7 +266,7 @@ class TiltSeries:
         projection of a point on each tilt image are mapped to the offsets from the
         point in the tomogram space. The patches of the tilt images around the
         projected points are reconstructed by these maps. The position-dependent
-        shifts are not included.
+        shifts are not included (see :meth:`local_detector2tomo_at`).
         """
         rotations = self.detector2tomo
         if self.local_shifts_2d is None:
@@ -277,6 +277,69 @@ class TiltSeries:
         inverse[:, 0, 0] = 1.0
         inverse[:, 1:, 1:] = np.linalg.inv(linear)
         return rotations @ inverse
+
+    @property
+    def position_dependent(self) -> bool:
+        """Whether the linear map of the projection around a point depends on it.
+
+        True if the tilt series has ``local_shifts``, or ``local_shifts_2d`` that is
+        not affine (:attr:`LocalShiftModel.position_dependent`), such as the local
+        alignments of IMOD (:class:`LocalAlignment` of ``mode="full"``). Then, the
+        subtomograms are reconstructed by :meth:`local_detector2tomo_at` of each point
+        instead of :attr:`local_detector2tomo`.
+        """
+        if self.local_shifts is not None:
+            return True
+        return (
+            self.local_shifts_2d is not None and self.local_shifts_2d.position_dependent
+        )
+
+    def local_detector2tomo_at(
+        self, points: ArrayLike, step: nm = 0.5
+    ) -> NDArray[np.float64]:
+        """Linear maps from the detector (z, y, x) to the tomogram space around points.
+
+        Same as :attr:`local_detector2tomo`, but the image plane is mapped by the
+        linear part of the projection around each point, including the
+        position-dependent shifts (``local_shifts`` and ``local_shifts_2d``), so that
+        the patches of the tilt images around the projected point are reconstructed
+        consistently with the projection of its neighborhood. For example, the local
+        alignments of IMOD change the tilt angles, the rotation and the magnification
+        of each local area. The linear part is computed by the central differences of
+        :meth:`project_points`.
+
+        Parameters
+        ----------
+        points : (..., 3) array
+            (z, y, x) coordinates in nm relative to the center of the tomogram.
+        step : float, default is 0.5
+            Step of the central differences in nm.
+
+        Returns
+        -------
+        (..., T, 3, 3) array
+            The linear maps of each point and tilt. They are the same as
+            :attr:`local_detector2tomo` if the projection is affine.
+        """
+        points = np.asarray(points, dtype=np.float64)
+        if points.shape[-1:] != (3,):
+            raise ValueError(f"Shape of points must be (..., 3), got {points.shape}.")
+        batch_shape = points.shape[:-1]
+        points = points.reshape(-1, 3)
+        npoints, ntilts = points.shape[0], self.ntilts
+        offsets = np.concatenate([np.eye(3), -np.eye(3)]) * step
+        shifted = points[:, np.newaxis, :] + offsets  # (N, 6, 3)
+        projected = self.project_points(shifted).reshape(npoints, 2, 3, ntilts, 2)
+        # (N, T, 2, 3) derivatives of the projected (y, x) by the (z, y, x) of points
+        jacobian = (projected[:, 0] - projected[:, 1]) / (2 * step)
+        jacobian = jacobian.transpose(0, 2, 3, 1)
+        # The depth of the projection is not used for the reconstruction, so that of
+        # the tilt series is used, as `detector2tomo`.
+        linear = self.projection_matrices[:, :3, :3] @ self.tomo2sample[:3, :3]
+        linear = np.repeat(linear[np.newaxis], npoints, axis=0)
+        linear[:, :, 1:, :] = jacobian
+        out = np.linalg.inv(linear)
+        return out.reshape(batch_shape + (ntilts, 3, 3))
 
     def project_points(self, points: ArrayLike) -> NDArray[np.float64]:
         """Project points in the tomogram space to the detector.
@@ -345,7 +408,8 @@ class TiltSeries:
         The returned filter can be added to :class:`TiltImagePreprocessor`. Each patch
         of the tilt images is phase-flipped by the CTF at the center of the patch. The
         defocus there is that of the plane z = 0 of the tomogram, which is the defocus
-        of ``ctf`` at the projection of the tomogram center, changed by the depth of
+        of ``ctf`` at the projection of the tomogram center (or at the center of the
+        tilt images, see :attr:`TiltSeriesCTF.defocus_at`), changed by the depth of
         the plane in the microscope (by the tilt angle and the position). The local
         shifts are not considered.
 
@@ -365,7 +429,11 @@ class TiltSeries:
         linear = mtx[:, 1:3, 1:3]
         depth = mtx[:, 0, 1:3]
         gradient = np.linalg.solve(linear.transpose(0, 2, 1), depth[..., np.newaxis])
-        return PatchCTFCorrection(self.ctf, gradient[..., 0], mtx[:, 1:3, 3], hand=hand)
+        if self.ctf.defocus_at == "tomogram_center":
+            center = mtx[:, 1:3, 3]
+        else:
+            center = np.zeros((self.ntilts, 2))
+        return PatchCTFCorrection(self.ctf, gradient[..., 0], center, hand=hand)
 
     @classmethod
     def from_etomo_directory(
@@ -373,7 +441,8 @@ class TiltSeries:
         path: str | Path,
         scale: nm,
         *,
-        local_alignment: bool | str | Path = False,
+        local_alignment: Literal["none", "shift", "full"] = "none",
+        local_alignment_file: str | Path | None = None,
         ctf: bool | str | Path = True,
     ) -> TiltSeries:
         """Read the alignment of an IMOD etomo directory.
@@ -389,26 +458,40 @@ class TiltSeries:
             The etomo directory.
         scale : float
             Pixel size of the raw tilt images in nm.
-        local_alignment : bool, str or Path, default is False
-            Whether to read the local alignments of tiltalign as ``local_shifts_2d``
-            (:class:`LocalAlignment`). If True, the file is ``LOCALFILE`` of tilt.com
-            (or ``OutputLocalFile`` of align.com). A path to the file can also be
-            given. As ``tilt`` of IMOD, the Z factors of the local alignments are used
-            only if tilt.com has ``ZFACTORFILE``.
+        local_alignment : {"none", "shift", "full"}, default is "none"
+            How to use the local alignments of tiltalign, which are read as
+            ``local_shifts_2d`` (:class:`LocalAlignment`) unless "none". "shift" uses
+            them only for the shifts of the projected points, so the subtomogram
+            around each point is reconstructed (and the template is projected) by
+            the geometry of the whole tilt series. "full" also uses the local tilt
+            angles, rotation and magnification around each point (see
+            :meth:`local_detector2tomo_at`), which is usually not needed and slower.
+            If the file of the local alignments is not found, a warning is issued
+            and they are not used. As ``tilt`` of IMOD, the Z factors of the local
+            alignments are used only if tilt.com has ``ZFACTORFILE``.
+        local_alignment_file : str or Path, optional
+            The file of the local alignments, relative to ``path``. By default,
+            ``LOCALFILE`` of tilt.com (or ``OutputLocalFile`` of align.com).
         ctf : bool, str or Path, default is True
             Whether to read the CTF parameters as ``ctf``, so that the CTF is
             corrected by :class:`BackProjectionLoader`. The defocus of each view is
             read from the defocus file of ctfplotter (``DefocusFile`` of
-            ctfcorrection.com or ctfplotter.com, or ``<dataset>.defocus``), and the
-            voltage, spherical aberration and amplitude contrast from
-            ctfcorrection.com or ctfplotter.com. A path to the defocus file can also
-            be given. If True and they are not found, a warning is issued and
-            ``ctf`` is not set. The handedness of the defocus gradient is not read
-            (see :meth:`ctf_correction`), and a warning is issued if
+            ctfplotter.com or ctfcorrection.com, or ``<dataset>.defocus``), and the
+            voltage, spherical aberration and amplitude contrast from ctfplotter.com,
+            with which the defocus was fitted, or from ctfcorrection.com if not found
+            there. A path to the defocus file can also be given. If True and they are
+            not found, a warning is issued and ``ctf`` is not set. If ``scale`` is
+            different from the pixel size at which ctfplotter fitted the defocus
+            (``PixelSize`` of ctfplotter.com, divided by ``BinByFactor`` of newst.com
+            for the aligned stack), the defocus and the spherical aberration are
+            scaled by the square and the fourth power of their ratio, so that the CTF
+            at each frequency in pixels is the fitted one. The handedness of the defocus gradient is
+            not read (see :meth:`ctf_correction`), and a warning is issued if
             ``InvertTiltAngles`` is set.
         """
         import etomofiles
 
+        mode = _local_alignment_mode(local_alignment)
         path = Path(path)
         df_all = etomofiles.read(path)
         df = df_all.loc[~df_all["excluded"]].reset_index(drop=True)
@@ -440,11 +523,12 @@ class TiltSeries:
                 stacklevel=2,
             )
         local_shifts_2d = None
-        if local_alignment is not False:
+        if mode != "none":
             local_shifts_2d = _read_imod_local_alignment(
                 path,
-                local_alignment,
+                local_alignment_file,
                 tilt_com,
+                mode=mode,
                 image_path=image_path,
                 scale=scale,
                 indices=df["idx_tilt"].to_numpy(),
@@ -462,6 +546,7 @@ class TiltSeries:
                 image_path=image_path,
                 indices=df["idx_tilt"].to_numpy(),
                 tilt_axis_angle=tilt_axis_angle,
+                scale=scale,
             )
         return cls(
             tilt_angles=df["tlt"].to_numpy(),
@@ -556,9 +641,12 @@ class TiltSeries:
             (``rlnDefocusU``, ``rlnDefocusV`` and ``rlnDefocusAngle``) is read from
             the tilt series, and ``rlnVoltage``, ``rlnSphericalAberration`` and
             ``rlnAmplitudeContrast`` from the global data block. If they are not
-            found, a warning is issued and ``ctf`` is not set. The handedness of the
-            defocus gradient is not read (see :meth:`ctf_correction`), and a warning
-            is issued if ``rlnTomoHand`` is 1.
+            found, a warning is issued and ``ctf`` is not set. If ``scale`` is
+            different from ``rlnTomoTiltSeriesPixelSize``, at which the defocus was
+            estimated, the defocus is scaled by the square of their ratio, so that the
+            zeros of the CTF are at the estimated frequencies in pixels. The
+            handedness of the defocus gradient is not read (see
+            :meth:`ctf_correction`), and a warning is issued if ``rlnTomoHand`` is 1.
         """
         from starfile_rs import read_star
 
@@ -637,7 +725,7 @@ class TiltSeries:
             image_path=tuple(image_paths),
             image_indices=None if not any(image_indices) else image_indices,
             scale=scale,
-            ctf=_read_relion_ctf(df, series, path) if ctf else None,
+            ctf=_read_relion_ctf(df, series, path, scale) if ctf else None,
         )
 
     @classmethod
@@ -815,31 +903,61 @@ def _read_imod_com(path: Path) -> dict[str, list[str]]:
     return options
 
 
+_LOCAL_ALIGNMENT_MODES = ("none", "shift", "full")
+
+
+def _local_alignment_mode(local_alignment) -> Literal["none", "shift", "full"]:
+    """The mode of the local alignments, converted from the deprecated bool."""
+    if isinstance(local_alignment, bool):
+        mode = "shift" if local_alignment else "none"
+        warnings.warn(
+            f"'local_alignment={local_alignment}' is deprecated. Use "
+            f"'local_alignment={mode!r}' instead.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        return mode
+    if local_alignment not in _LOCAL_ALIGNMENT_MODES:
+        raise ValueError(
+            "'local_alignment' must be one of 'none', 'shift' or 'full', got "
+            f"{local_alignment!r}. The file of the local alignments is given by "
+            "'local_alignment_file'."
+        )
+    return local_alignment
+
+
 def _read_imod_local_alignment(
     path: Path,
-    local_alignment: bool | str | Path,
+    local_alignment_file: str | Path | None,
     tilt_com: dict[str, list[str]],
     *,
+    mode: Literal["shift", "full"],
     image_path: Path,
     scale: nm,
     indices: NDArray[np.integer],
     nviews: int,
 ) -> LocalAlignment | None:
-    """Read the local alignments of an etomo directory for the selected views."""
-    if local_alignment is True:
+    """Read the local alignments of an etomo directory for the selected views.
+
+    None is returned with a warning if the file is not given and not found.
+    """
+    if local_alignment_file is None:
         names = tilt_com.get("LOCALFILE") or _read_imod_com(path / "align.com").get(
             "OUTPUTLOCALFILE"
         )
-        if names:
-            file = Path(names[0])
-        else:
+        file = path / names[0] if names else None
+        if file is None or not file.exists():
+            warnings.warn(
+                f"The local alignments (LOCALFILE of tilt.com or OutputLocalFile of "
+                f"align.com) are not found in {path}, so they are not used.",
+                UserWarning,
+                stacklevel=3,
+            )
             return None
     else:
-        file = Path(local_alignment)
-    if not file.is_absolute():
-        file = path / file
-    if not Path(file).exists():
-        return None
+        file = path / local_alignment_file
+        if not file.exists():
+            raise FileNotFoundError(f"Local alignment file {file} is not found.")
     if fullimage := tilt_com.get("FULLIMAGE"):
         image_shape = (int(fullimage[1]), int(fullimage[0]))
     else:
@@ -847,7 +965,7 @@ def _read_imod_local_alignment(
 
         image_shape = MrcImageStack(image_path).shape[1:]
     local = LocalAlignment.from_imod(
-        file, image_shape, scale, z_factors="ZFACTORFILE" in tilt_com
+        file, image_shape, scale, z_factors="ZFACTORFILE" in tilt_com, mode=mode
     )
     if local.ntilts == nviews:
         return local.select_tilts(indices)
@@ -869,6 +987,7 @@ def _read_imod_ctf(
     image_path: Path,
     indices: NDArray[np.integer],
     tilt_axis_angle: NDArray[np.float64],
+    scale: nm,
 ) -> TiltSeriesCTF | None:
     """Read the CTF parameters of the selected views from an etomo directory.
 
@@ -876,8 +995,11 @@ def _read_imod_ctf(
     """
     explicit = ctf is not True
     plotter_com = _read_imod_com(path / "ctfplotter.com")
-    # ctfcorrection.com (ctfphaseflip) is the one used for the correction
-    params = {**plotter_com, **_read_imod_com(path / "ctfcorrection.com")}
+    correction_com = _read_imod_com(path / "ctfcorrection.com")
+    # The defocus is valid only with the parameters with which ctfplotter fitted it,
+    # which may differ from those of ctfcorrection.com (such as the default voltage
+    # of etomo left unchanged).
+    params = {**correction_com, **plotter_com}
     if explicit:
         file = Path(ctf)
     elif names := params.get("DEFOCUSFILE"):
@@ -892,8 +1014,8 @@ def _read_imod_ctf(
             msg = f"Defocus file {file} is not found"
         else:
             msg = (
-                f"{', '.join(missing)} not found in ctfcorrection.com or "
-                f"ctfplotter.com in {path}"
+                f"{', '.join(missing)} not found in ctfplotter.com or "
+                f"ctfcorrection.com in {path}"
             )
         if explicit:
             raise (ValueError if file.exists() else FileNotFoundError)(f"{msg}.")
@@ -909,19 +1031,90 @@ def _read_imod_ctf(
         _warn_ignored(f"Phase shifts in {file} are not supported and ignored.")
     defocus1, defocus2, angle = defocus.at_views(np.asarray(indices) + 1)
     stack = plotter_com.get("INPUTSTACK")
-    if stack and stack[0].endswith(".ali"):
+    if stack and _is_imod_aligned_stack(stack[0]):
         # astigmatism angles of the aligned stack, whose tilt axis is vertical
         angle = angle + tilt_axis_angle
+        defocus_at = "tomogram_center"
+    else:
+        # As ctfphaseflip, the defocus measured on the raw images is at their center,
+        # which is moved by the shifts of the alignment.
+        defocus_at = "image_center"
     invert = params.get("INVERTTILTANGLES")
     if invert is not None and (not invert or invert[0] != "0"):
         _warn_ignored(_inverted_hand_message(f"InvertTiltAngles in {path}"))
-    return TiltSeriesCTF(
+    tilt_ctf = TiltSeriesCTF(
         defocus_u=-defocus1 / 1000,  # nm (underfocus positive) -> μm
         defocus_v=-defocus2 / 1000,
         astigmatism_angle=angle,
         voltage=float(params["VOLTAGE"][0]),
         spherical_aberration=float(params["SPHERICALABERRATION"][0]),
         amplitude_contrast=float(params["AMPLITUDECONTRAST"][0]),
+        defocus_at=defocus_at,
+    )
+    fitted = _imod_ctf_pixel_size(path, plotter_com, correction_com)
+    if fitted is None:
+        return tilt_ctf
+    return _ctf_for_pixel_size(tilt_ctf, fitted, scale, source=f"IMOD in {path}")
+
+
+def _is_imod_aligned_stack(name: str) -> bool:
+    """Whether the stack is the aligned stack of etomo (.ali or _ali.mrc)."""
+    return name.endswith(".ali") or Path(name).stem.endswith("_ali")
+
+
+def _imod_ctf_pixel_size(
+    path: Path,
+    plotter_com: dict[str, list[str]],
+    correction_com: dict[str, list[str]],
+) -> nm | None:
+    """Pixel size (nm) of the raw images at which the defocus was fitted.
+
+    ``PixelSize`` of ctfplotter.com, which fitted the defocus, is used (or that of
+    ctfcorrection.com if not found). It is the pixel size of the input stack, so it is
+    divided by ``BinByFactor`` of newst.com if the input is the aligned stack.
+    """
+    for com in [plotter_com, correction_com]:
+        if not (pixel := com.get("PIXELSIZE")):
+            continue
+        binsize = 1.0
+        stack = com.get("INPUTSTACK")
+        if stack and _is_imod_aligned_stack(stack[0]):
+            newst = _read_imod_com(path / "newst.com")
+            binsize = float((newst.get("BINBYFACTOR") or ["1"])[0])
+        return float(pixel[0]) / binsize
+    return None
+
+
+def _ctf_for_pixel_size(
+    ctf: TiltSeriesCTF, fitted: nm, scale: nm, *, source: str
+) -> TiltSeriesCTF:
+    """CTF parameters fitted at the pixel size ``fitted`` for the images of ``scale``.
+
+    The CTF is fitted to the power spectra at the frequencies in pixels, so if the
+    pixel size of the tilt series is different (such as a calibrated one), the
+    frequencies in nm⁻¹ are different by ``fitted / scale``. The phase of the CTF is
+    proportional to ``defocus * k**2`` and ``spherical_aberration * k**4`` at the
+    frequency ``k`` in nm⁻¹, so they are scaled by ``(scale / fitted) ** 2`` and
+    ``(scale / fitted) ** 4``, respectively, so that the CTF at each frequency in
+    pixels is the fitted one.
+    """
+    ratio = scale / fitted
+    if abs(ratio - 1) < 1e-6:
+        return ctf
+    if not 0.9 < ratio < 1.1:
+        warnings.warn(
+            f"The pixel size of the CTF estimation by {source} ({fitted:.4f} nm) is "
+            f"very different from that of the tilt series ({scale:.4f} nm). The "
+            "defocus and the spherical aberration are scaled by the square and the "
+            "fourth power of their ratio, but check the pixel sizes.",
+            UserWarning,
+            stacklevel=4,
+        )
+    return dataclasses.replace(
+        ctf,
+        defocus_u=ctf.defocus_u * ratio**2,
+        defocus_v=ctf.defocus_v * ratio**2,
+        spherical_aberration=ctf.spherical_aberration * ratio**4,
     )
 
 
@@ -937,6 +1130,7 @@ def _read_relion_ctf(
     df: pl.DataFrame,
     series: dict[str, Any] | None,
     path: Path,
+    scale: nm,
 ) -> TiltSeriesCTF | None:
     """Read the CTF parameters from the tilt series and its row in the global block.
 
@@ -966,13 +1160,18 @@ def _read_relion_ctf(
     if (hand := series.get("rlnTomoHand")) is not None and float(hand) > 0:
         _warn_ignored(_inverted_hand_message(f"rlnTomoHand = {hand} in {path}"))
     angst2um = 1e-4
-    return TiltSeriesCTF(
+    tilt_ctf = TiltSeriesCTF(
         defocus_u=-df["rlnDefocusU"].to_numpy().astype(np.float64) * angst2um,
         defocus_v=-df["rlnDefocusV"].to_numpy().astype(np.float64) * angst2um,
         astigmatism_angle=df["rlnDefocusAngle"].to_numpy().astype(np.float64),
         voltage=float(series["rlnVoltage"]),
         spherical_aberration=float(series["rlnSphericalAberration"]),
         amplitude_contrast=float(series["rlnAmplitudeContrast"]),
+    )
+    if (fitted := series.get("rlnTomoTiltSeriesPixelSize")) is None:
+        return tilt_ctf
+    return _ctf_for_pixel_size(
+        tilt_ctf, float(fitted) / _ANGSTROM_PER_NM, scale, source=f"RELION in {path}"
     )
 
 

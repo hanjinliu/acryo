@@ -382,7 +382,7 @@ can be used with ``tomogram_center=(0, 0, 0)``.
 
 The tilt images are preprocessed by :class:`acryo.projection.TiltImagePreprocessor`
 (background subtraction, bandpass filtering and normalization of each tilt image). Each
-tilt image is split into overlapping patches (3 x 3 by default, ``patch_grid``), which are
+tilt image is split into overlapping patches (6 x 6 by default, ``patch_grid``), which are
 filtered separately with a margin of ``padding`` pixels and blended in the overlapping
 regions (``overlap`` pixels). If the tilt images are binned, the Fourier transform of each
 patch is cropped before the inverse transform, so the binned images are computed directly.
@@ -391,9 +391,13 @@ The parameters can be changed by giving a preprocessor to ``preprocess``.
 The CTF of the tilt images is corrected by phase flipping if the tilt series has the CTF
 parameters (``tilt_series.ctf``, a :class:`acryo.ctf.TiltSeriesCTF`). They are read by
 default by :meth:`TiltSeries.from_etomo_directory` (the defocus file of ctfplotter and the
-parameters in ctfcorrection.com or ctfplotter.com) and
-:meth:`TiltSeries.from_relion_tilt_series_star` (``rlnDefocusU``, ``rlnDefocusV``,
-``rlnDefocusAngle`` and the optics in the global data block). Each patch is phase-flipped
+parameters in ctfplotter.com, with which the defocus was fitted, or in ctfcorrection.com)
+and :meth:`TiltSeries.from_relion_tilt_series_star` (``rlnDefocusU``, ``rlnDefocusV``,
+``rlnDefocusAngle`` and the optics in the global data block). If ``scale`` is different
+from the pixel size at which the defocus was estimated (such as a calibrated pixel size),
+the defocus and the spherical aberration are scaled so that the CTF at each frequency in
+pixels is the estimated one.
+Each patch is phase-flipped
 with the defocus at its center, which is corrected for the depth of the specimen in the
 tilted image by :class:`acryo.ctf.PatchCTFCorrection` (see
 :meth:`TiltSeries.ctf_correction`). Give ``ctf=False`` to the ``from_*`` methods to read
@@ -542,14 +546,18 @@ of the projected points is also accepted as ``local_shifts_2d``, but it cannot b
 
 The rotation of the transformation of each view of IMOD (.xf) is the tilt axis angle, and the
 rest, such as the change of magnification, is read as :class:`AffineShifts2D`. The local
-alignments of IMOD (``LOCALFILE`` of tilt.com) are read with ``local_alignment=True``, so the
-results with and without them can be compared.
+alignments of IMOD (``LOCALFILE`` of tilt.com) are read with ``local_alignment="shift"`` or
+``"full"``, so the results with and without them can be compared. ``"shift"`` uses them only
+for the shifts of the projected points, and the subtomogram around each point is
+reconstructed by the geometry of the whole tilt series, which is enough for most analyses.
+``"full"`` also uses the local tilt angles, rotation and magnification around each point
+(:meth:`TiltSeries.local_detector2tomo_at`), which is slower.
 
 .. code-block:: python
 
     tilt_series = TiltSeries.from_etomo_directory("path/to/etomo", scale=0.266)
     tilt_series_local = TiltSeries.from_etomo_directory(
-        "path/to/etomo", scale=0.266, local_alignment=True
+        "path/to/etomo", scale=0.266, local_alignment="shift"
     )
 
 :meth:`refine_tilt_series` uses the projection including these models, so the alignment

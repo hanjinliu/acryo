@@ -6,6 +6,7 @@ from scipy import fft as sfft
 from acryo.projection import (
     CentralSliceInsertion,
     DirectFourierReconstructor,
+    LocalSliceInsertion,
     VolumeProjector,
     centered_patches_rfft,
     read_patch,
@@ -193,6 +194,78 @@ def test_insertion_invalid_input():
         )
 
 
+def _magnified(seed: int, mag: float = 1.0) -> tuple[np.ndarray, np.ndarray]:
+    """Random (T, 2, 2) magnifications and the rotations of the magnified images."""
+    rng = np.random.default_rng(seed)
+    mags = mag * np.eye(2) + rng.uniform(-0.04, 0.04, size=(len(ROTATIONS), 2, 2))
+    return mags, _magnified_rotations(mags)
+
+
+def _magnified_rotations(mags: np.ndarray) -> np.ndarray:
+    inverse = np.tile(np.eye(3), (len(mags), 1, 1))
+    inverse[:, 1:, 1:] = np.linalg.inv(mags)
+    return ROTATIONS @ inverse
+
+
+@pytest.mark.parametrize("volume_shape", [24, 25, (20, 24, 27)])
+def test_local_insertion_same_as_central(volume_shape):
+    rng = np.random.default_rng(0)
+    _, magnified = _magnified(1)
+    shape = (2, len(ROTATIONS), 20, 11)
+    slices = (rng.normal(size=shape) + 1j * rng.normal(size=shape)).astype(np.complex64)
+    local = LocalSliceInsertion(20, volume_shape, scale=0.9)
+    for rotations in [ROTATIONS, magnified]:
+        central = CentralSliceInsertion(rotations, 20, volume_shape, scale=0.9)
+        expected = central.reconstruct(slices, 12)
+        each = np.broadcast_to(rotations, (2,) + rotations.shape)
+        out = local.reconstruct(slices, each, 12)
+        assert out.shape == (2, 12, 12, 12)
+        assert out.dtype == np.float32
+        assert_allclose(out, expected, atol=1e-5 * np.abs(expected).max())
+    # the slices of each volume are inserted by its own matrices
+    out = local.insert(slices, np.stack([ROTATIONS, magnified]))
+    for dft, rotations, sl in zip(out, [ROTATIONS, magnified], slices):
+        central = CentralSliceInsertion(rotations, 20, volume_shape, scale=0.9)
+        assert_allclose(dft, central.insert(sl), atol=1e-5 * np.abs(dft).max())
+    with pytest.raises(ValueError):
+        local.insert(slices, ROTATIONS)
+    with pytest.raises(ValueError):
+        local.insert(slices[..., :5], np.stack([ROTATIONS] * 2))
+
+
+def test_reconstruct_with_rotations_of_each_cube():
+    # The reconstructor is created for the magnification of the whole images, but the
+    # images are magnified differently around the cube, which is given for each cube.
+    mags, magnified = _magnified(2, mag=1.04)
+    rng = np.random.default_rng(3)
+    local_mags = mags + rng.uniform(-0.02, 0.02, size=mags.shape)
+    local = _magnified_rotations(local_mags)
+    images = _gaussian_tilt_images(np.array([2.3, -5.7, 6.1]), 2.5, 1.0, local_mags)
+    origin = np.array(IMAGE_SHAPE) // 2
+    offsets = _projected_positions(np.array([1.0, 0.5, -0.5])) - origin
+    positions = np.einsum("tij,tj->ti", local_mags, offsets) + origin
+    # reconstructed by the local magnification for all the cubes
+    expected = DirectFourierReconstructor(images, local, 1.0, 1.0, 24)(positions)
+    reconstructor = DirectFourierReconstructor(images, magnified, 1.0, 1.0, 24)
+    # The first cube is inserted separately, and the next ones by the insertion
+    # shared by the cubes of almost the same matrices.
+    assert reconstructor.nbytes == 0
+    cubes = [reconstructor(positions, local) for _ in range(3)]
+    assert reconstructor.nbytes > 0
+    error = max(np.abs(cube - expected).max() for cube in cubes)
+    assert error < 0.01
+    assert_allclose(cubes[1], cubes[0], atol=1e-4)
+    assert_allclose(cubes[2], cubes[1])
+    # the error is much larger if the local magnification is ignored
+    assert np.abs(reconstructor(positions) - expected).max() > 3 * error
+    # cubes of different matrices in a batch
+    batch = reconstructor(np.stack([positions] * 2), np.stack([local, magnified]))
+    assert_allclose(batch[0], cubes[0], atol=1e-4)
+    assert_allclose(batch[1], reconstructor(positions), atol=1e-4)
+    with pytest.raises(ValueError):
+        reconstructor(positions, ROTATIONS[:3])
+
+
 def test_read_patch():
     image = np.arange(30, dtype=np.float32).reshape(5, 6)
     assert_allclose(read_patch(image, (1, 2), (2, 3)), image[1:3, 2:5])
@@ -265,6 +338,38 @@ def test_volume_projector(size):
     # the row 0 of even-sized projections is not mirrored inside the projections
     start = 1 - size % 2
     assert_allclose(out[1, :, start:], out[0, :, start:][:, ::-1], atol=1e-5)
+
+
+def test_volume_projector_magnified():
+    from scipy.spatial.transform import Rotation
+
+    # a Gaussian, whose projection along any ray is known
+    size, sigma = 32, 2.0
+    center = np.array([2.0, -3.0, 4.0])
+    grid = np.arange(size) - size // 2
+    coords = np.stack(np.meshgrid(grid, grid, grid, indexing="ij"), axis=-1)
+    vol = np.exp(-np.sum((coords - center) ** 2, axis=-1) / (2 * sigma**2))
+    projector = VolumeProjector(vol)
+    rotations = Rotation.random(3, random_state=1).as_matrix()
+    # the projection planes are magnified and sheared
+    rng = np.random.default_rng(2)
+    planes = np.tile(np.eye(3), (3, 1, 1))
+    planes[:, 1:, 1:] += rng.uniform(-0.06, 0.06, size=(3, 2, 2))
+    matrices = rotations @ np.linalg.inv(planes)
+    out = projector(matrices)
+    uy, ux = np.meshgrid(grid, grid, indexing="ij")
+    for img, mat in zip(out, matrices):
+        # line integrals along the rays through the points of the projection plane
+        direction = mat[:, 0] / np.linalg.norm(mat[:, 0])
+        rel = np.stack([uy, ux], axis=-1) @ mat[:, 1:].T - center
+        perp = rel - (rel @ direction)[..., np.newaxis] * direction
+        dist2 = np.sum(perp**2, axis=-1)
+        expected = np.sqrt(2 * np.pi) * sigma * np.exp(-dist2 / (2 * sigma**2))
+        # as accurate as the projections of rotations (0.2-0.5%)
+        assert np.abs(img - expected).max() < 0.01 * expected.max()
+    # the background is the same in a magnified projection
+    out = VolumeProjector(np.full((10, 10, 10), 2.0))(np.diag([1.0, 0.8, 0.8]))
+    assert_allclose(out, 20.0, rtol=1e-5)
 
 
 def test_volume_projector_background():

@@ -223,6 +223,70 @@ def test_local_detector2tomo():
     assert_allclose(projected, expected, atol=1e-8)
 
 
+def test_position_dependent():
+    ts = _tilt_series()
+    assert not ts.position_dependent
+    rng = np.random.default_rng(12)
+    affine = AffineShifts2D(np.eye(2) + rng.normal(scale=0.03, size=(NTILTS, 2, 2)))
+    assert not ts.replace(local_shifts_2d=affine).position_dependent
+    local = _uniform_alignment(tilt_angles=rng.normal(size=NTILTS))
+    # the local alignments are used only for the shifts by default
+    assert local.mode == "shift"
+    for model in [local, AffineShifts2D(affine.matrices, base=local)]:
+        assert not model.position_dependent
+        assert not ts.replace(local_shifts_2d=model).position_dependent
+    full = dataclasses.replace(local, mode="full")
+    smooth = LocalShifts2D(np.ones((NTILTS, 2, 2, 3)), [300.0, 300.0])
+    for model in [
+        full,
+        smooth,
+        AffineShifts2D(affine.matrices, base=full),
+        FunctionShifts(lambda p: np.zeros_like(p)),
+    ]:
+        assert model.position_dependent
+        assert ts.replace(local_shifts_2d=model).position_dependent
+    assert ts.replace(local_shifts=lambda p: np.zeros_like(p)).position_dependent
+
+
+def test_local_detector2tomo_at():
+    rng = np.random.default_rng(13)
+    points = _points(n=6)
+    affine = AffineShifts2D(np.eye(2) + rng.normal(scale=0.03, size=(NTILTS, 2, 2)))
+    ts = _tilt_series(local_shifts_2d=affine)
+    out = ts.local_detector2tomo_at(points)
+    assert out.shape == (6, NTILTS, 3, 3)
+    assert_allclose(out, np.broadcast_to(ts.local_detector2tomo, out.shape), atol=1e-8)
+    nested = ts.local_detector2tomo_at(points.reshape(2, 3, 3))
+    assert nested.shape == (2, 3, NTILTS, 3, 3)
+
+    # the local alignments of the areas differ in the tilt angles and the rotation
+    gy, gx = 3, 4
+    angles = np.deg2rad(rng.normal(scale=1.0, size=(gy, gx, NTILTS)))
+    c, s = np.cos(angles), np.sin(angles)
+    local = LocalAlignment(
+        origin=[-100.0, -150.0],
+        spacing=[100.0, 100.0],
+        tilt_angles=rng.normal(scale=2.0, size=(gy, gx, NTILTS)),
+        x_tilts=rng.normal(scale=1.0, size=(gy, gx, NTILTS)),
+        matrices=np.stack([np.stack([c, -s], -1), np.stack([s, c], -1)], -2),
+    )
+    ts = ts.replace(local_shifts_2d=AffineShifts2D(affine.matrices, base=local))
+    maps = ts.local_detector2tomo_at(points)
+    # the small offsets from each point are mapped to the offsets from its projection
+    offsets = rng.normal(scale=0.2, size=(6, 3))
+    projected = ts.project_points(points + offsets) - ts.project_points(points)
+    inverse = np.linalg.inv(maps)[:, :, 1:, :]
+    approx = np.einsum("ntij,nj->nti", inverse, offsets)
+    error = np.abs(approx - projected).max()
+    assert error < 1e-4
+    # not by the linear maps of the whole tilt series
+    inverse = np.linalg.inv(ts.local_detector2tomo)[:, 1:, :]
+    error_global = np.abs(np.einsum("tij,nj->nti", inverse, offsets) - projected).max()
+    assert error_global > 10 * error
+    with pytest.raises(ValueError):
+        ts.local_detector2tomo_at(points[:, :2])
+
+
 def test_serialization():
     ts = _tilt_series()
     points = _points()
@@ -236,17 +300,22 @@ def test_serialization():
         matrices=np.eye(2) + rng.normal(scale=0.01, size=(2, 3, NTILTS, 2, 2)),
         translations=rng.normal(size=(2, 3, NTILTS, 2)),
         base=AffineShifts2D(np.eye(2) + rng.normal(scale=0.01, size=(NTILTS, 2, 2))),
+        mode="full",
     )
     model = LocalShifts2D(rng.normal(size=(NTILTS, 2, 2, 2)), [200, 300], base=local)
     ts = ts.replace(local_shifts_2d=model)
     data = json.loads(json.dumps(model.to_dict()))
     assert isinstance(LocalShiftModel.from_dict(data).base, LocalAlignment)
+    assert LocalShiftModel.from_dict(data).base.mode == "full"
+    # the mode of the dicts without it is "shift"
+    del data["base"]["mode"]
+    assert LocalShiftModel.from_dict(data).base.mode == "shift"
     out = TiltSeries.from_json(ts.dump_json())
     assert isinstance(out.local_shifts_2d, LocalShifts2D)
     assert_allclose(out.project_points(points), ts.project_points(points))
     # default parameters are omitted
     plain = _uniform_alignment().to_dict()
-    assert set(plain) == {"type", "origin", "spacing", "tilt_angles", "base"}
+    assert set(plain) == {"type", "origin", "spacing", "tilt_angles", "base", "mode"}
     with pytest.raises(ValueError):
         LocalShiftModel.from_dict({"type": "Unknown"})
 
@@ -268,6 +337,7 @@ def test_functions_are_not_serializable():
         {"matrices": np.zeros((2, 2, NTILTS, 2))},
         {"spacing": [0.0, 1.0]},
         {"origin": [0.0]},
+        {"mode": "none"},
     ],
 )
 def test_invalid_local_alignment(kwargs):
@@ -405,7 +475,8 @@ def test_from_etomo_directory_global(tmp_path, monkeypatch, magnification):
         assert_allclose(np.cos(np.radians(ts.tilt_axis_angle + angles)), 1.0)
 
 
-def test_from_etomo_directory_local(tmp_path, monkeypatch):
+@pytest.mark.parametrize("mode", ["shift", "full"])
+def test_from_etomo_directory_local(tmp_path, monkeypatch, mode):
     etomofiles = pytest.importorskip("etomofiles")
     rng = np.random.default_rng(11)
     df = _etomo_dataframe(rng)
@@ -437,10 +508,13 @@ def test_from_etomo_directory_local(tmp_path, monkeypatch):
     )
     without = TiltSeries.from_etomo_directory(tmp_path, scale=scale, ctf=False)
     ts = TiltSeries.from_etomo_directory(
-        tmp_path, scale=scale, local_alignment=True, ctf=False
+        tmp_path, scale=scale, local_alignment=mode, ctf=False
     )
     assert isinstance(ts.local_shifts_2d, AffineShifts2D)
     assert isinstance(ts.local_shifts_2d.base, LocalAlignment)
+    assert ts.local_shifts_2d.base.mode == mode
+    # the local geometry around each point is used only in the "full" mode
+    assert ts.position_dependent == (mode == "full")
     expected = _imod_projection(points, kept, 1.5, local, scale, shape, False)
     assert_allclose(ts.project_points(points), expected, atol=1e-6)
     assert (
@@ -453,22 +527,64 @@ def test_from_etomo_directory_local(tmp_path, monkeypatch):
     )
     with pytest.warns(UserWarning, match="ZFACTORFILE"):
         ts = TiltSeries.from_etomo_directory(
-            tmp_path, scale=scale, local_alignment="TS_01local.xf", ctf=False
+            tmp_path,
+            scale=scale,
+            local_alignment=mode,
+            local_alignment_file="TS_01local.xf",
+            ctf=False,
         )
     expected = _imod_projection(points, kept, 1.5, local, scale, shape, True)
     assert_allclose(ts.project_points(points), expected, atol=1e-6)
     out = TiltSeries.from_json(ts.dump_json())
     assert_allclose(out.project_points(points), ts.project_points(points))
+    assert out.position_dependent == ts.position_dependent
+    with pytest.raises(FileNotFoundError):
+        TiltSeries.from_etomo_directory(
+            tmp_path, scale=scale, local_alignment=mode, local_alignment_file="x.xf"
+        )
+
+
+def test_from_etomo_directory_local_alignment_flag(tmp_path, monkeypatch):
+    etomofiles = pytest.importorskip("etomofiles")
+    df = _etomo_dataframe(np.random.default_rng(11))
+    monkeypatch.setattr(etomofiles, "read", lambda path: df.copy())
+    n = len(df)
+    local = {
+        "grid": (150.0, 200.0, 250.0, 300.0),
+        "dtilt": np.zeros((2, 2, n)),
+        "dxtilt": np.zeros((2, 2, n)),
+        "zf": np.zeros((2, 2, n, 2)),
+        "xf": np.broadcast_to([1.0, 0.0, 0.0, 1.0, 0.0, 0.0], (2, 2, n, 6)),
+    }
+    _write_imod_local(tmp_path / "TS_01local.xf", local, 2.5)
+    (tmp_path / "tilt.com").write_text("LOCALFILE TS_01local.xf\nFULLIMAGE 100 100\n")
+    # bool is deprecated, and True is "shift" as before
+    with pytest.warns(DeprecationWarning, match="'shift'"):
+        ts = TiltSeries.from_etomo_directory(
+            tmp_path, scale=0.25, local_alignment=True, ctf=False
+        )
+    assert ts.local_shifts_2d.base.mode == "shift"
+    with pytest.warns(DeprecationWarning, match="'none'"):
+        ts = TiltSeries.from_etomo_directory(
+            tmp_path, scale=0.25, local_alignment=False, ctf=False
+        )
+    assert getattr(ts.local_shifts_2d, "base", None) is None
+    with pytest.raises(ValueError, match="local_alignment_file"):
+        TiltSeries.from_etomo_directory(
+            tmp_path, scale=0.25, local_alignment="TS_01local.xf", ctf=False
+        )
 
 
 def test_from_etomo_directory_no_local_file(tmp_path, monkeypatch):
     etomofiles = pytest.importorskip("etomofiles")
     df = _etomo_dataframe(np.random.default_rng(12))
     monkeypatch.setattr(etomofiles, "read", lambda path: df.copy())
-    with pytest.raises(ValueError, match="local alignment"):
-        TiltSeries.from_etomo_directory(
-            tmp_path, scale=0.2, local_alignment=True, ctf=False
+    # the global alignment is used with a warning
+    with pytest.warns(UserWarning, match="local alignments"):
+        ts = TiltSeries.from_etomo_directory(
+            tmp_path, scale=0.2, local_alignment="shift", ctf=False
         )
+    assert getattr(ts.local_shifts_2d, "base", None) is None
 
 
 def _write_ctf_files(path: Path, nviews: int, invert: str | None = None):
@@ -512,6 +628,13 @@ def test_from_etomo_directory_ctf(tmp_path, monkeypatch, invert, inverted):
     assert ts.ctf.voltage == 300
     assert ts.ctf.spherical_aberration == 2.7
     assert ts.ctf.amplitude_contrast == 0.07
+    # as ctfphaseflip, the defocus is at the center of the raw images
+    assert ts.ctf.defocus_at == "image_center"
+    correction = ts.ctf_correction()
+    for t in range(ts.ntilts):
+        du, dv = correction.defocus(t, (0.0, 0.0))
+        assert du == pytest.approx(ts.ctf.defocus_u[t])
+        assert dv == pytest.approx(ts.ctf.defocus_v[t])
     assert TiltSeries.from_etomo_directory(tmp_path, scale=0.2, ctf=False).ctf is None
 
 
@@ -532,6 +655,68 @@ def test_from_etomo_directory_ctf_of_aligned_stack(tmp_path, monkeypatch):
     assert ts.ctf.voltage == 200
     # rotated to the angles of the raw stack
     assert_allclose(ts.ctf.astigmatism_angle, 5 * views + ts.tilt_axis_angle)
+    # the center of the aligned images is the projection of the tomogram center
+    assert ts.ctf.defocus_at == "tomogram_center"
+
+
+def test_from_etomo_directory_ctf_parameters_of_ctfplotter(tmp_path, monkeypatch):
+    etomofiles = pytest.importorskip("etomofiles")
+    df = _etomo_dataframe(np.random.default_rng(9))
+    monkeypatch.setattr(etomofiles, "read", lambda path: df.copy())
+    _write_ctf_files(tmp_path, len(df))
+    # the defaults of etomo are left in ctfcorrection.com
+    com = ["InputStack TS_01.ali", "Voltage 200", "SphericalAberration 2"]
+    com.append("AmplitudeContrast 0.1")
+    (tmp_path / "ctfcorrection.com").write_text("\n".join(com) + "\n")
+    com = ["InputStack TS_01.mrc", "DefocusFile TS_01_ctf.defocus", "Voltage 300"]
+    com += ["SphericalAberration 2.7", "AmplitudeContrast 0.07"]
+    (tmp_path / "ctfplotter.com").write_text("\n".join(com) + "\n")
+    ts = TiltSeries.from_etomo_directory(tmp_path, scale=0.2)
+    # the parameters with which the defocus was fitted
+    assert ts.ctf.voltage == 300
+    assert ts.ctf.spherical_aberration == 2.7
+    assert ts.ctf.amplitude_contrast == 0.07
+
+
+@pytest.mark.parametrize(
+    "fitted_by", ["ctfplotter", "ctfplotter_aligned", "ctfcorrection"]
+)
+def test_from_etomo_directory_ctf_of_different_pixel_size(
+    tmp_path, monkeypatch, fitted_by
+):
+    etomofiles = pytest.importorskip("etomofiles")
+    df = _etomo_dataframe(np.random.default_rng(9))
+    monkeypatch.setattr(etomofiles, "read", lambda path: df.copy())
+    _write_ctf_files(tmp_path, len(df))
+    scale, fitted = 0.2, 0.21  # such as a calibrated pixel size
+    if fitted_by == "ctfplotter":
+        com = ["InputStack TS_01.mrc", f"PixelSize {fitted}"]
+        (tmp_path / "ctfplotter.com").write_text("\n".join(com) + "\n")
+    elif fitted_by == "ctfplotter_aligned":
+        # the pixel size of the aligned stack binned by newstack
+        com = ["InputStack TS_01_ali.mrc", f"PixelSize {fitted * 2}"]
+        (tmp_path / "ctfplotter.com").write_text("\n".join(com) + "\n")
+        (tmp_path / "newst.com").write_text("$newstack -StandardInput\nBinByFactor 2\n")
+    else:
+        with (tmp_path / "ctfcorrection.com").open("a") as f:
+            f.write(f"PixelSize {fitted}\n")
+    ref = TiltSeries.from_etomo_directory(tmp_path, scale=fitted)
+    ts = TiltSeries.from_etomo_directory(tmp_path, scale=scale)
+    ratio = scale / fitted
+    assert_allclose(
+        ref.ctf.defocus_u, -(3000 + 100 * np.array([1, 2, 4, 5, 6, 7])) / 1000
+    )
+    # the CTF at each frequency in pixels is the fitted one
+    assert_allclose(ts.ctf.defocus_u, ref.ctf.defocus_u * ratio**2)
+    assert_allclose(ts.ctf.defocus_v, ref.ctf.defocus_v * ratio**2)
+    assert ref.ctf.spherical_aberration == 2.7
+    assert ts.ctf.spherical_aberration == pytest.approx(2.7 * ratio**4)
+    assert_allclose(ts.ctf.astigmatism_angle, ref.ctf.astigmatism_angle)
+    # "_ali.mrc" is also the aligned stack
+    aligned = fitted_by == "ctfplotter_aligned"
+    assert (ts.ctf.defocus_at == "tomogram_center") == aligned
+    with pytest.warns(UserWarning, match="very different"):
+        TiltSeries.from_etomo_directory(tmp_path, scale=fitted * 2)
 
 
 def test_from_etomo_directory_ctf_not_found(tmp_path, monkeypatch):

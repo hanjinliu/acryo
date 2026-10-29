@@ -4,7 +4,12 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy import fft as sfft
 
-from acryo.projection._insertion import _gridding_correction
+from acryo.projection._insertion import (
+    _frequency_matrices,
+    _gridding_correction,
+    _is_orthogonal,
+    _slice_areas,
+)
 
 
 class VolumeProjector:
@@ -62,7 +67,10 @@ class VolumeProjector:
         rotations : (..., 3, 3) array
             Matrices that map the (z, y, x) coordinates of each projection (whose z
             axis is the direction of the projection) to the (z, y, x) coordinates of
-            the volume.
+            the volume. They are usually rotations, but the projection plane may also
+            be scaled or sheared, such as the projection on a magnified tilt image
+            (see :attr:`TiltSeries.local_detector2tomo`), in the same way as
+            :class:`CentralSliceInsertion`.
 
         Returns
         -------
@@ -77,15 +85,28 @@ class VolumeProjector:
             )
         batch_shape = rotations.shape[:-2]
         n = self.padded_size
-        slices = self._extract(rotations.reshape(-1, 3, 3))
+        rotations = rotations.reshape(-1, 3, 3)
+        orthogonal = _is_orthogonal(rotations)
+        matrices = _frequency_matrices(rotations)
+        slices = self._extract(matrices, orthogonal)
+        if not orthogonal:
+            # A scaled plane has more or less pixels over the volume, so the DFT of
+            # its projection is scaled by its area, as the insertion.
+            areas = _slice_areas(matrices).astype(np.float32)
+            slices *= areas[:, np.newaxis, np.newaxis]
         images = sfft.irfft2(slices, s=(n, n), overwrite_x=True)
         # crop the center of the padded projections
         indices = (np.arange(self._size) - self._size // 2) % n
         images = images[:, indices][:, :, indices] + self._edge * self._size
         return images.astype(np.float32).reshape(batch_shape + images.shape[1:])
 
-    def _extract(self, rotations: NDArray[np.float64]) -> NDArray[np.complex64]:
-        """Central slices (M, n, n // 2 + 1) of the DFT with trilinear interpolation."""
+    def _extract(
+        self, matrices: NDArray[np.float64], orthogonal: bool = True
+    ) -> NDArray[np.complex64]:
+        """Central slices (M, n, n // 2 + 1) of the DFT with trilinear interpolation.
+
+        ``matrices`` map the frequencies of the slices to those of the volume.
+        """
         n = self.padded_size
         nx = self._dft.shape[2]
         qy, qx = np.meshgrid(sfft.fftfreq(n), sfft.rfftfreq(n), indexing="ij")
@@ -95,13 +116,18 @@ class VolumeProjector:
         freqs = np.stack([np.zeros_like(qy), qy, qx], axis=-1).reshape(-1, 3)
         freqs = (freqs[inside] * n).astype(np.float32)
         dft = self._dft.ravel()
-        out = np.zeros((rotations.shape[0], n * nx), dtype=np.complex64)
+        out = np.zeros((matrices.shape[0], n * nx), dtype=np.complex64)
         # chunks of about 2^20 points to limit the memory
         chunk = max(1, (1 << 20) // inside.size)
-        for start in range(0, rotations.shape[0], chunk):
-            rot = rotations[start : start + chunk].astype(np.float32)
+        for start in range(0, matrices.shape[0], chunk):
+            mat = matrices[start : start + chunk].astype(np.float32)
             # (m, K, 3) indices of the frequencies in the DFT
-            index = freqs @ rot.transpose(0, 2, 1)
+            index = freqs @ mat.transpose(0, 2, 1)
+            # the frequencies of a stretched slice beyond the Nyquist frequency of the
+            # volume are not extracted
+            beyond = None
+            if not orthogonal:
+                beyond = np.einsum("mki,mki->mk", index, index) > (n / 2) ** 2
             # the rfft only has x >= 0, where the conjugate values are read
             is_conj = index[..., 2] < 0
             index[is_conj] *= -1
@@ -111,7 +137,10 @@ class VolumeProjector:
             # flat indices of the corners, which are periodic along z and y
             iz = (base[..., 0] % n, (base[..., 0] + 1) % n)
             iy = (base[..., 1] % n, (base[..., 1] + 1) % n)
-            ix = (base[..., 2], np.minimum(base[..., 2] + 1, nx - 1))
+            ix = (
+                np.minimum(base[..., 2], nx - 1),
+                np.minimum(base[..., 2] + 1, nx - 1),
+            )
             fz, fy, fx = frac[..., 0], frac[..., 1], frac[..., 2]
             wz = (1 - fz, fz)
             wy = (1 - fy, fy)
@@ -124,6 +153,8 @@ class VolumeProjector:
                     for cx in (0, 1):
                         values += (wzy * wx[cx]) * dft.take(row + ix[cx])
             np.conjugate(values, out=values, where=is_conj)
+            if beyond is not None:
+                values[beyond] = 0
             out[start : start + chunk, inside] = values
         return out.reshape(-1, n, nx)
 
