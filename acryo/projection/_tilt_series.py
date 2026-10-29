@@ -481,20 +481,6 @@ class TiltSeries:
         local_alignment_file : str or Path, optional
             The file of the local alignments, relative to ``path``. By default,
             ``LOCALFILE`` of tilt.com (or ``OutputLocalFile`` of align.com).
-        local_alignment : {"none", "shift", "full"}, default is "none"
-            How to use the local alignments of tiltalign, which are read as
-            ``local_shifts_2d`` (:class:`LocalAlignment`) unless "none". "shift" uses
-            them only for the shifts of the projected points, so the subtomogram
-            around each point is reconstructed (and the template is projected) by
-            the geometry of the whole tilt series. "full" also uses the local tilt
-            angles, rotation and magnification around each point (see
-            :meth:`local_detector2tomo_at`), which is usually not needed and slower.
-            If the file of the local alignments is not found, a warning is issued
-            and they are not used. As ``tilt`` of IMOD, the Z factors of the local
-            alignments are used only if tilt.com has ``ZFACTORFILE``.
-        local_alignment_file : str or Path, optional
-            The file of the local alignments, relative to ``path``. By default,
-            ``LOCALFILE`` of tilt.com (or ``OutputLocalFile`` of align.com).
         ctf : bool, str or Path, default is True
             Whether to read the CTF parameters as ``ctf``, so that the CTF is
             corrected by :class:`BackProjectionLoader`. The defocus of each view is
