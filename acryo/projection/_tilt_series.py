@@ -481,6 +481,20 @@ class TiltSeries:
         local_alignment_file : str or Path, optional
             The file of the local alignments, relative to ``path``. By default,
             ``LOCALFILE`` of tilt.com (or ``OutputLocalFile`` of align.com).
+        local_alignment : {"none", "shift", "full"}, default is "none"
+            How to use the local alignments of tiltalign, which are read as
+            ``local_shifts_2d`` (:class:`LocalAlignment`) unless "none". "shift" uses
+            them only for the shifts of the projected points, so the subtomogram
+            around each point is reconstructed (and the template is projected) by
+            the geometry of the whole tilt series. "full" also uses the local tilt
+            angles, rotation and magnification around each point (see
+            :meth:`local_detector2tomo_at`), which is usually not needed and slower.
+            If the file of the local alignments is not found, a warning is issued
+            and they are not used. As ``tilt`` of IMOD, the Z factors of the local
+            alignments are used only if tilt.com has ``ZFACTORFILE``.
+        local_alignment_file : str or Path, optional
+            The file of the local alignments, relative to ``path``. By default,
+            ``LOCALFILE`` of tilt.com (or ``OutputLocalFile`` of align.com).
         ctf : bool, str or Path, default is True
             Whether to read the CTF parameters as ``ctf``, so that the CTF is
             corrected by :class:`BackProjectionLoader`. The defocus of each view is
@@ -984,6 +998,29 @@ def _imod_global_transforms(f: NDArray[np.float64]) -> NDArray[np.float64]:
     matrices = inv @ matrices
     shifts = (shifts - shifts.mean(axis=0)) @ inv.T
     return np.concatenate([matrices.reshape(-1, 4), shifts], axis=1)
+
+
+_LOCAL_ALIGNMENT_MODES = ("none", "shift", "full")
+
+
+def _local_alignment_mode(local_alignment) -> Literal["none", "shift", "full"]:
+    """The mode of the local alignments, converted from the deprecated bool."""
+    if isinstance(local_alignment, bool):
+        mode = "shift" if local_alignment else "none"
+        warnings.warn(
+            f"'local_alignment={local_alignment}' is deprecated. Use "
+            f"'local_alignment={mode!r}' instead.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        return mode
+    if local_alignment not in _LOCAL_ALIGNMENT_MODES:
+        raise ValueError(
+            "'local_alignment' must be one of 'none', 'shift' or 'full', got "
+            f"{local_alignment!r}. The file of the local alignments is given by "
+            "'local_alignment_file'."
+        )
+    return local_alignment
 
 
 _LOCAL_ALIGNMENT_MODES = ("none", "shift", "full")
