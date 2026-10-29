@@ -1,3 +1,5 @@
+import dataclasses
+
 import numpy as np
 from numpy.testing import assert_allclose
 import pytest
@@ -225,6 +227,7 @@ def test_local_alignment_of_patches(monkeypatch):
         origin=[-10.0, -10.0],
         spacing=[20.0, 20.0],
         tilt_angles=rng.normal(scale=2.0, size=(2, 2, ts.ntilts)),
+        mode="full",
     )
     calls = []
     _call = DirectFourierReconstructor.__call__
@@ -235,6 +238,11 @@ def test_local_alignment_of_patches(monkeypatch):
 
     monkeypatch.setattr(DirectFourierReconstructor, "__call__", _call_record)
     reconstruct_tomogram(ts, images, (10, 20, 20), patch_size=10)
+    assert len(calls) > 0 and all(rot is None for rot in calls)
+    calls.clear()
+    # only shifted in the "shift" mode
+    shifted = ts.replace(local_shifts_2d=dataclasses.replace(local, mode="shift"))
+    reconstruct_tomogram(shifted, images, (10, 20, 20), patch_size=10)
     assert len(calls) > 0 and all(rot is None for rot in calls)
     calls.clear()
     # each patch is reconstructed by the projection around its center
