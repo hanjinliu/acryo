@@ -1009,29 +1009,6 @@ def _local_alignment_mode(local_alignment) -> Literal["none", "shift", "full"]:
     return local_alignment
 
 
-_LOCAL_ALIGNMENT_MODES = ("none", "shift", "full")
-
-
-def _local_alignment_mode(local_alignment) -> Literal["none", "shift", "full"]:
-    """The mode of the local alignments, converted from the deprecated bool."""
-    if isinstance(local_alignment, bool):
-        mode = "shift" if local_alignment else "none"
-        warnings.warn(
-            f"'local_alignment={local_alignment}' is deprecated. Use "
-            f"'local_alignment={mode!r}' instead.",
-            DeprecationWarning,
-            stacklevel=3,
-        )
-        return mode
-    if local_alignment not in _LOCAL_ALIGNMENT_MODES:
-        raise ValueError(
-            "'local_alignment' must be one of 'none', 'shift' or 'full', got "
-            f"{local_alignment!r}. The file of the local alignments is given by "
-            "'local_alignment_file'."
-        )
-    return local_alignment
-
-
 def _read_imod_local_alignment(
     path: Path,
     local_alignment_file: str | Path | None,

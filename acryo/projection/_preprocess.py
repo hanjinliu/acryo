@@ -138,7 +138,7 @@ class TiltImagePreprocessor:
         Whether to normalize the image on the central crop.
     filters : sequence of callable, optional
         Additional Fourier filters. See :class:`TiltImageFilter`.
-    patch_grid : int or (int, int), default is (6, 6)
+    patch_grid : int or (int, int), default is (3, 3)
         Number of patches along y and x. ``(1, 1)`` filters the whole image at once.
     overlap : int, default is 64
         Width of the overlap of neighboring patches in pixels, over which the
@@ -161,7 +161,7 @@ class TiltImagePreprocessor:
     subtract_background: bool = True
     normalize: bool = True
     filters: tuple[TiltImageFilter, ...] = ()
-    patch_grid: tuple[int, int] = (6, 6)
+    patch_grid: tuple[int, int] = (3, 3)
     overlap: int = 64
     real_space_binning: int | None = 4
 

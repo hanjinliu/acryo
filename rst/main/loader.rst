@@ -385,7 +385,7 @@ can be used with ``tomogram_center=(0, 0, 0)``.
 
 The tilt images are preprocessed by :class:`acryo.projection.TiltImagePreprocessor`
 (background subtraction, bandpass filtering and normalization of each tilt image). Each
-tilt image is split into overlapping patches (6 x 6 by default, ``patch_grid``), which are
+tilt image is split into overlapping patches (3 x 3 by default, ``patch_grid``), which are
 filtered separately with a margin of ``padding`` pixels and blended in the overlapping
 regions (``overlap`` pixels). If the tilt images are binned, the Fourier transform of each
 patch is cropped before the inverse transform, so the binned images are computed directly.
