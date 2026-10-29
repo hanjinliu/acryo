@@ -587,6 +587,68 @@ def test_from_etomo_directory_no_local_file(tmp_path, monkeypatch):
     assert getattr(ts.local_shifts_2d, "base", None) is None
 
 
+def _etomo_coarse_dataframe(rng, n=7):
+    """The DataFrame of etomofiles before the fine alignment (no .xf, .tlt, .xtilt)."""
+    df = _etomo_dataframe(rng, n)
+    xf_columns = ["xf_a11", "xf_a12", "xf_a21", "xf_a22", "xf_dx", "xf_dy"]
+    df[["tlt", "xtilt"] + xf_columns] = np.nan
+    df["xaxistilt"] = None
+    return df
+
+
+def _write_imod_xf(path: Path, shifts):
+    """Write the (dx, dy) translations as an IMOD transformation file."""
+    lines = [f"1 0 0 1 {dx:.7f} {dy:.7f}" for dx, dy in shifts]
+    path.write_text("\n".join(lines) + "\n")
+
+
+@pytest.mark.parametrize("ext", ["prexg", "prexf"])
+def test_from_etomo_directory_coarse(tmp_path, monkeypatch, ext):
+    etomofiles = pytest.importorskip("etomofiles")
+    rng = np.random.default_rng(13)
+    df = _etomo_coarse_dataframe(rng)
+    monkeypatch.setattr(etomofiles, "read", lambda path: df.copy())
+    scale = 0.2
+    xg = rng.normal(scale=20, size=(len(df), 2))  # (dx, dy) of the coarse alignment
+    if ext == "prexg":
+        _write_imod_xf(tmp_path / "TS_01.prexg", xg)
+    else:
+        # translations to the previous views, from which xftoxg -nfit 0 gives the
+        # translations relative to the average
+        xf = np.concatenate([np.zeros((1, 2)), np.diff(xg, axis=0)])
+        _write_imod_xf(tmp_path / "TS_01.prexf", xf)
+        xg = np.cumsum(xf, axis=0)
+        xg -= xg.mean(axis=0)
+    with pytest.warns(UserWarning, match="coarse alignment"):
+        ts = TiltSeries.from_etomo_directory(tmp_path, scale=scale, ctf=False)
+    kept = np.flatnonzero(~df["excluded"].to_numpy())
+    assert_allclose(ts.image_indices, kept)
+    assert_allclose(ts.tilt_angles, df["rawtlt"].to_numpy()[kept])
+    assert_allclose(np.cos(np.radians(ts.tilt_axis_angle - 177.0)), 1.0)
+    assert ts.local_shifts_2d is None
+
+    # the views of the coarse aligned stack are rotated by -177° to the projections
+    points = _points(10)
+    th, rot = np.radians(ts.tilt_angles), np.radians(177.0)
+    rotation = np.array([[np.cos(rot), -np.sin(rot)], [np.sin(rot), np.cos(rot)]])
+    z, y, x = (points / scale).T[..., np.newaxis]
+    proj_x = np.cos(th) * x + np.sin(th) * z  # (N, T)
+    proj = np.stack([proj_x, np.broadcast_to(y, proj_x.shape)], axis=-1)
+    expected = proj @ rotation.T - xg[kept]  # (x, y) in pixels of the raw images
+    assert_allclose(ts.project_points(points), expected[..., ::-1] * scale, atol=1e-6)
+
+
+def test_from_etomo_directory_coarse_errors(tmp_path, monkeypatch):
+    etomofiles = pytest.importorskip("etomofiles")
+    df = _etomo_coarse_dataframe(np.random.default_rng(14))
+    monkeypatch.setattr(etomofiles, "read", lambda path: df.copy())
+    with pytest.raises(FileNotFoundError, match="prexg"):
+        TiltSeries.from_etomo_directory(tmp_path, scale=0.2, ctf=False)
+    _write_imod_xf(tmp_path / "TS_01.prexg", np.zeros((len(df) - 1, 2)))
+    with pytest.raises(ValueError, match="views"):
+        TiltSeries.from_etomo_directory(tmp_path, scale=0.2, ctf=False)
+
+
 def _write_ctf_files(path: Path, nviews: int, invert: str | None = None):
     """Write the defocus file (version 3 with astigmatism) and ctfcorrection.com."""
     lines = ["1 0 0. 0. 0 3"]

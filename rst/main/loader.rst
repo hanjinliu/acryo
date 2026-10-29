@@ -335,6 +335,9 @@ Reading the tilt images requires ``mrcfile``.
 The tilt series is given as a :class:`acryo.projection.TiltSeries` object, which describes
 the alignment of the tilt series in nm. The alignment of IMOD (``etomofiles`` is required),
 AreTomo (``alnfile`` is required) and RELION 5 (``starfile-rs`` is required) can be read.
+An etomo directory of IMOD with only the coarse alignment by cross-correlation (no fine
+alignment) can also be read, and the alignment can be improved by
+:meth:`BackProjectionLoader.align_tilt_series` (see below).
 The tilt series and the reconstruction are ported from
 `torch-reconstruct-tomogram <https://github.com/teamtomo/torch-reconstruct-tomogram>`_ and
 `torch-tilt-series <https://github.com/teamtomo/torch-tilt-series>`_ in numpy and scipy, so
@@ -619,12 +622,15 @@ of the tilt series and the positions of the particles are optimized together, as
 alignment of a tilt series using fiducial markers:
 
 - the shifts of the tilt images (``sample_translations``),
-- the rotation of all the tilt images (``tilt_axis_angle``, unless ``tilt_axis="fixed"``),
+- the rotation of all the tilt images (``tilt_axis_angle``, unless ``tilt_axis="fixed"``), or
+  the rotation of each tilt image if ``tilt_axis="per_tilt"``,
 - the tilt angles (``tilt_angles``) within ``±max_tilt_angle_change`` degrees, if given,
+- the x tilts (``x_tilts``) within ``±max_x_tilt_change`` degrees, if given,
 - the 3D offsets of the particles.
 
 The mean change of the tilt angles is fixed to zero, because it is equivalent to a rotation of
-the tomogram around the tilt axis. The correlation (and the projections of the templates) is
+the tomogram around the tilt axis. The mean change of the x tilts is also fixed to zero, as a
+rotation of the tomogram around the x axis. The correlation (and the projections of the templates) is
 computed at the beginning of each iteration, and the changes of the parameters only move the
 particles during the optimization, so the tilt angles are optimized without projecting the
 templates again for each angle.
@@ -636,6 +642,14 @@ average. The particles with the same value of the feature ``group_by`` share the
 as the particles on the same filament. ``position_sigma`` is the standard deviation (nm) of the
 prior of the offsets, which keeps the offsets that the tilt images cannot determine, such as
 along the filaments. Give ``position_sigma=None`` to keep the particles fixed.
+
+If the tilt axis angle is wrong, the tomogram in which the particles are picked is rotated around
+the normal of the sample, and the particles far from the tomogram center are misplaced by large
+distances, much larger than ``position_sigma`` in a large field of view. Therefore, the rotation
+common to all the tilt images is applied together with the opposite rotation of the particles
+(their positions and orientations) around the normal of the sample through the tomogram center,
+which keeps the projections at the zero tilt, and only the offsets after the rotation are
+restricted by ``position_sigma``. The returned molecules are rotated in the same way.
 
 The tilts are added one by one from the zero tilt. The correlation of each added tilt is
 computed around the positions predicted from the tilts already added, so the errors

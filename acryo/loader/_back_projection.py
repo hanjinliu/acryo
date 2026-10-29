@@ -613,6 +613,23 @@ class BackProjectionLoader(LoaderBase):
             rotations[:, 0, :] *= -1
         return pos, rotations
 
+    def _from_tilt_series_frame(
+        self,
+        pos: NDArray[np.float64],
+        rotations: NDArray[np.float64],
+        features: Any,
+    ) -> Molecules:
+        """Molecules of the positions (nm) and rotations in the tilt series frame.
+
+        This is the inverse of :meth:`_to_tilt_series_frame`.
+        """
+        pos = pos.copy()
+        rotations = rotations.copy()
+        if self.tomo_hand == -1:
+            pos[:, 0] = 2 * self.tomogram_center[0] - pos[:, 0]
+            rotations[:, 0, :] *= -1
+        return Molecules.from_matrix(pos, rotations, features=features)
+
     def _tilt_images(self) -> tuple[TiltSeries, NDArray[np.float32]]:
         """The tilt series and its images binned to the pixel size of this loader."""
         binsize = self._images.binsize_for(self.binsize)
@@ -817,8 +834,9 @@ class BackProjectionLoader(LoaderBase):
         cutoff: float | None = None,
         group_by: str | None = None,
         position_sigma: nm | None = 10.0,
-        tilt_axis: Literal["fixed", "global"] = "global",
+        tilt_axis: Literal["fixed", "global", "per_tilt"] = "global",
         max_tilt_angle_change: degree = 0.0,
+        max_x_tilt_change: degree = 0.0,
         progressive: bool = True,
         niter: int = 3,
         batch_size: int = 16,
@@ -831,18 +849,31 @@ class BackProjectionLoader(LoaderBase):
         positions of the particles are optimized together, as the alignment using
         fiducial markers. The projections of the templates placed at the particles are
         compared with the tilt images by ZNCC within ``max_shift``, and the shifts of
-        the tilt images (``sample_translations``), the rotation of all the tilt images
-        (``tilt_axis_angle``) and the 3D offsets of the particles are optimized to
+        the tilt images (``sample_translations``), the rotation of the tilt images
+        (``tilt_axis_angle``, see ``tilt_axis``) and the 3D offsets of the particles are
+        optimized to
         maximize the sum of the ZNCC of all the particles in all the tilt images. The
         offsets are needed because the particles picked in a tomogram of a wrong
         alignment are misplaced, especially along the z axis, which shifts the particles
         differently in each tilt image. The mean offset of the particles is fixed to
         zero, so the particles stay on average.
 
+        If the tilt axis angle is wrong, the tomogram in which the particles are picked
+        is rotated around the normal of the sample, so correcting the tilt axis angle
+        needs the opposite rotation of all the particles, which moves the particles far
+        from the tomogram center by large distances. Therefore, the rotation common to
+        all the tilt images is applied together with the opposite rotation of the
+        particles (their positions and orientations) around the normal of the sample
+        through the tomogram center, which keeps the projections at the zero tilt, and
+        the prior of ``position_sigma`` is of the offsets after the rotation.
+
         If ``max_tilt_angle_change`` is given, the tilt angles (``tilt_angles``) are
         also optimized within the range around the current ones. The mean change of the
         tilt angles is fixed to zero, because it is equivalent to a rotation of the
-        tomogram around the tilt axis. The ZNCC (and the projections of the templates)
+        tomogram around the tilt axis. Similarly, if ``max_x_tilt_change`` is given, the
+        x tilts (``x_tilts``, the tilt of the sample around the x axis in each tilt) are
+        optimized, and their mean change is fixed to zero, because it is a rotation of
+        the tomogram around the x axis. The ZNCC (and the projections of the templates)
         is computed for the alignment at the beginning of each iteration, and the
         changes of the parameters are applied to the positions of the particles during
         the optimization, so the tilt angles and the rotation are optimized as fast as
@@ -888,14 +919,28 @@ class BackProjectionLoader(LoaderBase):
             penalty of each molecule is ``|offset|^2 / (2 * position_sigma^2)``,
             compared with its ZNCC summed over the tilts. It keeps the offsets that
             cannot be determined by the tilt images, such as along filaments. If None,
-            the molecules are not moved.
-        tilt_axis : "fixed" or "global", default is "global"
+            the molecules are not moved, nor rotated with the tilt images.
+        tilt_axis : "fixed", "global" or "per_tilt", default is "global"
             If "global", the rotation of all the tilt images (the change of the tilt
-            axis angle common to all the tilts) is optimized.
+            axis angle common to all the tilts) is optimized. If "per_tilt", the
+            rotation of each tilt image (the tilt axis angle of each tilt) is optimized
+            independently, as the rotation of each view in ``tiltalign`` of IMOD. It is
+            determined only by the particles in the tilt image, so the particles should
+            be spread over the tilt images. The rotations are around the projection of
+            the tomogram center, by at most 10° in each iteration, and the particles
+            are rotated with their mean. If ``progressive``, each added tilt starts
+            from the rotation of the nearest tilt already added.
         max_tilt_angle_change : float, default is 0.0
             Maximum change of each tilt angle from the current one in degrees, such as
             1.0 for ±1° (approximately, as the mean change is subtracted). The tilt
             angles are not optimized if 0.
+        max_x_tilt_change : float, default is 0.0
+            Maximum change of each x tilt from the current one in degrees, as
+            ``max_tilt_angle_change``. The x tilts are not optimized if 0. An x tilt
+            moves the particles along the tilt axis in proportion to their depths, and
+            perpendicular to it in proportion to their positions along the tilt axis
+            and the sine of the tilt angle, so the x tilts of the tilts near zero are
+            determined only if the particles are at different depths.
         progressive : bool, default is True
             Whether to add the tilts one by one in the first iteration. If false, the
             shift of each tilt is searched independently within ``max_shift`` at
@@ -914,7 +959,8 @@ class BackProjectionLoader(LoaderBase):
         TiltSeriesAlignment
             Named tuple of ``loader``, a new loader with the aligned tilt series,
             ``molecules``, the list of the molecules of the references moved by the
-            offsets (in the tomogram of the aligned tilt series), and ``scores``, the
+            offsets and rotated with the tilt images (in the tomogram of the aligned
+            tilt series), and ``scores``, the
             list of the ZNCC (N, T) of the molecules in each tilt image at the aligned
             positions.
 
@@ -931,9 +977,10 @@ class BackProjectionLoader(LoaderBase):
         from acryo.loader._tilt_align import align_tilt_series
         from acryo.loader._tilt_refine import ParticleSet
 
-        if tilt_axis not in ("fixed", "global"):
+        if tilt_axis not in ("fixed", "global", "per_tilt"):
             raise ValueError(
-                f"'tilt_axis' must be 'fixed' or 'global', got {tilt_axis!r}."
+                "'tilt_axis' must be 'fixed', 'global' or 'per_tilt', got "
+                f"{tilt_axis!r}."
             )
         particle_sets: list[ParticleSet] = []
         groups: list[NDArray[np.intp]] = []
@@ -964,8 +1011,9 @@ class BackProjectionLoader(LoaderBase):
             max_shift=max_shift,
             cutoff=cutoff,
             position_sigma=position_sigma,
-            fit_angle=tilt_axis == "global",
+            tilt_axis=tilt_axis,
             max_tilt_angle_change=max_tilt_angle_change,
+            max_x_tilt_change=max_x_tilt_change,
             progressive=progressive,
             niter=niter,
             batch_size=batch_size,
@@ -976,18 +1024,24 @@ class BackProjectionLoader(LoaderBase):
             tilt_angles=result.tilt_series.tilt_angles,
             tilt_axis_angle=result.tilt_series.tilt_axis_angle,
             sample_translations=result.tilt_series.sample_translations,
+            x_tilts=result.tilt_series.x_tilts,
         )
         molecules: list[Molecules] = []
         scores: list[NDArray[np.float32]] = []
         start = 0
-        for (mole, _), group in zip(references, groups):
-            shifts = result.offsets[group]
-            if self.tomo_hand == -1:
-                # the offsets in the mirrored tomogram
-                shifts[:, 0] *= -1
-            molecules.append(mole.translate(shifts))
-            scores.append(result.scores[start : start + mole.count()])
-            start += mole.count()
+        for mole, _ in references:
+            stop = start + mole.count()
+            # the particles are moved by the offsets and rotated with the tilt images
+            _, rotations = self._to_tilt_series_frame(mole)
+            molecules.append(
+                self._from_tilt_series_frame(
+                    result.points[start:stop] + self.tomogram_center,
+                    result.rotation @ rotations,
+                    mole.features,
+                )
+            )
+            scores.append(result.scores[start:stop])
+            start = stop
         return TiltSeriesAlignment(self.with_tilt_series(aligned), molecules, scores)
 
     def score_on_tilt(
@@ -1099,7 +1153,7 @@ class TiltSeriesAlignment(NamedTuple):
     loader: BackProjectionLoader
     """A new loader with the aligned tilt series."""
     molecules: list[Molecules]
-    """Molecules of each reference moved by the offsets."""
+    """Molecules of each reference moved by the offsets and the particle rotation."""
     scores: list[NDArray[np.float32]]
     """ZNCC (N, T) of the molecules of each reference in each tilt image."""
 

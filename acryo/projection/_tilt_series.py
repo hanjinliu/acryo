@@ -452,6 +452,15 @@ class TiltSeries:
         rest of the transformation, such as the change of magnification, is given as
         ``local_shifts_2d`` (:class:`AffineShifts2D`).
 
+        If the fine alignment is not done yet (no .xf), the coarse alignment by
+        cross-correlation is read with a warning. The transformation of each view is
+        that of the coarse aligned stack (.prexg), followed by the rotation by the tilt
+        axis angle in the .edf file (``Setup.ImageRotationA``), and the tilt angles are
+        those of .rawtlt. If .prexg is not generated yet, the transformations to the
+        previous views (.prexf) are accumulated and centered at their average, as
+        ``xftoxg`` with ``NumberToFit 0``. Refine the alignment by
+        :meth:`BackProjectionLoader.align_tilt_series`, for example.
+
         Parameters
         ----------
         path : str or Path
@@ -494,10 +503,12 @@ class TiltSeries:
         mode = _local_alignment_mode(local_alignment)
         path = Path(path)
         df_all = etomofiles.read(path)
-        df = df_all.loc[~df_all["excluded"]].reset_index(drop=True)
-        image_path = Path(df["image_path"][0].split("[")[0])
+        image_path = Path(df_all["image_path"][0].split("[")[0])
         if not image_path.is_absolute():
             image_path = path / image_path
+        if df_all[list(_IMOD_XF_COLUMNS)].isna().to_numpy().all():
+            df_all = _with_imod_coarse_alignment(df_all, path, image_path.stem)
+        df = df_all.loc[~df_all["excluded"]].reset_index(drop=True)
         xf = etomofiles.df_to_xf(df, yx=True)  # (T, 2, 3) in (y, x)
         # IMOD transforms the images to the aligned ones, which is the inverse of
         # the projection model.
@@ -901,6 +912,101 @@ def _read_imod_com(path: Path) -> dict[str, list[str]]:
             continue
         options[parts[0].upper()] = parts[1:]
     return options
+
+
+_IMOD_XF_COLUMNS = ("xf_a11", "xf_a12", "xf_a21", "xf_a22", "xf_dx", "xf_dy")
+
+
+def _with_imod_coarse_alignment(df, path: Path, name: str):
+    """Fill the alignment of the etomofiles DataFrame by the coarse alignment.
+
+    The transformations of the views are those of the coarse alignment followed by the
+    rotation of the tilt axis to the vertical, and the tilt angles are the raw ones.
+    """
+    import etomofiles
+
+    if (file := path / f"{name}.prexg").exists():
+        xg = etomofiles.read_xf(file)
+    elif (file := path / f"{name}.prexf").exists():
+        xg = _imod_global_transforms(etomofiles.read_xf(file))
+    else:
+        raise FileNotFoundError(
+            f"No alignment ({name}.xf, {name}.prexg or {name}.prexf) is found in "
+            f"{path}. Run the coarse alignment in etomo first."
+        )
+    if len(xg) != len(df):
+        raise ValueError(
+            f"{file} has the transformations of {len(xg)} views, but the tilt series "
+            f"has {len(df)} views."
+        )
+    angle = df["tilt_axis_angle"].iloc[0]
+    if angle is None or np.isnan(angle):
+        raise ValueError(
+            f"The tilt axis angle (Setup.ImageRotationA) is not found in the .edf file "
+            f"in {path}."
+        )
+    if df["rawtlt"].isna().any():
+        raise ValueError(f"The tilt angles of {name}.rawtlt are not found in {path}.")
+    warnings.warn(
+        f"The fine alignment ({name}.xf) is not found in {path}. The coarse alignment "
+        f"({file.name}), the tilt axis angle in the .edf file and the raw tilt angles "
+        f"({name}.rawtlt) are used.",
+        UserWarning,
+        stacklevel=3,
+    )
+    # As the fine alignment, the coarse aligned images are rotated by -angle so that
+    # the tilt axis is vertical.
+    c, s = np.cos(np.deg2rad(angle)), np.sin(np.deg2rad(angle))
+    rotation = np.array([[c, s], [-s, c]])
+    matrices = rotation @ xg[:, :4].reshape(-1, 2, 2)
+    shifts = xg[:, 4:] @ rotation.T
+    df = df.copy()
+    df[list(_IMOD_XF_COLUMNS)] = np.concatenate(
+        [matrices.reshape(-1, 4), shifts], axis=1
+    )
+    df["tlt"] = df["rawtlt"]
+    return df
+
+
+def _imod_global_transforms(f: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Global transformations (.prexg) from the ones to the previous views (.prexf).
+
+    As ``xftoxg`` with ``NumberToFit 0``, the transformations are accumulated and
+    centered at their average.
+    """
+    matrices = f[:, :4].reshape(-1, 2, 2).copy()
+    shifts = f[:, 4:].copy()
+    for i in range(1, len(f)):
+        # to the previous view, and then to the first view
+        shifts[i] = matrices[i - 1] @ shifts[i] + shifts[i - 1]
+        matrices[i] = matrices[i - 1] @ matrices[i]
+    inv = np.linalg.inv(matrices.mean(axis=0))
+    matrices = inv @ matrices
+    shifts = (shifts - shifts.mean(axis=0)) @ inv.T
+    return np.concatenate([matrices.reshape(-1, 4), shifts], axis=1)
+
+
+_LOCAL_ALIGNMENT_MODES = ("none", "shift", "full")
+
+
+def _local_alignment_mode(local_alignment) -> Literal["none", "shift", "full"]:
+    """The mode of the local alignments, converted from the deprecated bool."""
+    if isinstance(local_alignment, bool):
+        mode = "shift" if local_alignment else "none"
+        warnings.warn(
+            f"'local_alignment={local_alignment}' is deprecated. Use "
+            f"'local_alignment={mode!r}' instead.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        return mode
+    if local_alignment not in _LOCAL_ALIGNMENT_MODES:
+        raise ValueError(
+            "'local_alignment' must be one of 'none', 'shift' or 'full', got "
+            f"{local_alignment!r}. The file of the local alignments is given by "
+            "'local_alignment_file'."
+        )
+    return local_alignment
 
 
 _LOCAL_ALIGNMENT_MODES = ("none", "shift", "full")

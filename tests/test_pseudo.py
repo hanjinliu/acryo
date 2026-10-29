@@ -1245,6 +1245,82 @@ def test_align_tilt_series_options(tmp_path):
     assert error.mean() > 1.0
 
 
+def _picked_positions(ts: TiltSeries, true_pos: np.ndarray) -> np.ndarray:
+    """Positions (N, 3) of the particles in the tomogram reconstructed from ``ts``.
+
+    They are the least-squares positions for the true projections (N, T, 2), which are
+    rotated around the normal of the sample if the tilt axis angle is wrong.
+    """
+    origin = ts.project_points(np.zeros(3))
+    basis = np.stack([ts.project_points(e) - origin for e in np.eye(3)], axis=-1)
+    a = basis.reshape(-1, 3)
+    b = (true_pos - origin).reshape(len(true_pos), -1).T
+    fitted, *_ = np.linalg.lstsq(a, b, rcond=None)
+    return fitted.T
+
+
+@pytest.mark.parametrize("tomo_hand", [1, -1])
+def test_align_tilt_series_picked_in_rotated_tomogram(tmp_path, tomo_hand):
+    centers, rot = _random_particles(30, seed=1)
+    ts = _make_tilt_series(tmp_path / "ts.mrc", _particle_points(centers, rot))
+    true_pos = ts.project_points(centers)
+    initial = ts.replace(tilt_axis_angle=ts.tilt_axis_angle + 4.0)
+    picked = _picked_positions(initial, true_pos)
+    assert np.linalg.norm(picked - centers, axis=1).max() > 2.0  # rotated by -4°
+    if tomo_hand == 1:
+        mole = Molecules(picked + CENTER, rot)
+        template = _particle_template(0.5, 16)
+    else:
+        mole = Molecules(_mirror_z(picked) + CENTER, _mirror_rotation(rot))
+        template = _particle_template(0.5, 16, _mirror_z(PARTICLE))
+    loader = _loader(initial, mole, tomo_hand=tomo_hand)
+    # The particles far from the center have to move by the rotation, which is much
+    # larger than position_sigma, as in a tomogram of hundreds of nm.
+    result = loader.align_tilt_series(
+        [(mole, template)], max_shift=8.0, position_sigma=1.0
+    )
+    aligned = result.loader.tilt_series
+    change = np.mean(aligned.tilt_axis_angle - initial.tilt_axis_angle)
+    assert change == pytest.approx(-4.0, abs=0.5)
+    assert _geometry_error(aligned, true_pos).max() < 0.1  # nm
+    # the molecules are rotated with the tilt images around the tomogram center
+    (moved,) = result.molecules
+    pos = moved.pos - CENTER
+    if tomo_hand == -1:
+        pos = _mirror_z(pos)
+    error = np.linalg.norm(aligned.project_points(pos) - true_pos, axis=-1)
+    assert error.mean() < 0.3
+    relative = (moved.rotator * mole.rotator.inv()).as_rotvec()  # (z, y, x)
+    assert_allclose(np.degrees(np.abs(relative[:, 0])), -change, atol=1e-3)
+    assert_allclose(relative[:, 1:], 0.0, atol=1e-6)
+
+
+@pytest.mark.parametrize("progressive", [True, False])
+def test_align_tilt_series_per_tilt_rotation(tmp_path, progressive):
+    centers, rot = _random_particles(20, seed=4)
+    ts = _make_tilt_series(tmp_path / "ts.mrc", _particle_points(centers, rot))
+    rng = np.random.default_rng(8)
+    rotations = rng.uniform(-2.5, 2.5, size=ts.ntilts)  # degrees
+    initial = _drifted(ts, 1.5, axis=2.0, seed=2)
+    initial = initial.replace(tilt_axis_angle=initial.tilt_axis_angle + rotations)
+    mole = Molecules(_z_misplaced(centers, 2.0, seed=3) + CENTER, rot)
+    true_pos = ts.project_points(centers)
+    loader = _loader(initial, mole)
+    refs = [(mole, _particle_template(0.5, 16))]
+    kwargs = dict(max_shift=12.0, progressive=progressive)
+
+    # a common rotation cannot correct the rotations of each tilt image
+    result = loader.align_tilt_series(refs, **kwargs)
+    change = result.loader.tilt_series.tilt_axis_angle - initial.tilt_axis_angle
+    assert np.ptp(change) < 1e-8
+    assert _geometry_error(result.loader.tilt_series, true_pos).max() > 0.3
+
+    result = loader.align_tilt_series(refs, tilt_axis="per_tilt", **kwargs)
+    aligned = result.loader.tilt_series
+    assert_allclose(aligned.tilt_axis_angle, ts.tilt_axis_angle, atol=0.25)
+    assert _geometry_error(aligned, true_pos).max() < 0.15  # nm
+
+
 def test_align_tilt_series_tilt_angles(tmp_path):
     centers, rot = _random_particles(12, seed=2)
     ts = _make_tilt_series(tmp_path / "ts.mrc", _particle_points(centers, rot))
@@ -1308,7 +1384,9 @@ def test_projection_ctf_of_selected_tilts(tmp_path):
     assert_allclose(selected, full[:, [4, 1]])
 
 
-def test_align_tilt_series_gradient():
+@pytest.mark.parametrize("coupled", [True, False])
+@pytest.mark.parametrize("tilt_axis", ["global", "per_tilt"])
+def test_align_tilt_series_gradient(tilt_axis, coupled):
     from scipy import optimize
     from acryo.loader._tilt_align import _AlignmentProblem
 
@@ -1323,6 +1401,7 @@ def test_align_tilt_series_gradient():
     detector = np.stack(
         [[np.cos(angles), np.sin(angles)], [-np.sin(angles), np.cos(angles)]]
     ).transpose(2, 0, 1)
+    tilt_rotations = Rotation.random(ntilts, random_state=1).as_matrix()
     problem = _AlignmentProblem(
         rng.normal(scale=20.0, size=(npoints, ntilts, 3)),
         rng.normal(size=(ntilts, 3, 3)),
@@ -1331,25 +1410,153 @@ def test_align_tilt_series_gradient():
         radius=radius,
         prior=0.1,
         offsets=rng.normal(size=(4, 3)),
-        fit_angle=True,
+        tilt_axis=tilt_axis,
         max_tilt=0.03,
+        tilt_rotations=tilt_rotations,
+        max_x_tilt=0.03,
+        sample_rotations=(
+            Rotation.random(ntilts, random_state=2).as_matrix() if coupled else None
+        ),
     )
     problem.set_maps(maps.astype(np.float32))
     tilts = np.array([0, 2, 3])
     tilt_angles = np.zeros(ntilts)
     tilt_angles[tilts] = [0.01, -0.02, 0.01]  # the mean is zero
+    x_tilts = np.zeros(ntilts)
+    x_tilts[tilts] = [-0.02, 0.005, 0.015]
+    # the common rotation, and the deviations of the tilts (mean zero if coupled)
+    common = 0.01 if coupled or tilt_axis == "global" else 0.0
+    deviations = np.zeros(ntilts)
+    if tilt_axis == "per_tilt":
+        deviations = rng.normal(scale=0.02, size=ntilts)
+        if coupled:
+            deviations[tilts] -= deviations[tilts].mean()
+    angles = common + deviations
     corrections = problem.zeros()._replace(
         shifts=rng.normal(scale=0.5, size=(ntilts, 2)),
-        angle=0.01,
+        angles=angles,
         tilt_angles=tilt_angles,
+        x_tilts=x_tilts,
         offsets=rng.normal(scale=0.3, size=(4, 3)),
+        particle_rotation=-common if coupled else 0.0,
     )
     params = problem._pack(corrections)
+    unpacked = problem._unpack(params, tilts)
+    assert_allclose(unpacked.angles, angles)
+    assert unpacked.particle_rotation == pytest.approx(corrections.particle_rotation)
+    assert_allclose(unpacked.tilt_angles, tilt_angles, atol=1e-12)
+    assert_allclose(unpacked.x_tilts, x_tilts, atol=1e-12)
     _, grad = problem._loss(params, tilts)
     numerical = optimize.approx_fprime(
         params, lambda p: problem._loss(p, tilts)[0], 1e-6
     )
     assert_allclose(grad, numerical, rtol=1e-3, atol=1e-4)
+    if tilt_axis == "per_tilt":
+        # the deviation of the tilt not in the optimization has no effect
+        assert grad[2 * ntilts + 2] == 0.0
+
+
+def test_align_tilt_series_model():
+    from acryo.loader._tilt_align import _AlignmentProblem, _microscope_frame
+    from acryo.projection._tilt_series import _rotation
+
+    rng = np.random.default_rng(3)
+    ntilts, npoints = 5, 7
+    ts = TiltSeries(
+        tilt_angles=np.linspace(-60, 60, ntilts),
+        tilt_axis_angle=rng.normal(85, 2, ntilts),
+        sample_translations=rng.normal(size=(ntilts, 2)),
+        x_tilts=rng.normal(size=ntilts),
+    )
+    points = rng.uniform(-30, 30, size=(npoints, 3))
+    scope, linear, detector = _microscope_frame(ts, points)
+    problem = _AlignmentProblem(
+        scope,
+        linear,
+        detector,
+        np.arange(npoints),
+        radius=10,
+        prior=None,
+        offsets=np.zeros((npoints, 3)),
+        tilt_axis="per_tilt",
+        max_tilt=0.1,
+        tilt_rotations=_rotation(ts.tilt_angles, "y")[:, :3, :3],
+        max_x_tilt=0.1,
+        sample_rotations=ts.sample2scope[:, :3, :3],
+    )
+    corrections = problem.zeros()._replace(
+        shifts=rng.normal(size=(ntilts, 2)),
+        angles=rng.normal(scale=0.03, size=ntilts),
+        tilt_angles=rng.normal(scale=0.03, size=ntilts),
+        x_tilts=rng.normal(scale=0.03, size=ntilts),
+        offsets=rng.normal(size=(npoints, 3)),
+        particle_rotation=0.05,
+    )
+    # the displacements are the changes of the projections by the corrections
+    corrected = ts.replace(
+        tilt_angles=ts.tilt_angles + np.degrees(corrections.tilt_angles),
+        x_tilts=ts.x_tilts + np.degrees(corrections.x_tilts),
+        tilt_axis_angle=ts.tilt_axis_angle + np.degrees(corrections.angles),
+        sample_translations=ts.sample_translations + corrections.shifts,
+    )
+    # the particles are rotated around the z axis of the sample (the tomogram center)
+    rz = _rotation(np.degrees(corrections.particle_rotation), "z")[:3, :3]
+    moved = (points + corrections.offsets) @ rz.T
+    expected = corrected.project_points(moved) - ts.project_points(points)
+    assert_allclose(problem.displacements(corrections), expected, atol=1e-10)
+
+    # the projections at the zero tilt are kept by the rotation with the particles
+    flat = ts.replace(x_tilts=0.0, tilt_angles=np.linspace(0, 60, ntilts))
+    problem = _AlignmentProblem(
+        *_microscope_frame(flat, points),
+        np.arange(npoints),
+        radius=10,
+        prior=0.1,
+        offsets=np.zeros((npoints, 3)),
+        tilt_axis="global",
+        sample_rotations=flat.sample2scope[:, :3, :3],
+    )
+    params = problem._pack(problem.zeros())
+    params[2 * ntilts] = 0.05 / problem._angle_unit  # the common rotation
+    corrections = problem._unpack(params)
+    assert corrections.particle_rotation == pytest.approx(-0.05)
+    disp = np.linalg.norm(problem.displacements(corrections), axis=-1)
+    assert_allclose(disp[:, 0], 0.0, atol=1e-10)
+    assert disp[:, -1].max() > 0.3  # moved at the high tilt
+
+
+def test_align_tilt_series_x_tilts(tmp_path):
+    centers, rot = _random_particles(20, seed=6)
+    ts = _make_tilt_series(tmp_path / "ts.mrc", _particle_points(centers, rot))
+    rng = np.random.default_rng(5)
+    initial = _drifted(ts, 1.5, seed=7).replace(
+        x_tilts=rng.uniform(-1.5, 1.5, size=ts.ntilts)
+    )
+    mole = Molecules(centers + CENTER, rot)
+    true_pos = ts.project_points(centers)
+    loader = _loader(initial, mole)
+    refs = [(mole, _particle_template(0.5, 16))]
+
+    # the x tilts are not optimized by default
+    result = loader.align_tilt_series(refs, max_shift=10.0)
+    assert_allclose(result.loader.tilt_series.x_tilts, initial.x_tilts)
+    assert _geometry_error(result.loader.tilt_series, true_pos).max() > 0.2
+
+    result = loader.align_tilt_series(refs, max_shift=10.0, max_x_tilt_change=2.0)
+    aligned = result.loader.tilt_series
+    change = aligned.x_tilts - initial.x_tilts
+    assert abs(change.mean()) < 1e-8  # a rotation of the tomogram around the x axis
+    assert np.abs(change).max() < 2.1
+    assert _geometry_error(aligned, true_pos).max() < 0.1  # nm
+    # the true x tilts are zero up to the mean, determined at high tilts
+    errors = aligned.x_tilts - aligned.x_tilts.mean()
+    high = np.abs(ts.tilt_angles) > 30
+    assert np.abs(errors[high]).max() < 0.3  # degrees
+    out = TiltSeries.from_json(aligned.dump_json())
+    assert_allclose(out.x_tilts, aligned.x_tilts)
+
+    with pytest.warns(UserWarning, match="x tilts reached the limit"):
+        loader.align_tilt_series(refs, max_shift=10.0, max_x_tilt_change=0.5, niter=1)
 
 
 def test_align_tilt_series_tilt_angle_limit():
@@ -1372,7 +1579,7 @@ def test_align_tilt_series_tilt_angle_limit():
         radius=radius,
         prior=None,
         offsets=np.zeros((npoints, 3)),
-        fit_angle=False,
+        tilt_axis="fixed",
         max_tilt=0.01,
     )
     problem.set_maps(maps.astype(np.float32))
@@ -1390,7 +1597,7 @@ def test_align_tilt_series_tilt_angle_limit():
         radius=radius,
         prior=None,
         offsets=np.zeros((npoints, 3)),
-        fit_angle=False,
+        tilt_axis="fixed",
         max_tilt=0.1,
     )
     problem.set_maps(maps.astype(np.float32))
@@ -1418,7 +1625,7 @@ def test_align_tilt_series_consensus_along_filaments():
         radius=radius,
         prior=None,
         offsets=np.zeros((npoints, 3)),
-        fit_angle=False,
+        tilt_axis="fixed",
     )
     problem.set_maps(maps.astype(np.float32))
     # the shift along the filaments is kept
@@ -1444,7 +1651,9 @@ def test_align_tilt_series_invalid_input(blob_tilt_series):
         {"position_sigma": 0.0},
         {"niter": 0},
         {"batch_size": 0},
-        {"tilt_axis": "per_tilt"},
+        {"tilt_axis": "each"},
+        {"max_tilt_angle_change": -1.0},
+        {"max_x_tilt_change": -1.0},
     ]:
         with pytest.raises(ValueError):
             loader.align_tilt_series(refs, **kwargs)
