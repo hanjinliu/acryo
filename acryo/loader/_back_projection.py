@@ -23,6 +23,7 @@ import uuid
 
 import numpy as np
 from numpy.typing import DTypeLike, NDArray
+import polars as pl
 import dask
 from dask import array as da
 from dask.highlevelgraph import HighLevelGraph
@@ -733,6 +734,7 @@ class BackProjectionLoader(LoaderBase):
         niter: int = 100,
         batch_size: int = 16,
         ctf: bool = False,
+        freq_weight: pl.DataFrame | None = None,
     ) -> Self:
         """Refine the alignment of the tilt series using particles and templates.
 
@@ -783,6 +785,19 @@ class BackProjectionLoader(LoaderBase):
             The handedness of the defocus gradient is that of the
             ``PatchCTFCorrection`` of the preprocessor, or -1 (the standard, as
             :meth:`TiltSeries.ctf_correction`) if there is none.
+        freq_weight : pl.DataFrame, optional
+            Weights of the frequencies in the correlation, to suppress the frequencies
+            at which the templates are not reliable. It is a data frame (or an object
+            that can be converted to it, such as a dict) in the scheme of the FSC
+            returned by :meth:`fsc_with_halfmaps`, so the FSC can be given as it is:
+            the column "freq" is the frequencies in cycles per pixel of ``scale`` (0.5
+            is the Nyquist frequency), and the other columns (such as "FSC-0") are the
+            weights at the frequencies. The weights of the columns are averaged,
+            clipped at 0 and linearly interpolated (the weights at the nearest
+            frequency are used out of the range of "freq"). They are multiplied to the
+            Fourier transforms of both the projections of the templates and the tilt
+            images, so the correlation is weighted by their squares. No weighting by
+            default.
 
         Returns
         -------
@@ -794,6 +809,8 @@ class BackProjectionLoader(LoaderBase):
         """
         from acryo.loader._tilt_refine import ParticleSet, refine_tilt_series
 
+        if freq_weight is not None:
+            freq_weight = pl.DataFrame(freq_weight)
         particle_sets: list[ParticleSet] = []
         for mole, template in references:
             pos, rotations = self._to_tilt_series_frame(mole)
@@ -817,6 +834,7 @@ class BackProjectionLoader(LoaderBase):
             niter=niter,
             batch_size=batch_size,
             ctf=self._projection_ctf(tilt_series) if ctf else None,
+            freq_weight=freq_weight,
         )
         # the geometry is in nm, so it does not depend on the binning of the images
         tilt_series = self.tilt_series.replace(

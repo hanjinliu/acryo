@@ -10,6 +10,7 @@ from typing import Callable, Literal, NamedTuple, Sequence
 import dask
 import numpy as np
 from numpy.typing import NDArray
+import polars as pl
 from scipy import fft as sfft
 from scipy import ndimage as ndi
 from scipy import optimize
@@ -183,6 +184,7 @@ def refine_tilt_series(
     niter: int = 100,
     batch_size: int = 16,
     ctf: ProjectionCTF | None = None,
+    freq_weight: pl.DataFrame | None = None,
 ) -> TiltSeries:
     """Refine the shifts of the tilt images using particles and their templates.
 
@@ -225,6 +227,12 @@ def refine_tilt_series(
         Number of particles processed at once.
     ctf : ProjectionCTF, optional
         If given, the CTF of each particle is applied to the projections.
+    freq_weight : pl.DataFrame, optional
+        Weights of the frequencies in the scheme of the FSC: the column "freq" is the
+        frequencies in cycles per pixel of ``scale``, and the other columns are the
+        weights (averaged, and clipped at 0). They are linearly interpolated, and
+        multiplied to the Fourier transforms of both the projections and the patches
+        of the tilt images.
 
     Returns
     -------
@@ -244,10 +252,11 @@ def refine_tilt_series(
     geometry = _MapGeometry.create(particle_sets, scale, input_spacing, max_shift)
     spacing = geometry.spacing
     projectors = [geometry.projector(ps.template) for ps in particle_sets]
+    weight = geometry.radial_weight(freq_weight, scale)
 
     def _all_maps(ts: TiltSeries):
         return _particle_maps(
-            ts, images, particle_sets, projectors, geometry, batch_size, ctf
+            ts, images, particle_sets, projectors, geometry, batch_size, ctf, weight
         )
 
     maps, positions = _all_maps(tilt_series)  # angles[0] is 0
@@ -515,6 +524,50 @@ class _MapGeometry(NamedTuple):
         if cutoff is None:
             return None
         return _lowpass_weight(self.box, cutoff * self.spacing / scale)
+
+    def radial_weight(
+        self, freq_weight: pl.DataFrame | None, scale: nm
+    ) -> NDArray[np.float32] | None:
+        """Weights of the patches for the radial profile of ``freq_weight``."""
+        if freq_weight is None:
+            return None
+        return _radial_weight(self.box, freq_weight, scale / self.spacing)
+
+
+def _radial_weight(
+    size: int, freq_weight: pl.DataFrame, ratio: float = 1.0
+) -> NDArray[np.float32]:
+    """Weights (size, size // 2 + 1) of the rfft of square images from the profile.
+
+    ``freq_weight`` is a data frame in the scheme of the FSC (see
+    :meth:`LoaderBase.fsc_with_halfmaps`): the column "freq" is the frequencies in
+    cycles per pixel, and the other columns are the weights at the frequencies. The
+    weights of the columns are averaged, clipped at 0 (as the FSC is negative by the
+    noise) and linearly interpolated. Out of the range of "freq", the weights at the
+    nearest frequency are used. ``ratio`` is the pixel size of the frequencies of
+    ``freq_weight`` divided by that of the images.
+    """
+    df = pl.DataFrame(freq_weight)
+    if "freq" not in df.columns or df.width < 2:
+        raise ValueError(
+            "'freq_weight' must have the column 'freq' and one or more columns of the "
+            f"weights, got the columns {df.columns}."
+        )
+    if df.height < 2:
+        raise ValueError("'freq_weight' must have two or more rows.")
+    df = df.sort("freq")
+    nodes = df["freq"].to_numpy().astype(np.float64)
+    profile = df.drop("freq").to_numpy().astype(np.float64).mean(axis=1)
+    if not (np.all(np.isfinite(nodes)) and np.all(np.isfinite(profile))):
+        raise ValueError("'freq_weight' must be finite.")
+    if nodes[0] < 0 or np.any(np.diff(nodes) <= 0):
+        raise ValueError("'freq' of 'freq_weight' must be non-negative and unique.")
+    profile = np.maximum(profile, 0.0)
+    if profile.max() <= 0:
+        raise ValueError("The weights of 'freq_weight' must not be all non-positive.")
+    qy, qx = np.meshgrid(sfft.fftfreq(size), sfft.rfftfreq(size), indexing="ij")
+    freq = np.sqrt(qy**2 + qx**2) * ratio
+    return np.interp(freq, nodes, profile).astype(np.float32)
 
 
 def _particle_maps(

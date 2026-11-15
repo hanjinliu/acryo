@@ -1090,6 +1090,79 @@ def test_refine_invalid_input(blob_tilt_series):
         loader.refine_tilt_series(
             [(Molecules(BLOBS + CENTER), template)], rotation=(-1.0, 0.5)
         )
+    for freq_weight in [
+        {"freq": [0.0, 0.5]},  # no weight
+        {"weight": [1.0, 1.0]},  # no frequency
+        {"freq": [0.0], "weight": [1.0]},
+        {"freq": [0.0, 0.5], "weight": [-0.5, 0.0]},
+        {"freq": [0.0, 0.5], "weight": [1.0, np.nan]},
+        {"freq": [0.2, 0.2], "weight": [1.0, 1.0]},
+        {"freq": [-0.1, 0.5], "weight": [1.0, 1.0]},
+    ]:
+        with pytest.raises(ValueError):
+            loader.refine_tilt_series(
+                [(Molecules(BLOBS + CENTER), template)], freq_weight=freq_weight
+            )
+
+
+def test_refine_tilt_series_freq_weight(tmp_path):
+    centers, rot = _random_particles(30, seed=1)
+    ts = _make_tilt_series(tmp_path / "ts.mrc", _particle_points(centers, rot))
+    mole = Molecules(centers + CENTER, rot)
+    template = _particle_template(0.5, 16)
+    loader = _loader(_perturbed(ts, 1.2), mole)
+    plain = loader.refine_tilt_series([(mole, template)])
+    # uniform weights do not change the result
+    uniform = loader.refine_tilt_series(
+        [(mole, template)], freq_weight={"freq": [0.0, 0.5], "weight": [2.0, 2.0]}
+    )
+    assert_allclose(
+        uniform.tilt_series.sample_translations,
+        plain.tilt_series.sample_translations,
+        atol=1e-4,
+    )
+    # weights falling below zero at half the Nyquist frequency, in the scheme of the FSC
+    freq = np.linspace(0.01, 0.7, 33)
+    freq_weight = pl.DataFrame(
+        {"freq": freq, "FSC-0": 1 - freq / 0.25, "FSC-1": 1.1 - freq / 0.25}
+    )
+    refined = loader.refine_tilt_series([(mole, template)], freq_weight=freq_weight)
+    error = refined.tilt_series.sample_translations - ts.sample_translations
+    assert np.abs(error).max() < 0.1  # nm
+    assert not np.allclose(
+        refined.tilt_series.sample_translations,
+        plain.tilt_series.sample_translations,
+        atol=1e-6,
+    )
+
+
+def test_radial_weight():
+    from acryo.loader._tilt_refine import _radial_weight
+
+    # not sorted, and the mean of the columns is negative at 0.5 cycles per pixel
+    profile = pl.DataFrame(
+        {
+            "freq": [0.5, 0.0, 0.25],
+            "FSC-0": [-0.1, 0.9, 0.4],
+            "FSC-1": [-0.3, 1.1, 0.6],
+        }
+    )
+    weight = _radial_weight(8, profile)
+    assert weight.shape == (8, 5)
+    assert weight.dtype == np.float32
+    # along x: 0, 0.125, 0.25, 0.375 and 0.5 cycles per pixel
+    assert_allclose(weight[0], [1.0, 0.75, 0.5, 0.25, 0.0], atol=1e-6)
+    assert_allclose(
+        weight[:, 0], [1.0, 0.75, 0.5, 0.25, 0.0, 0.25, 0.5, 0.75], atol=1e-6
+    )
+    assert weight[4, 4] == 0.0  # beyond the Nyquist frequency
+    # the pixels of the patches are half as large as those of the profile
+    assert_allclose(
+        _radial_weight(8, profile, 2.0)[0], [1.0, 0.5, 0.0, 0.0, 0.0], atol=1e-6
+    )
+    # the weights at the nearest frequency are used out of the range
+    narrow = pl.DataFrame({"freq": [0.125, 0.25], "weight": [0.8, 0.2]})
+    assert_allclose(_radial_weight(8, narrow)[0], [0.8, 0.8, 0.2, 0.2, 0.2], atol=1e-6)
 
 
 def _drifted(
