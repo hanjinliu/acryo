@@ -612,6 +612,31 @@ as :class:`acryo.projection.LocalAlignment`), which are kept as the ``base`` of 
         smoothness=0.01,
     )
 
+The frequencies at which the templates are not reliable can be suppressed by
+``freq_weight``, a data frame in the scheme of the FSC returned by
+:meth:`fsc_with_halfmaps`: the column "freq" is the frequencies in cycles per pixel of
+``scale``, and the other columns are the weights at the frequencies (averaged if there are
+two or more, and clipped at 0). The weights are linearly interpolated and multiplied to the
+Fourier transforms of both the projections of the templates and the tilt images. The FSC
+can be given as it is, or after it is converted to other weights:
+
+.. code-block:: python
+
+    import polars as pl
+
+    df, (half0, half1), _ = loader.fsc_with_halfmaps(mask)
+    template = (half0 + half1) / 2
+
+    # weighted by the FSC
+    refined = loader.refine_tilt_series([(molecules, template)], freq_weight=df)
+
+    # weighted by sqrt(2 * FSC / (1 + FSC))
+    fsc = pl.col("FSC-0").clip(0, 1)
+    refined = loader.refine_tilt_series(
+        [(molecules, template)],
+        freq_weight=df.select("freq", (2 * fsc / (1 + fsc)).sqrt()),
+    )
+
 Aligning a Tilt Series of Large Errors
 --------------------------------------
 
